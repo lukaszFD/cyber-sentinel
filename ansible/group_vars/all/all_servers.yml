@@ -1,0 +1,13 @@
+# Local source directory where the Ansible playbook is run from (on the controller host - Linux Mint)
+main_repo_source_dir: "/home/hunter/IdeaProjects/cyber-sentinel"
+
+# Base directory on the remote host (VM/RPi) for deployment
+remote_deploy_base: "/home/{{ ansible_user }}"
+
+# The user used for deployment (owner and group for copied files and directories)
+deployment_user: "{{ ansible_user }}"
+
+mongodb_username: "hunter"
+mysql_host: "mysqldb"
+mysql_user: "hunter"
+mysql_database: "cyber_intelligence"

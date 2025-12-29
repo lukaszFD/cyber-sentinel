@@ -1,0 +1,4 @@
+/.env
+/.idea
+/ansible/.vault_pass
+/ansible/group_vars/all/vault.yml

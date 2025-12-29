@@ -1,0 +1,161 @@
+services:
+  unbound:
+    image: klutchell/unbound:latest
+    container_name: unbound
+    hostname: unbound
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.2
+    volumes:
+      - './unbound/unbound.conf:/etc/unbound/unbound.conf'
+    restart: unless-stopped
+
+  passive_dns:
+    build:
+      context: .
+      dockerfile: Dockerfile.pdns
+    container_name: passive_dns
+    hostname: passive_dns
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.3
+    volumes:
+      - './passive-dns:/etc/dnsmasq.d'
+      - './var-log-passive-dns:/var/log'
+    restart: unless-stopped
+    command: ["dnsmasq", "-k", "--no-resolv", "--server=10.10.10.2#53", "--log-queries", "--log-facility=/var/log/dns.log"]
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.4
+    environment:
+      TZ: "Europe/Warsaw"
+      PIHOLE_DNS_: "10.10.10.3#53"
+    volumes:
+      - './pihole:/etc/pihole'
+      - './dnsmasq.d:/etc/dnsmasq.d'
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80/tcp"
+      - "443:443/tcp"
+    restart: unless-stopped
+    depends_on:
+      - unbound
+      - passive_dns
+
+  firefox:
+    image: lscr.io/linuxserver/firefox:latest
+    container_name: firefox
+    hostname: firefox
+    tmpfs:
+      - /config
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.5
+    dns: 10.10.10.4
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+      - FIREFOX_CLI=https://www.linuxserver.io/
+    security_opt:
+      - seccomp=unconfined
+    ports:
+      - "4000:3000"
+      - "4001:3001"
+    shm_size: 2gb
+    restart: unless-stopped
+
+  dns_log_processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.log_processor
+    container_name: dns_log_processor
+    depends_on:
+      - mysqldb
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.6
+    volumes:
+      - './var-log-passive-dns:/var/log/dns'
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-server
+    network_mode: host
+    volumes:
+      - n8n_data:/home/node/.n8n
+    user: "1000:1000"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - NODE_ENV=production
+      - N8N_SECURE_COOKIE=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+      - GENERIC_TIMEZONE=Europe/Warsaw
+    restart: unless-stopped
+
+  kali:
+    image: kalilinux/kali-rolling
+    container_name: kali
+    restart: unless-stopped
+    network_mode: host
+    tty: true
+    entrypoint: ["/bin/bash", "-c", "tail -f /dev/null"]
+    volumes:
+      - ./kali_data:/root/data
+      - ./config/kali/ssh_config:/etc/ssh
+
+  mysqldb:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: cyber_intelligence
+      MYSQL_ROOT_HOST: "%"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.8
+
+  mongo:
+    image: mongo
+    container_name: mongo
+    hostname: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGODB_USERNAME}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGODB_PASSWORD}"
+      MONGO_INITDB_DATABASE: threat_data_lake
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./config/mongo:/docker-entrypoint-initdb.d:ro
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.7
+    restart: unless-stopped
+
+networks:
+  internal_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.10.0/24
+
+volumes:
+  n8n_data:
+  mysql_data:
+  mongo_data:

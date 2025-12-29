@@ -1,0 +1,82 @@
+---
+- name: 00 - Docker Deployment (x86 & ARM)
+  hosts: all_servers
+  become: yes
+  vars:
+    # Mapping system architecture to Docker repo labels
+    arch_mapping:
+      x86_64: "amd64"
+      aarch64: "arm64"
+      armv7l: "armhf"
+
+  tasks:
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - python3-docker # Essential for Ansible Docker modules
+        state: present
+        update_cache: yes
+
+    - name: Create directory for Docker GPG key
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Docker official GPG key (modern way)
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Add Docker repository for current architecture
+      ansible.builtin.apt_repository:
+        # Nowoczesne wskazanie klucza przez signed-by dla poprawy bezpieczeństwa
+        repo: >
+          deb [arch={{ arch_mapping[ansible_architecture] }} signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/debian
+          {{ ansible_distribution_release }}
+          stable
+        state: present
+
+    - name: Install Docker Engine and Compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Ensure docker group exists
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Add dynamic user from inventory to docker group
+      ansible.builtin.user:
+        # Pobiera 'ansible_user' bezpośrednio z Twojego pliku hosts.ini
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+      register: user_group_update
+
+    - name: Reset connection to apply group changes
+      ansible.builtin.meta: reset_connection
+      # Gwarantuje, że użytkownik może od razu używać komend docker
+
+    - name: Verify Docker installation
+      ansible.builtin.command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Show Docker version
+      ansible.builtin.debug:
+        msg: "Docker version on {{ inventory_hostname }} is {{ docker_version.stdout }}"

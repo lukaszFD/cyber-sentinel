@@ -1,0 +1,25 @@
+---
+- name: 00 - Generate and Copy .env file to remote host
+  hosts: all_servers
+  become: yes
+  become_method: sudo
+
+  vars:
+    remote_env_file: "{{ remote_deploy_base }}/.env"
+
+  tasks:
+    - name: Task 1.0 - Create base deployment directory if it doesn't exist
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}"
+        state: directory
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0755'
+
+    - name: Task 1.1 - Generate .env from template with decrypted secrets
+      ansible.builtin.template:
+        src: "templates/env.j2"
+        dest: "{{ remote_env_file }}"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0600'
