@@ -3,7 +3,12 @@
 A distributed Cyber Threat Intelligence (CTI) and Passive DNS monitoring system.
 
 ## 🎯 Project Purpose
-This project was specifically created to **automate AI-driven workflows in n8n**. By orchestrating these Docker containers, the system provides a structured pipeline where DNS traffic is captured, processed, and enriched, allowing n8n to perform intelligent security analysis and automated threat response.
+This project is an advanced evolution of the [home-network-guardian](https://github.com/lukaszFD/home-network-guardian) repository. While the previous project focused on network monitoring and visibility, **Cyber AI Sentinel** is specifically designed to **automate AI-driven workflows in n8n**.
+
+By orchestrating these Docker containers, the system provides a structured pipeline where DNS traffic is captured, processed, and enriched. The key differences in this version are:
+* **AI Focus:** Dedicated integration with MongoDB as a Threat Data Lake for AI analysis.
+* **Streamlined Management:** Simplifying the process by allowing service management and threat response directly from the **n8n** level.
+* **Automated CTI:** Transforming raw DNS logs into actionable intelligence for automated security playbooks.
 
 ## 🏗️ Architecture Overview
 
