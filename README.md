@@ -66,11 +66,42 @@ The environment is accessible via the host (127.0.0.1) using the following port 
 | **Firefox** | `4000` | `3000` | Isolated VNC Browser                 |
 | **Portainer** | `9443` | `9010` | Docker Management                    |
 
+## 🚀 Deployment & Operations
+```bash
+# Full Environment Deployment -> local_vm
+~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini deploy-cyber-ai-sentinel.yml --limit local_vm
+```
 
-## 🔐 Secrets Management
+## 🔐 Secrets and Access Management
 
 Deployment secrets (database passwords, API keys) are managed using **Ansible Vault**. To view or edit the secrets:
 
 ```bash
 # View encrypted variables
 EDITOR=cat ~/ansible_mint_venv/bin/ansible-vault view ansible/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass
+
+# Edit existing encrypted variables
+ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass
+
+# Encrypt a new string for use in variables (e.g., a new API Key)
+ansible-vault encrypt_string 'your_secret_api_key' --name 'vt_api_key' --vault-password-file ansible/.vault_pass
+```
+
+Access MongoDB Shell from host
+```bash
+docker exec -it mongo mongosh -u "hunter" -p "your_password" --authenticationDatabase admin
+```
+
+## 🔍 Troubleshooting & Logs
+
+Check if services are running and healthy:
+```bash
+# Check container status
+ssh hunter@127.0.0.1 -p 2222 "docker ps -a"
+
+# Follow logs of the DNS Log Processor (Python)
+ssh hunter@127.0.0.1 -p 2222 "docker logs -f dns_log_processor"
+
+# Monitor incoming DNS queries in MySQL
+watch -n 5 'mysql -h 127.0.0.1 -P 3306 -u hunter -p"password" -e "SELECT * FROM cyber_intelligence.v_pending_analysis;"'
+```
