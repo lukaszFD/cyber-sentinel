@@ -12,7 +12,7 @@ By orchestrating these Docker containers, the system provides a structured pipel
 
 ## 🏗️ Architecture Overview
 
-The system is deployed on a **Debian** Virtual Machine (VM) and managed via **Ansible** and **Docker Compose**.
+The system is deployed on a **VirtualBox Virtual Machine** running the official **Debian** distribution. The entire stack is managed via **Ansible** and **Docker Compose**.
 
 * **DNS Protection:** Pi-hole handles blocking and Unbound acts as a recursive resolver.
 * **Passive DNS:** A custom container monitors DNS traffic and logs it for analysis.
@@ -21,36 +21,37 @@ The system is deployed on a **Debian** Virtual Machine (VM) and managed via **An
     * **MySQL 8.0:** Stores structured threat indicators and DNS query history.
     * **MongoDB 8.2:** Acts as the `threat_data_lake` for storing raw JSON reports from external providers like VirusTotal.
 
-## 📂 Project Structure
+## 📂 Project Structure Explained
 
 ```text
 cyber-sentinel/
-├── ansible/
+├── ansible/                        # Infrastructure as Code (IaC) layer
 │   ├── group_vars/
 │   │   └── all/
-│   │       ├── all_servers.yml
-│   │       └── vault.yml
+│   │       ├── all_servers.yml     # Non-sensitive global variables and ports
+│   │       └── vault.yml           # 🔐 Encrypted secrets (Passwords, API Keys). See below ‘Secrets and Access Management’.
 │   ├── templates/
-│   │   └── env.j2
-│   ├── ansible.cfg
-│   ├── copy-env.yml
-│   ├── deploy-cyber-ai-sentinel.yml
-│   ├── deploy_docker.yml
-│   └── hosts.ini
-├── config/
+│   │   └── env.j2                  # Jinja2 template for Docker environment files
+│   ├── .vault_pass                 # 🔐 You must generate it yourself. See below ‘Secrets and Access Management’.
+│   ├── ansible.cfg                 # Ansible runtime configuration
+│   ├── copy-env.yml                # Playbook for syncing environment variables
+│   ├── deploy-cyber-ai-sentinel.yml # Main deployment playbook for the entire stack
+│   ├── deploy_docker.yml           # Baseline Docker engine installation playbook
+│   └── hosts.ini                   # Inventory file (Debian VM at 127.0.0.1:2222)
+├── config/                         # Service-specific configurations
 │   ├── dns/
-│   │   ├── 01-passive.conf
-│   │   ├── Dockerfile.log_processor
-│   │   ├── Dockerfile.pdns
-│   │   └── log_processor.py
+│   │   ├── 01-passive.conf         # Passive DNS capture settings
+│   │   ├── Dockerfile.log_processor # Python environment for log tailing
+│   │   ├── Dockerfile.pdns         # Container definition for DNS sniffing
+│   │   └── log_processor.py        # Core Python script (Log extraction to MySQL)
 │   ├── mongo/
-│   │   └── init_mongo.js
+│   │   └── init_mongo.js           # Database & Collection initialization script
 │   ├── mysql/
-│   │   └── db_deployment.sql
+│   │   └── db_deployment.sql       # SQL Schema and analytic views/tbl 
 │   └── unbound/
-│       └── unbound.conf
+│       └── unbound.conf            # Recursive DNS resolver configuration
 └── docker/
-    └── docker-compose-cyber-sentinel.yml
+    └── docker-compose-cyber-sentinel.yml # Main Docker orchestration file
 ```
 
 ## 📡 Connectivity & Port Mapping
@@ -87,11 +88,6 @@ ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file ansibl
 ansible-vault encrypt_string 'your_secret_api_key' --name 'vt_api_key' --vault-password-file ansible/.vault_pass
 ```
 
-Access MongoDB Shell from host
-```bash
-docker exec -it mongo mongosh -u "hunter" -p "your_password" --authenticationDatabase admin
-```
-
 ## 🔍 Troubleshooting & Logs
 
 Check if services are running and healthy:
@@ -101,6 +97,9 @@ ssh hunter@127.0.0.1 -p 2222 "docker ps -a"
 
 # Follow logs of the DNS Log Processor (Python)
 ssh hunter@127.0.0.1 -p 2222 "docker logs -f dns_log_processor"
+
+# Access MongoDB Shell from host
+docker exec -it mongo mongosh -u "hunter" -p "your_password" --authenticationDatabase admin
 
 # Monitor incoming DNS queries in MySQL
 watch -n 5 'mysql -h 127.0.0.1 -P 3306 -u hunter -p"password" -e "SELECT * FROM cyber_intelligence.v_pending_analysis;"'
