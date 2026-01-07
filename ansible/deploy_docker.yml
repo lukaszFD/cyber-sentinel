@@ -3,14 +3,13 @@
   hosts: all_servers
   become: yes
   vars:
-    # Mapping system architecture to Docker repo labels
     arch_mapping:
       x86_64: "amd64"
       aarch64: "arm64"
       armv7l: "armhf"
 
   tasks:
-    - name: Install prerequisite packages
+    - name: Install prerequisite and monitoring packages
       ansible.builtin.apt:
         name:
           - apt-transport-https
@@ -19,7 +18,11 @@
           - gnupg
           - lsb-release
           - python3-pip
-          - python3-docker # Essential for Ansible Docker modules
+          - python3-docker
+          - htop            # Interactive process viewer
+          - smartmontools   # Storage monitoring (smartctl)
+          - fail2ban        # Brute-force protection
+          - jq              # JSON processor for n8n/API
         state: present
         update_cache: yes
 
@@ -37,7 +40,6 @@
 
     - name: Add Docker repository for current architecture
       ansible.builtin.apt_repository:
-        # Nowoczesne wskazanie klucza przez signed-by dla poprawy bezpieczeństwa
         repo: >
           deb [arch={{ arch_mapping[ansible_architecture] }} signed-by=/etc/apt/keyrings/docker.asc]
           https://download.docker.com/linux/debian
@@ -62,7 +64,6 @@
 
     - name: Add dynamic user from inventory to docker group
       ansible.builtin.user:
-        # Pobiera 'ansible_user' bezpośrednio z Twojego pliku hosts.ini
         name: "{{ ansible_user }}"
         groups: docker
         append: yes
@@ -70,7 +71,6 @@
 
     - name: Reset connection to apply group changes
       ansible.builtin.meta: reset_connection
-      # Gwarantuje, że użytkownik może od razu używać komend docker
 
     - name: Verify Docker installation
       ansible.builtin.command: docker --version

@@ -1,0 +1,45 @@
+---
+- name: Deploy Nginx Reverse Proxy with SSL
+  hosts: all
+  become: yes
+  vars:
+    domain_suffix: "{{ 'local' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
+    services:
+      - { name: "pihole", port: 80, internal_host: "pihole" }
+      - { name: "n8n", port: 5678, internal_host: "n8n-server" }
+      - { name: "portainer", port: 9000, internal_host: "portainer" }
+      - { name: "firefox", port: 3000, internal_host: "firefox" }
+
+  tasks:
+    - name: Ensure directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ remote_deploy_base }}/config/nginx/conf.d"
+        - "{{ remote_deploy_base }}/config/nginx/certs"
+
+    - name: Generate Self-Signed Certificates
+      shell: |
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout {{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.key \
+        -out {{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.crt \
+        -subj "/C=PL/ST=Masovia/L=Warsaw/O=CyberSentinel/CN={{ item.name }}.{{ domain_suffix }}"
+      loop: "{{ services }}"
+      args:
+        creates: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.crt"
+
+    - name: Deploy Nginx Templates
+      template:
+        src: templates/nginx_service.conf.j2
+        dest: "{{ remote_deploy_base }}/config/nginx/conf.d/{{ item.name }}.conf"
+      loop: "{{ services }}"
+
+    - name: Start Nginx Container
+      community.docker.docker_container:
+        name: nginx-proxy
+        image: nginx:latest
+        state: started
+        restart_policy: always
+        networks:
+          - name: "cyber-sentinel_internal_network"

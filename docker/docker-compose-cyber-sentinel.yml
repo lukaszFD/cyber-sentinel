@@ -7,7 +7,7 @@ services:
       internal_network:
         ipv4_address: 10.10.10.2
     volumes:
-      - './unbound/unbound.conf:/etc/unbound/unbound.conf'
+      - './config/unbound/unbound.conf:/etc/unbound/unbound.conf'
     restart: unless-stopped
 
   passive_dns:
@@ -20,10 +20,24 @@ services:
       internal_network:
         ipv4_address: 10.10.10.3
     volumes:
-      - './passive-dns:/etc/dnsmasq.d'
-      - './var-log-passive-dns:/var/log'
+      - './config/dns/dnsmasq.d:/etc/dnsmasq.d'
+      - './config/dns/var-log:/var/log'
     restart: unless-stopped
     command: ["dnsmasq", "-k", "--no-resolv", "--server=10.10.10.2#53", "--log-queries", "--log-facility=/var/log/dns.log"]
+
+  dns_log_processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.log_processor
+    container_name: dns_log_processor
+    depends_on:
+      - mysqldb
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.6
+    volumes:
+      - './config/dns/var-log:/var/log/dns:ro'
+    restart: unless-stopped
 
   pihole:
     image: pihole/pihole:latest
@@ -40,8 +54,6 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "80:80/tcp"
-      - "443:443/tcp"
     restart: unless-stopped
     depends_on:
       - unbound
@@ -64,30 +76,17 @@ services:
       - FIREFOX_CLI=https://www.linuxserver.io/
     security_opt:
       - seccomp=unconfined
-    ports:
-      - "4000:3000"
-      - "4001:3001"
     shm_size: 2gb
-    restart: unless-stopped
-
-  dns_log_processor:
-    build:
-      context: .
-      dockerfile: Dockerfile.log_processor
-    container_name: dns_log_processor
-    depends_on:
-      - mysqldb
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.6
-    volumes:
-      - './var-log-passive-dns:/var/log/dns'
     restart: unless-stopped
 
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n-server
-    network_mode: host
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.10
+    ports:
+      - "5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     user: "1000:1000"
@@ -117,8 +116,6 @@ services:
     image: mysql:8.0
     container_name: mysql_db
     restart: unless-stopped
-    ports:
-      - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_DATABASE: cyber_intelligence
@@ -131,21 +128,31 @@ services:
         ipv4_address: 10.10.10.8
 
   mongo:
-    image: mongo
+    image: mongo:4.4
     container_name: mongo
     hostname: mongo
     environment:
       MONGO_INITDB_ROOT_USERNAME: "${MONGODB_USERNAME}"
       MONGO_INITDB_ROOT_PASSWORD: "${MONGODB_PASSWORD}"
       MONGO_INITDB_DATABASE: threat_data_lake
-    ports:
-      - "27017:27017"
     volumes:
       - mongo_data:/data/db
-      - ./config/mongo:/docker-entrypoint-initdb.d:ro
+      - './config/mongo:/docker-entrypoint-initdb.d:ro'
     networks:
       internal_network:
         ipv4_address: 10.10.10.7
+    restart: unless-stopped
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    hostname: portainer
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.20
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer_data:/data
     restart: unless-stopped
 
 networks:

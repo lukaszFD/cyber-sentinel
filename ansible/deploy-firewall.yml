@@ -1,0 +1,35 @@
+---
+- name: Configure Firewall (UFW) for Cyber Sentinel
+  hosts: all
+  become: yes
+  vars:
+    allow_ports:
+      - { port: 22, proto: "tcp", comment: "SSH Management" }
+      - { port: 80, proto: "tcp", comment: "Nginx HTTP Redirect" }
+      - { port: 443, proto: "tcp", comment: "Nginx HTTPS Proxy" }
+      - { port: 53, proto: "udp", comment: "Pi-hole DNS UDP" }
+      - { port: 53, proto: "tcp", comment: "Pi-hole DNS TCP" }
+
+  tasks:
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+
+    - name: Reset UFW to default (Deny all incoming)
+      ufw:
+        state: reset
+
+    - name: Allow defined ports
+      ufw:
+        rule: allow
+        port: "{{ item.port | string }}"
+        proto: "{{ item.proto }}"
+        comment: "{{ item.comment }}"
+      loop: "{{ allow_ports }}"
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny # Default incoming policy
