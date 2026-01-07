@@ -1,0 +1,187 @@
+---
+- name: 01 - Deploy Cyber AI Sentinel Stack
+  hosts: all_servers
+  become: yes
+
+  vars:
+    project_name: "cyber-sentinel"
+    docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
+
+    source_docker_compose_file: "{{ main_repo_source_dir }}/docker/{{ docker_compose_file_name }}"
+    remote_docker_compose_file: "{{ remote_deploy_base }}/{{ docker_compose_file_name }}"
+    source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
+    mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
+
+  tasks:
+    - name: Task 1.0 - Create required directories for Sentinel Stack
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/{{ item }}"
+        state: directory
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0755'
+      loop:
+        - "config/nginx/conf.d"
+        - "config/nginx/certs"
+        - "config/mongo"
+        - "config/mysql"
+        - "config/unbound"
+        - "config/dns/dnsmasq.d"
+        - "config/dns/var-log"
+        - "config/kali"
+        - "portainer_data"
+        - "n8n_data"
+
+    - name: Task 1.1 - Copy Docker Compose template
+      ansible.builtin.copy:
+        src: "{{ source_docker_compose_file }}"
+        dest: "{{ remote_docker_compose_file }}"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 1.2 - Copy Dockerfile for Passive DNS
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.pdns"
+        dest: "{{ remote_deploy_base }}/Dockerfile.pdns"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 1.3 - Copy Dockerfile for DNS Log Processor
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.log_processor"
+        dest: "{{ remote_deploy_base }}/Dockerfile.log_processor"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 1.4 - Copy python script for DNS Log Processor
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/dns/log_processor.py"
+        dest: "{{ remote_deploy_base }}/log_processor.py"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 1.6 - Prepare DNS log file with correct permissions
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
+        state: touch
+        owner: "1000"
+        group: "1000"
+        mode: '0666'
+
+    - name: Task 1.7 - Copy Unbound configuration file
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/unbound/unbound.conf"
+        dest: "{{ remote_deploy_base }}/config/unbound/unbound.conf"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 1.8 - Copy MongoDB initialization script
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/mongo/init_mongo.js"
+        dest: "{{ remote_deploy_base }}/config/mongo/db_init.js"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 2.0 - Pull and Start Sentinel Stack
+      ansible.builtin.shell:
+        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up --build -d"
+        chdir: "{{ remote_deploy_base }}"
+      register: deploy_output
+
+    - name: Task 2.1 - Set Pi-hole admin password from Vault
+      ansible.builtin.shell:
+        cmd: "docker exec pihole pihole setpassword '{{ vault_pihole_admin_password }}'"
+      register: pihole_pass_result
+      no_log: true
+      changed_when: "'New password set' in pihole_pass_result.stdout"
+
+    - name: Task 2.2 - Debug Pi-hole password update
+      ansible.builtin.debug:
+        msg: "Pi-hole web interface password has been updated successfully."
+      when: pihole_pass_result.changed
+
+    - name: Task 3.0 - Read credentials from .env
+      ansible.builtin.shell:
+        cmd: "grep '{{ item }}=' {{ remote_deploy_base }}/.env | cut -d '=' -f 2 | tr -d '\"'"
+      register: env_vars
+      loop:
+        - MYSQL_USER
+        - MYSQL_PASSWORD
+        - MYSQL_ROOT_PASSWORD
+      changed_when: false
+
+    - name: Task 3.1 - Set facts for MySQL
+      ansible.builtin.set_fact:
+        mysql_app_user: "{{ env_vars.results[0].stdout | trim }}"
+        mysql_password: "{{ env_vars.results[1].stdout | trim }}"
+        mysql_root_password: "{{ env_vars.results[2].stdout | trim }}"
+
+    - name: Task 3.2 - Render SQL script with actual credentials
+      ansible.builtin.template:
+        src: "{{ source_mysql_script }}"
+        dest: "{{ remote_deploy_base }}/init_db_rendered.sql"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Task 3.3 - Execute SQL and log output
+      ansible.builtin.shell:
+        cmd: |
+          echo "--- Execution Date: $(date) ---" >> {{ mysql_init_log }}
+          docker exec -i mysql_db mysql -u root -p'{{ mysql_root_password }}' < {{ remote_deploy_base }}/init_db_rendered.sql >> {{ mysql_init_log }} 2>&1
+      register: db_init_result
+      until: db_init_result.rc == 0 or 'ERROR 1007' in db_init_result.stderr
+      retries: 10
+      delay: 5
+      changed_when: db_init_result.rc == 0
+      failed_when:
+        - db_init_result.rc != 0
+
+    - name: Task 4.0 - Display deployment status
+      ansible.builtin.debug:
+        msg: |
+          Cyber AI Sentinel deployed.
+          Check SQL logs at: {{ mysql_init_log }}
+
+    - name: Task 5.0 - Install SSH server inside Kali
+      ansible.builtin.shell:
+        cmd: "docker exec -u root kali apt-get update && docker exec -u root kali apt-get install -y openssh-server"
+      when: deploy_output.changed
+
+    - name: Task 5.1 - Ensure SSH service is running in Kali
+      ansible.builtin.shell:
+        cmd: "docker exec -d kali service ssh start"
+
+    - name: Task 6.0 - Configure Fail2Ban for SSH
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          port = ssh
+          maxretry = 3
+          bantime = 1h
+          findtime = 10m
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Task 6.1 - Ensure Fail2Ban is running
+      ansible.builtin.service:
+        name: fail2ban
+        state: restarted
+        enabled: yes
+
+    - name: Task 7.0 - Add local DNS records to Pi-hole
+      ansible.builtin.lineinfile:
+        path: "{{ remote_deploy_base }}/pihole/custom.list"
+        line: "{{ ansible_default_ipv4.address }} {{ item }}.local"
+        create: yes
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+      loop:
+        - pihole
+        - n8n
+        - portainer
+        - firefox
