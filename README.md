@@ -99,8 +99,16 @@ ssh hunter@127.0.0.1 -p 2222 "docker ps -a"
 ssh hunter@127.0.0.1 -p 2222 "docker logs -f dns_log_processor"
 
 # Access MongoDB Shell from host
-docker exec -it mongo mongosh -u "hunter" -p "your_password" --authenticationDatabase admin
+docker exec -it mongo mongo -u "hunter" -p "your_password" --authenticationDatabase admin
+---------------
+show dbs
+use threat_data_lake
+show collections
 
 # Monitor incoming DNS queries in MySQL
-watch -n 5 'mysql -h 127.0.0.1 -P 3306 -u hunter -p"password" -e "SELECT * FROM cyber_intelligence.v_pending_analysis;"'
+docker exec -t mysql_db mysql -u root -p"password" -e "SELECT * FROM cyber_intelligence.v_pending_analysis;"
+docker exec -t mysql_db mysql -u root -p"password" -e "SELECT * FROM cyber_intelligence.v_security_alerts;"
+docker exec -t mysql_db mysql -u root -p"password" -e "SELECT * FROM cyber_intelligence.dns_queries;"
+
+watch -n 5 'mysql -h 127.0.0.1 -P 3306 -u hunter -p "password" -e "SELECT * FROM cyber_intelligence.v_pending_analysis;"'
 ```

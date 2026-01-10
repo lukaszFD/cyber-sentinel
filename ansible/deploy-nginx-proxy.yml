@@ -3,7 +3,7 @@
   hosts: all
   become: yes
   vars:
-    domain_suffix: "{{ 'local' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
+    domain_suffix: "{{ 'dev' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
     services:
       - { name: "pihole", port: 80, internal_host: "pihole" }
       - { name: "n8n", port: 5678, internal_host: "n8n-server" }
@@ -35,11 +35,19 @@
         dest: "{{ remote_deploy_base }}/config/nginx/conf.d/{{ item.name }}.conf"
       loop: "{{ services }}"
 
-    - name: Start Nginx Container
+    - name: Run Nginx Proxy Container
       community.docker.docker_container:
         name: nginx-proxy
         image: nginx:latest
         state: started
+        recreate: yes
         restart_policy: always
+        volumes:
+          - "{{ remote_deploy_base }}/config/nginx/conf.d:/etc/nginx/conf.d:ro"
+          - "{{ remote_deploy_base }}/config/nginx/certs:/etc/nginx/certs:ro"
         networks:
-          - name: "cyber-sentinel_internal_network"
+          - name: cyber-sentinel_internal_network
+            ipv4_address: 10.10.10.100
+        ports:
+          - "80:80"
+          - "443:443"

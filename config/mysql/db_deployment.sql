@@ -42,12 +42,12 @@ CREATE TABLE IF NOT EXISTS dns_queries (
 -- Shows domains from DNS logs that are not yet in the threat_indicators table
 CREATE OR REPLACE VIEW v_pending_analysis AS
 SELECT DISTINCT
-    dq.domain,
+    dq.response_ip,
     dq.timestamp as first_seen
 FROM dns_queries dq
 LEFT JOIN threat_indicators ti ON dq.domain = ti.observable
 WHERE ti.id IS NULL
-AND dq.domain NOT REGEXP '^[0-9.]+$'; -- Exclude direct IP queries
+AND dq.response_ip REGEXP '^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$';
 
 -- 4. Analytics View: High Risk Indicators (for Grafana Dashboard)
 CREATE OR REPLACE VIEW v_security_alerts AS
@@ -60,13 +60,4 @@ SELECT
     mongo_ref_id,
     last_scan
 FROM threat_indicators
-WHERE is_malicious = TRUE OR threat_score > 70;
-
--- 5. Maintenance Procedure: Data Retention
-DELIMITER //
-CREATE PROCEDURE clean_old_intelligence(IN days_to_keep INT)
-BEGIN
-    DELETE FROM dns_queries WHERE timestamp < NOW() - INTERVAL days_to_keep DAY;
-    -- We usually keep threat_indicators longer for historical correlation
-END //
-DELIMITER ;
+WHERE is_malicious = TRUE OR threat_score > 2;

@@ -25,20 +25,6 @@ services:
     restart: unless-stopped
     command: ["dnsmasq", "-k", "--no-resolv", "--server=10.10.10.2#53", "--log-queries", "--log-facility=/var/log/dns.log"]
 
-  dns_log_processor:
-    build:
-      context: .
-      dockerfile: Dockerfile.log_processor
-    container_name: dns_log_processor
-    depends_on:
-      - mysqldb
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.6
-    volumes:
-      - './config/dns/var-log:/var/log/dns:ro'
-    restart: unless-stopped
-
   pihole:
     image: pihole/pihole:latest
     container_name: pihole
@@ -79,12 +65,28 @@ services:
     shm_size: 2gb
     restart: unless-stopped
 
+  dns_log_processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.log_processor
+    container_name: dns_log_processor
+    depends_on:
+      - mysqldb
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.6
+    dns: 10.10.10.4
+    volumes:
+      - './config/dns/var-log:/var/log/dns:ro'
+    restart: unless-stopped
+
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n-server
     networks:
       internal_network:
-        ipv4_address: 10.10.10.10
+        ipv4_address: 10.10.10.7
+    dns: 10.10.10.4
     ports:
       - "5678:5678"
     volumes:
@@ -112,21 +114,6 @@ services:
       - ./kali_data:/root/data
       - ./config/kali/ssh_config:/etc/ssh
 
-  mysqldb:
-    image: mysql:8.0
-    container_name: mysql_db
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
-      MYSQL_DATABASE: cyber_intelligence
-      MYSQL_ROOT_HOST: "%"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.8
-
   mongo:
     image: mongo:4.4
     container_name: mongo
@@ -140,8 +127,25 @@ services:
       - './config/mongo:/docker-entrypoint-initdb.d:ro'
     networks:
       internal_network:
-        ipv4_address: 10.10.10.7
+        ipv4_address: 10.10.10.8
+    dns: 10.10.10.4
     restart: unless-stopped
+
+  mysqldb:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: cyber_intelligence
+      MYSQL_ROOT_HOST: "%"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./config/mysql:/docker-entrypoint-initdb.d:ro
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.9
+    dns: 10.10.10.4
 
   portainer:
     image: portainer/portainer-ce:latest
@@ -149,7 +153,8 @@ services:
     hostname: portainer
     networks:
       internal_network:
-        ipv4_address: 10.10.10.20
+        ipv4_address: 10.10.10.10
+    dns: 10.10.10.4
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./portainer_data:/data
