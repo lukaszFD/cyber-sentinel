@@ -103,17 +103,6 @@ services:
       - GENERIC_TIMEZONE=Europe/Warsaw
     restart: unless-stopped
 
-  kali:
-    image: kalilinux/kali-rolling
-    container_name: kali
-    restart: unless-stopped
-    network_mode: host
-    tty: true
-    entrypoint: ["/bin/bash", "-c", "tail -f /dev/null"]
-    volumes:
-      - ./kali_data:/root/data
-      - ./config/kali/ssh_config:/etc/ssh
-
   mongo:
     image: mongo:4.4
     container_name: mongo
@@ -160,6 +149,22 @@ services:
       - ./portainer_data:/data
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.11
+    dns: 10.10.10.4
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - './config/grafana/provisioning:/etc/grafana/provisioning'
+      - './config/grafana/dashboards:/etc/grafana/dashboards'
+      - 'grafana_data:/var/lib/grafana'
+    restart: unless-stopped
+
 networks:
   internal_network:
     driver: bridge
@@ -171,3 +176,5 @@ volumes:
   n8n_data:
   mysql_data:
   mongo_data:
+  prometheus_data:
+  grafana_data:

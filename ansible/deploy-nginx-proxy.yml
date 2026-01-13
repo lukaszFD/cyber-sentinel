@@ -3,12 +3,13 @@
   hosts: all
   become: yes
   vars:
-    domain_suffix: "{{ 'dev' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
+    domain_suffix: "{{ 'local' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
     services:
       - { name: "pihole", port: 80, internal_host: "pihole" }
       - { name: "n8n", port: 5678, internal_host: "n8n-server" }
       - { name: "portainer", port: 9000, internal_host: "portainer" }
       - { name: "firefox", port: 3000, internal_host: "firefox" }
+      - { name: "grafana", port: 3000, internal_host: "grafana" }
 
   tasks:
     - name: Ensure directories exist

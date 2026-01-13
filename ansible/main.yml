@@ -3,7 +3,7 @@
 - import_playbook: copy-env.yml
 
 # 2. Installing Docker and tools (htop, smartmontools, fail2ban)
-- import_playbook: deploy_docker.yml
+- import_playbook: prepare-node.yml
 
 # 3. Network security configuration (UFW)
 - import_playbook: deploy-firewall.yml
