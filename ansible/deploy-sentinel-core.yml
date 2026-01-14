@@ -200,3 +200,36 @@
         - portainer
         - firefox
         - grafana
+
+    - name: Section 7 - Initial Account Configuration
+      block:
+        - name: Task 7.1 - Initialize Portainer Owner Account via API
+          ansible.builtin.uri:
+            url: "http://10.10.10.10:9000/api/users/admin/init"
+            method: POST
+            body_format: json
+            body:
+              username: "{{ portainer_admin_user }}"
+              password: "{{ vault_portainer_password }}"
+            status_code: [200, 409]
+          register: portainer_init
+          until: portainer_init.status in [200, 409]
+          retries: 12
+          delay: 5
+          changed_when: portainer_init.status == 200
+
+        - name: Task 7.2 - Initialize n8n Owner Account via API
+          ansible.builtin.uri:
+            url: "http://localhost:5678/rest/owner/setup"
+            method: POST
+            body_format: json
+            body:
+              email: "{{ n8n_admin_email }}"
+              password: "{{ vault_n8n_password }}"
+              firstName: "Hunter"
+              lastName: "Sentinel"
+            status_code: [200, 409]
+          register: n8n_init
+          until: n8n_init.status in [200, 409]
+          retries: 15
+          delay: 10

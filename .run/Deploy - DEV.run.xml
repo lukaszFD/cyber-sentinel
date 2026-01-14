@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Deploy - local VM" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="cd ~/IdeaProjects/cyber-sentinel/ansible &amp;&amp; ~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini main.yml --limit local_vm" />
+    <option name="SCRIPT_TEXT" value="cd ~/IdeaProjects/cyber-sentinel/ansible &amp;&amp; ~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini main.yml --limit dev_vm" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />

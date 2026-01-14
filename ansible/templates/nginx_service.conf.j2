@@ -11,13 +11,19 @@ server {
     ssl_certificate /etc/nginx/certs/{{ item.name }}.crt;
     ssl_certificate_key /etc/nginx/certs/{{ item.name }}.key;
 
+    resolver 127.0.0.11 valid=30s;
+
     location / {
-        proxy_pass http://{{ item.internal_host }}:{{ item.port }};
+        resolver 127.0.0.11 valid=30s;
+        set $upstream_host {{ item.internal_host }};
+        proxy_pass http://$upstream_host:{{ item.port }};
+
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Support for WebSockets (n8n & Portainer)
+        # WebSockets support
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "Upgrade";

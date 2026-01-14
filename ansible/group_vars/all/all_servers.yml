@@ -11,3 +11,7 @@ mongodb_username: "hunter"
 mysql_host: "mysqldb"
 mysql_user: "hunter"
 mysql_database: "cyber_intelligence"
+
+portainer_admin_user: "admin_sentinel"
+n8n_admin_user: "n8n_manager"
+n8n_admin_email: "hunter@cyber-sentinel.local"

@@ -93,14 +93,15 @@ services:
       - n8n_data:/home/node/.n8n
     user: "1000:1000"
     environment:
-      - N8N_HOST=0.0.0.0
+      - N8N_HOST=n8n.{{ domain_suffix }}
       - N8N_PORT=5678
+      - N8N_PROTOCOL=https
       - NODE_ENV=production
       - N8N_SECURE_COOKIE=false
-      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - N8N_RUNNERS_ENABLED=true
+      - WEBHOOK_URL=https://n8n.{{ domain_suffix }}/
       - GENERIC_TIMEZONE=Europe/Warsaw
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     restart: unless-stopped
 
   mongo:
