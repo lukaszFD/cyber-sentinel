@@ -23,6 +23,7 @@
           - smartmontools   # Storage monitoring (smartctl)
           - fail2ban        # Brute-force protection
           - jq              # JSON processor for n8n/API
+          - sqlite3
         state: present
         update_cache: yes
 
