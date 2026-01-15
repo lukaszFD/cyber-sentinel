@@ -1,0 +1,9 @@
+---
+- import_playbook: 01_setup_secrets.yml
+- import_playbook: 02_setup_security.yml
+- import_playbook: 03_setup_system.yml
+- import_playbook: 04_1_prepare_stack.yml
+- import_playbook: 04_2_deploy_containers.yml
+- import_playbook: 04_3_db_create.yml
+- import_playbook: 04_4_post_config.yml
+- import_playbook: 05_deploy_proxy.yml

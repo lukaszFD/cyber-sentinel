@@ -1,5 +1,5 @@
 ---
-- name: Deploy Nginx Reverse Proxy with SSL
+- name: 05 - Deploy Nginx Reverse Proxy with SSL
   hosts: all
   become: yes
   vars:

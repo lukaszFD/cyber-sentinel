@@ -1,5 +1,5 @@
 ---
-- name: 00 - Docker Deployment (x86 & ARM)
+- name: 03 - Setup System (x86 & ARM)
   hosts: all_servers
   become: yes
   vars:

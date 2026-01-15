@@ -1,0 +1,51 @@
+---
+- name: 04.3 - DB create
+  hosts: all_servers
+  become: yes
+
+  vars:
+    source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
+    mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
+
+  tasks:
+    - name: Read credentials from .env
+      ansible.builtin.shell:
+        cmd: "grep '{{ item }}=' {{ remote_deploy_base }}/.env | cut -d '=' -f 2 | tr -d '\"'"
+      register: env_vars
+      loop:
+        - MYSQL_USER
+        - MYSQL_PASSWORD
+        - MYSQL_ROOT_PASSWORD
+      changed_when: false
+
+    - name: Set facts for MySQL
+      ansible.builtin.set_fact:
+        mysql_app_user: "{{ env_vars.results[0].stdout | trim }}"
+        mysql_password: "{{ env_vars.results[1].stdout | trim }}"
+        mysql_root_password: "{{ env_vars.results[2].stdout | trim }}"
+
+    - name: Render SQL script with actual credentials
+      ansible.builtin.template:
+        src: "{{ source_mysql_script }}"
+        dest: "{{ remote_deploy_base }}/init_db_rendered.sql"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Execute SQL and log output
+      ansible.builtin.shell:
+        cmd: |
+          echo "--- Execution Date: $(date) ---" >> {{ mysql_init_log }}
+          docker exec -i mysql_db mysql -u root -p'{{ mysql_root_password }}' < {{ remote_deploy_base }}/init_db_rendered.sql >> {{ mysql_init_log }} 2>&1
+      register: db_init_result
+      until: db_init_result.rc == 0 or 'ERROR 1007' in db_init_result.stderr
+      retries: 10
+      delay: 5
+      changed_when: db_init_result.rc == 0
+      failed_when:
+        - db_init_result.rc != 0
+
+    - name: Display deployment status
+      ansible.builtin.debug:
+        msg: |
+          Cyber AI Sentinel deployed.
+          Check SQL logs at: {{ mysql_init_log }}

@@ -1,5 +1,5 @@
 ---
-- name: Configure Firewall (UFW) for Cyber Sentinel
+- name: 02 - Configure Firewall (UFW)
   hosts: all
   become: yes
   vars:

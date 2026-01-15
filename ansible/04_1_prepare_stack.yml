@@ -1,0 +1,110 @@
+---
+- name: 04.1 - Prepare Sentinel Stack environment
+  hosts: all_servers
+  become: yes
+
+  vars:
+    project_name: "cyber-sentinel"
+    docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
+
+    source_docker_compose_file: "{{ main_repo_source_dir }}/docker/{{ docker_compose_file_name }}"
+    remote_docker_compose_file: "{{ remote_deploy_base }}/{{ docker_compose_file_name }}"
+    source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
+    mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
+
+  tasks:
+    - name: Create required directories
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/{{ item }}"
+        state: directory
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0755'
+      loop:
+        - "config/nginx/conf.d"
+        - "config/nginx/certs"
+        - "config/mongo"
+        - "config/mysql"
+        - "config/unbound"
+        - "config/dns/dnsmasq.d"
+        - "config/dns/var-log"
+        - "config/kali"
+        - "portainer_data"
+        - "n8n_data"
+        - "config/grafana/provisioning/datasources"
+        - "config/grafana/provisioning/dashboards"
+        - "config/grafana/dashboards"
+
+    - name: Copy docker-compose file
+      ansible.builtin.copy:
+        src: "{{ source_docker_compose_file }}"
+        dest: "{{ remote_docker_compose_file }}"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy Dockerfile for Passive DNS
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.pdns"
+        dest: "{{ remote_deploy_base }}/Dockerfile.pdns"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy Dockerfile for DNS Log Processor
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.log_processor"
+        dest: "{{ remote_deploy_base }}/Dockerfile.log_processor"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy python script for DNS Log Processor
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/dns/log_processor.py"
+        dest: "{{ remote_deploy_base }}/log_processor.py"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Ensure Secrets are in .env (Vault)
+      ansible.builtin.lineinfile:
+        path: "{{ remote_deploy_base }}/.env"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+        create: yes
+        owner: "{{ deployment_user }}"
+        mode: '0600'
+      loop:
+        - { key: 'GRAFANA_PASSWORD', value: "{{ vault_grafana_password }}" }
+        - { key: 'MONGODB_PASSWORD', value: "{{ vault_mongodb_password }}" }
+        - { key: 'MYSQL_ROOT_PASSWORD', value: "{{ vault_mysql_root_password }}" }
+      no_log: true
+
+    - name: Copy Unbound configuration file
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/unbound/unbound.conf"
+        dest: "{{ remote_deploy_base }}/config/unbound/unbound.conf"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy MongoDB initialization script
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/mongo/init_mongo.js"
+        dest: "{{ remote_deploy_base }}/config/mongo/db_init.js"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy Grafana Provisioning (Dashboards & Datasources)
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/grafana/provisioning/"
+        dest: "{{ remote_deploy_base }}/config/grafana/provisioning/"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+        directory_mode: '0755'
+
+    - name: Prepare DNS log file with correct permissions
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
+        state: touch
+        owner: "1000"
+        group: "1000"
+        mode: '0666'

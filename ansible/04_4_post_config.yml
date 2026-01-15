@@ -1,0 +1,105 @@
+---
+- name: 04.4 - Post config
+  hosts: all_servers
+  become: yes
+
+  tasks:
+    - name: Section 1 - Fail2Ban
+      block:
+        - name: Task 1.1 - Configure Fail2Ban for SSH
+          ansible.builtin.copy:
+            dest: /etc/fail2ban/jail.local
+            content: |
+              [sshd]
+              enabled = true
+              port = ssh
+              maxretry = 3
+              bantime = 1h
+              findtime = 10m
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Task 1.2 - Ensure Fail2Ban is running
+          ansible.builtin.service:
+            name: fail2ban
+            state: restarted
+            enabled: yes
+
+    - name: Section 2 - Pihole DNS
+      block:
+        - name: Task 2.1 - Set Pi-hole admin password from Vault
+          ansible.builtin.shell:
+            cmd: "docker exec pihole pihole setpassword '{{ vault_pihole_admin_password }}'"
+          register: pihole_pass_result
+          no_log: true
+          changed_when: "'New password set' in pihole_pass_result.stdout"
+
+        - name: Task 2.2 - Debug Pi-hole password update
+          ansible.builtin.debug:
+            msg: "Pi-hole web interface password has been updated successfully."
+          when: pihole_pass_result.changed
+
+        - name: Task 2.3 - Add local DNS records to Pi-hole
+          ansible.builtin.lineinfile:
+            path: "{{ remote_deploy_base }}/pihole/custom.list"
+            line: "{{ ansible_default_ipv4.address }} {{ item }}.local"
+            create: yes
+            owner: "{{ deployment_user }}"
+            mode: '0644'
+          loop:
+            - pihole
+            - n8n
+            - portainer
+            - firefox
+            - grafana
+
+        - name: Task 2.4 - Add Adlists to Pi-hole database (via Host)
+          ansible.builtin.shell:
+            cmd: >
+              sqlite3 {{ remote_deploy_base }}/pihole/gravity.db 
+              "INSERT OR IGNORE INTO adlist (address, enabled, comment) 
+              VALUES ('{{ item.strip() }}', 1, 'Added by Ansible Sentinel');"
+          loop: "{{ lookup('file', main_repo_source_dir + '/config/pihole/adlists.txt').splitlines() }}"
+          when: item.strip() | length > 0
+          register: adlist_result
+          changed_when: adlist_result.rc == 0
+
+        - name: Task 2.5 - Update Pi-hole Gravity
+          ansible.builtin.shell:
+            cmd: "docker exec pihole pihole -g"
+          run_once: true
+          when: adlist_result.changed
+
+    - name: Section 3 - Initial Account Configuration
+      block:
+        - name: Task 3.1 - Initialize Portainer Owner Account via API
+          ansible.builtin.uri:
+            url: "http://10.10.10.10:9000/api/users/admin/init"
+            method: POST
+            body_format: json
+            body:
+              username: "{{ portainer_admin_user }}"
+              password: "{{ vault_portainer_password }}"
+            status_code: [200, 409]
+          register: portainer_init
+          until: portainer_init.status in [200, 409]
+          retries: 12
+          delay: 5
+          changed_when: portainer_init.status == 200
+
+        - name: Task 3.2 - Initialize n8n Owner Account via API
+          ansible.builtin.uri:
+            url: "http://localhost:5678/rest/owner/setup"
+            method: POST
+            body_format: json
+            body:
+              email: "{{ n8n_admin_email }}"
+              password: "{{ vault_n8n_password }}"
+              firstName: "Hunter"
+              lastName: "Sentinel"
+            status_code: [200, 409]
+          register: n8n_init
+          until: n8n_init.status in [200, 409]
+          retries: 15
+          delay: 10

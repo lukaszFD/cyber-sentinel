@@ -1,0 +1,15 @@
+---
+- name: 04.2 - Deploy Docker stack
+  hosts: all_servers
+  become: yes
+
+  vars:
+    project_name: "cyber-sentinel"
+    docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
+
+  tasks:
+    - name: Pull and Start Sentinel Stack
+      ansible.builtin.shell:
+        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up --build -d"
+        chdir: "{{ remote_deploy_base }}"
+      register: deploy_output
