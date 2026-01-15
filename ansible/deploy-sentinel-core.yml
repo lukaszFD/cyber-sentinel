@@ -100,12 +100,14 @@
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Task 1.9 - Copy Grafana Provisioning
+    - name: Task 1.9 - Copy Grafana Provisioning (Dashboards & Datasources)
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/grafana/provisioning/"
         dest: "{{ remote_deploy_base }}/config/grafana/provisioning/"
         owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
         mode: '0644'
+        directory_mode: '0755'
 
     - name: Task 2.0 - Pull and Start Sentinel Stack
       ansible.builtin.shell:

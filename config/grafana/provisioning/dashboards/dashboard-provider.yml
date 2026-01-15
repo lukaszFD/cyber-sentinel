@@ -2,9 +2,9 @@ apiVersion: 1
 providers:
   - name: 'CyberSentinelDashboards'
     orgId: 1
-    folder: 'Infrastructure'
+    folder: 'Cyber Sentinel'
     type: file
     disableDeletion: false
     editable: true
     options:
-      path: /etc/grafana/dashboards
+      path: /etc/grafana/provisioning/dashboards

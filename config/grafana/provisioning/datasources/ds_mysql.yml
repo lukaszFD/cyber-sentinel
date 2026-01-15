@@ -1,17 +1,16 @@
 apiVersion: 1
-
 datasources:
-  - name: MySQL-CyberSentinel
+  - name: MySQL
     type: mysql
-
-    url: mysql_db:3306
+    access: proxy
+    url: mysqldb:3306
     database: cyber_intelligence
     user: hunter
+    uid: PCF4C4661FE7E0A44
+    jsonData:
+      maxOpenConns: 0
+      maxIdleConns: 2
+      connMaxLifetime: 14400
     secureJsonData:
       password: "${MYSQL_PASSWORD}"
-    jsonData:
-      sslmode: "disable"
-      maxOpenConns: 100
-      maxIdleConns: 100
-    isDefault: true
     editable: true
