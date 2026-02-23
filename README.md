@@ -79,17 +79,17 @@ Deployment secrets (database passwords, API keys) are managed using **Ansible Va
 
 ```bash
 # View encrypted variables
-EDITOR=cat ~/ansible_mint_venv/bin/ansible-vault view ansible/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass
+EDITOR=nano ~/ansible_mint_venv/bin/ansible-vault view ansible/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass
 
 # Edit existing encrypted variables
-ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass
+EDITOR=nano ~/ansible_mint_venv/bin/ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass
 
 # Encrypt a new string for use in variables (e.g., a new API Key)
 ansible-vault encrypt_string 'your_secret_api_key' --name 'vt_api_key' --vault-password-file ansible/.vault_pass
 ```
 
 ## 🔍 Troubleshooting & Logs
-
+clear
 Check if services are running and healthy:
 ```bash
 # Check container status

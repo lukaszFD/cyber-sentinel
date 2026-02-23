@@ -33,7 +33,6 @@ services:
         ipv4_address: 10.10.10.4
     environment:
       TZ: "Europe/Warsaw"
-      PIHOLE_DNS_: "10.10.10.3#53"
     volumes:
       - './pihole:/etc/pihole'
       - './dnsmasq.d:/etc/dnsmasq.d'
@@ -166,6 +165,25 @@ services:
       - 'grafana_data:/var/lib/grafana'
     restart: unless-stopped
 
+  vault:
+    image: hashicorp/vault:latest
+    container_name: hashicorp_vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "${VAULT_ROOT_TOKEN}"
+      VAULT_ADDR: "http://0.0.0.0:8200"
+      VAULT_UI: "true"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./config/vault/data:/vault/file
+      - ./config/vault/config:/vault/config
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.12
+    restart: unless-stopped
+
 networks:
   internal_network:
     driver: bridge
@@ -177,5 +195,4 @@ volumes:
   n8n_data:
   mysql_data:
   mongo_data:
-  prometheus_data:
   grafana_data:

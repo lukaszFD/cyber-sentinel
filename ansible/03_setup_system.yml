@@ -19,6 +19,7 @@
           - lsb-release
           - python3-pip
           - python3-docker
+          - python3-hvac
           - htop            # Interactive process viewer
           - smartmontools   # Storage monitoring (smartctl)
           - fail2ban        # Brute-force protection

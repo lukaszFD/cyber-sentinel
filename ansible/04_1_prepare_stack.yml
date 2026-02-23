@@ -31,6 +31,8 @@
         - "config/kali"
         - "portainer_data"
         - "n8n_data"
+        - "config/vault/data"
+        - "config/vault/config"
         - "config/grafana/provisioning/datasources"
         - "config/grafana/provisioning/dashboards"
         - "config/grafana/dashboards"
@@ -108,3 +110,10 @@
         owner: "1000"
         group: "1000"
         mode: '0666'
+
+    - name: Set permissions for Vault data directory
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/vault/data"
+        owner: "100"
+        group: "1000"
+        mode: '0700'
