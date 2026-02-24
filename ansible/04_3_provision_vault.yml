@@ -47,12 +47,22 @@
       loop: "{{ services }}"
       no_log: true
 
-    - name: Task 1.3 - Smoke Test (Verify access)
+    - name: Task 1.3 - Provision Application Passwords to Vault
       ansible.builtin.uri:
-        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys"
-        method: GET
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/credentials"
+        method: POST
         headers:
           X-Vault-Token: "{{ vault_root_token | trim }}"
-        status_code: [200]
-      register: vault_verify
+        body_format: json
+        body:
+          data:
+            mysql_app_user: "{{ vault_mysql_app_user }}"
+            mongodb_password: "{{ vault_mongodb_password }}"
+            mysql_password: "{{ vault_mysql_password }}"
+            mysql_root_password: "{{ vault_mysql_root_password }}"
+            pihole_admin_password: "{{ vault_pihole_admin_password }}"
+            grafana_password: "{{ vault_grafana_password }}"
+            portainer_password: "{{ vault_portainer_password }}"
+            n8n_password: "{{ vault_n8n_password }}"
+        status_code: [200, 204]
       no_log: true

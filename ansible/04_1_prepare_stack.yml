@@ -23,6 +23,7 @@
       loop:
         - "config/nginx/conf.d"
         - "config/nginx/certs"
+        - "config/nginx/html"
         - "config/mongo"
         - "config/mysql"
         - "config/unbound"

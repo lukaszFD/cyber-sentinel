@@ -65,6 +65,7 @@
         restart_policy: always
         networks:
           - name: cyber-sentinel_internal_network
+            ipv4_address: 10.10.10.100
         volumes:
           - "{{ remote_deploy_base }}/config/nginx/conf.d:/etc/nginx/conf.d:ro"
           - "{{ remote_deploy_base }}/config/nginx/certs:/etc/nginx/certs:ro"

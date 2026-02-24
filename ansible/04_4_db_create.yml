@@ -4,48 +4,44 @@
   become: yes
 
   vars:
+    vault_url: "http://{{ ansible_host }}:8200"
     source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
     mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
 
   tasks:
-    - name: Read credentials from .env
-      ansible.builtin.shell:
-        cmd: "grep '{{ item }}=' {{ remote_deploy_base }}/.env | cut -d '=' -f 2 | tr -d '\"'"
-      register: env_vars
-      loop:
-        - MYSQL_USER
-        - MYSQL_PASSWORD
-        - MYSQL_ROOT_PASSWORD
-      changed_when: false
+    - name: Task 4.1 - Get Database Credentials from HashiCorp Vault
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ vault_url }}"
+        token: "{{ vault_root_token }}"
+        path: "cyber-sentinel/credentials"
+      register: vault_db_secrets
+      no_log: true
 
-    - name: Set facts for MySQL
+    - name: Task 4.2 - Set facts from Vault secrets
       ansible.builtin.set_fact:
-        mysql_app_user: "{{ env_vars.results[0].stdout | trim }}"
-        mysql_password: "{{ env_vars.results[1].stdout | trim }}"
-        mysql_root_password: "{{ env_vars.results[2].stdout | trim }}"
+        mysql_app_user: "{{ vault_db_secrets.secret.mysql_app_user }}"
+        mysql_password: "{{ vault_db_secrets.secret.mysql_password }}"
+        mysql_root_password: "{{ vault_db_secrets.secret.mysql_root_password }}"
+      no_log: true
 
-    - name: Render SQL script with actual credentials
+    - name: Task 4.3 - Render SQL script with actual credentials
       ansible.builtin.template:
         src: "{{ source_mysql_script }}"
         dest: "{{ remote_deploy_base }}/init_db_rendered.sql"
         owner: "{{ deployment_user }}"
-        mode: '0644'
+        mode: '0600'
 
-    - name: Execute SQL and log output
+    - name: Task 4.4 - Execute SQL and log output
       ansible.builtin.shell:
         cmd: |
           echo "--- Execution Date: $(date) ---" >> {{ mysql_init_log }}
           docker exec -i mysql_db mysql -u root -p'{{ mysql_root_password }}' < {{ remote_deploy_base }}/init_db_rendered.sql >> {{ mysql_init_log }} 2>&1
       register: db_init_result
-      until: db_init_result.rc == 0 or 'ERROR 1007' in db_init_result.stderr
+      until: (db_init_result.rc | default(-1)) == 0 or (db_init_result.stderr | default('') is search('ERROR 1007'))
       retries: 10
-      delay: 5
-      changed_when: db_init_result.rc == 0
-      failed_when:
-        - db_init_result.rc != 0
+      delay: 10
 
-    - name: Display deployment status
-      ansible.builtin.debug:
-        msg: |
-          Cyber AI Sentinel deployed.
-          Check SQL logs at: {{ mysql_init_log }}
+    - name: Task 4.5 - Cleanup rendered SQL script
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/init_db_rendered.sql"
+        state: absent
