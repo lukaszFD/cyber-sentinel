@@ -56,6 +56,8 @@
         body_format: json
         body:
           data:
+            kali_gemini_api_key: "{{ vault_kali_gemini_api_key }}"
+            gemini_api_key: "{{ vault_gemini_api_key }}"
             mysql_app_user: "{{ vault_mysql_app_user }}"
             mongodb_password: "{{ vault_mongodb_password }}"
             mysql_password: "{{ vault_mysql_password }}"
