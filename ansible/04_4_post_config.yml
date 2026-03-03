@@ -40,21 +40,7 @@
             msg: "Pi-hole web interface password has been updated successfully."
           when: pihole_pass_result.changed
 
-        - name: Task 2.3 - Add local DNS records to Pi-hole
-          ansible.builtin.lineinfile:
-            path: "{{ remote_deploy_base }}/pihole/custom.list"
-            line: "{{ ansible_default_ipv4.address }} {{ item }}.local"
-            create: yes
-            owner: "{{ deployment_user }}"
-            mode: '0644'
-          loop:
-            - pihole
-            - n8n
-            - portainer
-            - firefox
-            - grafana
-
-        - name: Task 2.4 - Add Adlists to Pi-hole database (via Host)
+        - name: Task 2.3 - Add Adlists to Pi-hole database (via Host)
           ansible.builtin.shell:
             cmd: >
               sqlite3 {{ remote_deploy_base }}/pihole/gravity.db 
@@ -65,7 +51,7 @@
           register: adlist_result
           changed_when: adlist_result.rc == 0
 
-        - name: Task 2.5 - Update Pi-hole Gravity
+        - name: Task 2.4 - Update Pi-hole Gravity
           ansible.builtin.shell:
             cmd: "docker exec pihole pihole -g"
           run_once: true
