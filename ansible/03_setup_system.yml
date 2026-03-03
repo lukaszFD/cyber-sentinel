@@ -82,3 +82,44 @@
     - name: Show Docker version
       ansible.builtin.debug:
         msg: "Docker version on {{ inventory_hostname }} is {{ docker_version.stdout }}"
+
+    - name: Task - Argon NEO 5 Fan Control Setup (RPi 5)
+      block:
+        - name: Download Argon NEO 5 for RPi 5 script
+          ansible.builtin.get_url:
+            url: https://download.argon40.com/argonone-setup-raspberry-pi-5.sh
+            dest: /tmp/argon_rpi5.sh
+            mode: '0755'
+            force: yes
+            follow_redirects: yes 
+
+        - name: Run Argon NEO 5 installation script
+          ansible.builtin.shell: /tmp/argon_rpi5.sh
+          args:
+            executable: /bin/bash
+            creates: /usr/bin/argonone-config
+
+        - name: Configure Fan Thresholds for AI Workloads
+          ansible.builtin.copy:
+            dest: /etc/argononed.conf
+            content: |
+              # Argon Fan Speed Configuration (CPU)
+              55=100
+              65=100
+            owner: root
+            group: root
+            mode: '0644'
+          notify: Restart Argon Service
+
+        - name: Ensure Argon cooling service is running
+          ansible.builtin.systemd:
+            name: argononed
+            state: started
+            enabled: yes
+      when: ansible_architecture == "aarch64"
+
+  handlers:
+    - name: Restart Argon Service
+      ansible.builtin.systemd:
+        name: argononed
+        state: restarted

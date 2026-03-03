@@ -4,8 +4,8 @@ USE cyber_intelligence;
 
 -- User configuration for application access
 -- These variables will be replaced by Ansible during deployment
-CREATE USER IF NOT EXISTS '{{ mysql_app_user }}'@'%' IDENTIFIED BY '{{ mysql_password }}';
-GRANT ALL PRIVILEGES ON cyber_intelligence.* TO '{{ mysql_app_user }}'@'%';
+CREATE USER IF NOT EXISTS '{{ mysql_user }}'@'%' IDENTIFIED BY '{{ vault_mysql_password }}';
+GRANT ALL PRIVILEGES ON cyber_intelligence.* TO '{{ mysql_user }}'@'%';
 FLUSH PRIVILEGES;
 
 -- 1. Main table for standardized threat data (Link to MongoDB)

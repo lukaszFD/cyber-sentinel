@@ -15,3 +15,8 @@ mysql_database: "cyber_intelligence"
 portainer_admin_user: "admin_sentinel"
 n8n_admin_user: "n8n_manager"
 n8n_admin_email: "hunter@cyber-sentinel.local"
+
+# vault configuration - add these to all_servers.yml
+vault_mysql_database: "{{ mysql_database }}"
+vault_mysql_app_user: "{{ mysql_user }}"
+vault_address: "10.10.10.12"

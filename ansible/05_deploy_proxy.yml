@@ -23,40 +23,31 @@
         - "{{ remote_deploy_base }}/config/nginx/conf.d"
         - "{{ remote_deploy_base }}/config/nginx/certs"
 
-    - name: Task 5.1 - Get Certificates from HashiCorp Vault
-      community.hashi_vault.vault_kv2_get:
-        url: "http://{{ ansible_host }}:8200"
-        token: "{{ vault_root_token }}"
-        path: "cyber-sentinel/certs/{{ item.name }}"
-      register: vault_certs
+    - name: Task 5.1 - Save Certificate files (.crt)
+      ansible.builtin.copy:
+        content: "{{ lookup('vars', 'vault_' + item.name + '_cert') }}"
+        dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.crt"
+        owner: "{{ deployment_user }}"
+        mode: '0600'
       loop: "{{ services }}"
       no_log: true
 
-    - name: Task 5.2 - Save Certificate files (.crt)
+    - name: Task 5.2 - Save Private Key files (.key)
       ansible.builtin.copy:
-        content: "{{ item.secret.cert }}"
-        dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.item.name }}.crt"
+        content: "{{ lookup('vars', 'vault_' + item.name + '_key') }}"
+        dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.key"
         owner: "{{ deployment_user }}"
         mode: '0600'
-      loop: "{{ vault_certs.results }}"
+      loop: "{{ services }}"
       no_log: true
 
-    - name: Task 5.3 - Save Private Key files (.key)
-      ansible.builtin.copy:
-        content: "{{ item.secret.key }}"
-        dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.item.name }}.key"
-        owner: "{{ deployment_user }}"
-        mode: '0600'
-      loop: "{{ vault_certs.results }}"
-      no_log: true
-
-    - name: Task 5.4 - Deploy Nginx Templates
+    - name: Task 5.3 - Deploy Nginx Templates
       ansible.builtin.template:
         src: templates/nginx_service.conf.j2
         dest: "{{ remote_deploy_base }}/config/nginx/conf.d/{{ item.name }}.conf"
       loop: "{{ services }}"
 
-    - name: Task 5.5 - Run Nginx Proxy Container
+    - name: Task 5.4 - Run Nginx Proxy Container
       community.docker.docker_container:
         name: nginx-proxy
         image: nginx:latest

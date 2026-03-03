@@ -171,7 +171,7 @@ services:
     ports:
       - "8200:8200"
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "${VAULT_ROOT_TOKEN}"
+      VAULT_LOCAL_CONFIG: '{"storage": {"file": {"path": "/vault/file"}}, "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": 1}}}'
       VAULT_ADDR: "http://0.0.0.0:8200"
       VAULT_UI: "true"
     cap_add:
@@ -179,6 +179,7 @@ services:
     volumes:
       - ./config/vault/data:/vault/file
       - ./config/vault/config:/vault/config
+    command: server
     networks:
       internal_network:
         ipv4_address: 10.10.10.12

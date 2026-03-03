@@ -1,0 +1,124 @@
+---
+- name: Provision HashiCorp Vault (Persistence & Separation)
+  hosts: all_servers
+  vars:
+    vault_url: "http://{{ ansible_host }}:8200"
+    mysql_host: "10.10.10.9"
+    mongo_host: "10.10.10.8"
+
+  tasks:
+    - name: Task 0.1 - Check Vault Health
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/health"
+        status_code: [200, 429, 501, 503]
+      register: vault_health
+
+    - name: Task 0.2 - Auto-Unseal Vault (Multiple Keys)
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/unseal"
+        method: POST
+        body: { key: "{{ item }}" }
+        body_format: json
+      loop: "{{ vault_unseal_keys }}"
+      when: vault_health.status == 503
+      no_log: true
+
+    - name: Task 1.1 - Ensure KV Secrets Engine is enabled
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/mounts/secret"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body: { type: "kv", options: { version: "2" } }
+        body_format: json
+        status_code: [200, 204, 400]
+
+    - name: Task 2.0 - Write VirusTotal Token
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/virustotal"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body: { data: { token: "{{ vault_virus_total_token }}" } }
+        body_format: json
+        status_code: [200, 204]
+      no_log: true
+
+    - name: Task 2.1 - Write Certificates for Services
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/certs/{{ item.name }}"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body:
+          data:
+            cert: "{{ lookup('vars', 'vault_' + item.name + '_cert') }}"
+            key: "{{ lookup('vars', 'vault_' + item.name + '_key') }}"
+        body_format: json
+        status_code: [200, 204]
+      loop:
+        - { name: "pihole" }
+        - { name: "n8n" }
+        - { name: "grafana" }
+      no_log: true
+
+    - name: Task 3.0 - Provision Separated Application Secrets
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/credentials/{{ item.path }}"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body:
+          data:
+            user: "{{ item.user | default('admin') }}"
+            password: "{{ item.value }}"
+        body_format: json
+        status_code: [200, 204]
+      no_log: true
+      loop:
+        # AI & API
+        - { path: "api/gemini", value: "{{ vault_gemini_api_key }}" }
+        - { path: "api/kali_gemini", value: "{{ vault_kali_gemini_api_key }}" }
+        # App Passwords
+        - { path: "pihole", value: "{{ vault_pihole_admin_password }}" }
+        - { path: "grafana", value: "{{ vault_grafana_password }}" }
+        - { path: "portainer", value: "{{ vault_portainer_password }}", user: "{{ portainer_admin_user }}" }
+        - { path: "n8n", value: "{{ vault_n8n_password }}", user: "{{ n8n_admin_user }}" }
+        # Database Roots
+        - { path: "mysql/root", value: "{{ vault_mysql_root_password }}", user: "root" }
+        - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}", user: "{{ vault_mysql_app_user }}" }
+        - { path: "mongodb/admin", value: "{{ vault_mongodb_password }}", user: "admin" }
+
+    - name: Task 4.0 - Enable Database Engine
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/mounts/database"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body: { type: "database" }
+        body_format: json
+        status_code: [200, 204, 400]
+
+    - name: Task 4.1 - Configure MySQL Dynamic Role
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/database/config/mysql-db"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body:
+          plugin_name: "mysql-database-plugin"
+          allowed_roles: "n8n-role"
+          connection_url: "{{ vault_mysql_app_user }}:{{ vault_mysql_password }}@tcp({{ mysql_host }}:3306)/"
+        body_format: json
+        status_code: [200, 204]
+
+    - name: Task 4.2 - Create Dynamic Role for n8n
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/database/roles/n8n-role"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body:
+          db_name: "mysql-db"
+          creation_statements: >
+            {% raw %}
+            CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}';
+            GRANT ALL PRIVILEGES ON {% endraw %}{{ vault_mysql_database }}{% raw %}.* TO '{{name}}'@'%';
+            {% endraw %}
+          default_ttl: "1h"
+          max_ttl: "24h"
+        body_format: json
+        status_code: [200, 204]

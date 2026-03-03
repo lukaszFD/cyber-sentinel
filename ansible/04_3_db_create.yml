@@ -1,0 +1,31 @@
+---
+- name: 04.3 - DB create
+  hosts: all_servers
+  become: yes
+
+  vars:
+    source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
+    mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
+
+  tasks:
+    - name: Task 4.1 - Render SQL script with actual credentials
+      ansible.builtin.template:
+        src: "{{ source_mysql_script }}"
+        dest: "{{ remote_deploy_base }}/init_db_rendered.sql"
+        owner: "{{ deployment_user }}"
+        mode: '0600'
+
+    - name: Task 4.2 - Execute SQL and log output
+      ansible.builtin.shell:
+        cmd: |
+          echo "--- Execution Date: $(date) ---" >> {{ mysql_init_log }}
+          docker exec -i mysql_db mysql -u root -p'{{ vault_mysql_root_password }}' < {{ remote_deploy_base }}/init_db_rendered.sql >> {{ mysql_init_log }} 2>&1
+      register: db_init_result
+      until: (db_init_result.rc | default(-1)) == 0 or (db_init_result.stderr | default('') is search('ERROR 1007'))
+      retries: 10
+      delay: 10
+
+    - name: Task 4.3 - Cleanup rendered SQL script
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/init_db_rendered.sql"
+        state: absent

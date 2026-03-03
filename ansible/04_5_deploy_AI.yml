@@ -1,0 +1,58 @@
+---
+- name: Deploy AI Suite for Cyber Sentinel
+  hosts: all_servers
+  become: yes
+
+  vars:
+    docker_network: "cyber-sentinel_internal_network"
+    ai_models:
+      - "llama3.2:3b"
+      - "deepseek-coder:1.3b"
+
+  tasks:
+    - name: Task 4.1 - Ensure Docker network exists
+      community.docker.docker_network:
+        name: "{{ docker_network }}"
+        state: present
+
+    - name: Task 4.2 - Ensure Ollama volume exists
+      community.docker.docker_volume:
+        name: ollama_data
+        state: present
+
+    - name: Task 4.3 - Run Ollama Container
+      community.docker.docker_container:
+        name: ollama
+        image: ollama/ollama:latest
+        state: started
+        restart_policy: always
+        networks:
+          - name: "{{ docker_network }}"
+        ports:
+          - "11434:11434"
+        volumes:
+          - "ollama_data:/root/.ollama"
+        memory: 4g
+
+    - name: Task 4.4 - Wait for Ollama API to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:11434/api/tags"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 10
+      delay: 5
+
+    - name: Task 4.5 - Pull AI Models (Llama and DeepSeek)
+      command: "docker exec ollama ollama pull {{ item }}"
+      loop: "{{ ai_models }}"
+      register: pull_result
+      changed_when: "'success' in pull_result.stdout"
+
+    - name: Task 4.6 - Verify Models Installation
+      command: "docker exec ollama ollama list"
+      register: models_list
+
+    - name: Debug - Show Installed Models
+      debug:
+        msg: "Installed AI Models: {{ models_list.stdout }}"

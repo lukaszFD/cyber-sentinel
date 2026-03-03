@@ -166,4 +166,4 @@ Run this command on your ThinkPad to forward local port `3307` to the MySQL cont
 
 ```bash
 # Formula: ssh -L [local_port]:[container_internal_ip]:[db_port] [user]@[host] -p [ssh_port]
-ssh -L 3307:10.10.10.9:3306 hunter@127.0.0.1 -p 2222
+ssh -L 3307:10.10.10.9:3306 hunter@192.168.0.2 -p 22
