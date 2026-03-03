@@ -7,3 +7,4 @@
 - import_playbook: 04_3_db_create.yml
 - import_playbook: 04_4_post_config.yml
 - import_playbook: 05_deploy_proxy.yml
+- import_playbook: 06_1_initialize_vault.yml

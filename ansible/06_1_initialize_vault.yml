@@ -1,0 +1,24 @@
+---
+- name: Initialize HashiCorp Vault
+  hosts: all_servers
+  vars:
+    vault_url: "http://{{ ansible_host }}:8200"
+
+  tasks:
+    - name: Task 0.0 - Check if Vault is initialized
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/init"
+        method: GET
+      register: vault_init_status
+
+    - name: Task 0.1 - Initialize Vault (ONLY IF NEW)
+      ansible.builtin.shell:
+        cmd: "docker exec hashicorp_vault vault operator init -format=json"
+      register: vault_init_output
+      when: not (vault_init_status.json.initialized)
+      no_log: false
+
+    - name: DEBUG - Show Keys (Temporary)
+      ansible.builtin.debug:
+        var: vault_init_output.stdout_lines
+      when: vault_init_output.changed

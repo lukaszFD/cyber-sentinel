@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Deploy - local VM" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="cd ~/IdeaProjects/cyber-sentinel/ansible &amp;&amp; ~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini main.yml --limit dev_vm" />
+    <option name="SCRIPT_TEXT" value="cd ~/IdeaProjects/cyber-sentinel/ansible &amp;&amp; ~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini main.yml --limit rpi5" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />
@@ -14,8 +14,8 @@
     <envs />
     <method v="2" />
   </configuration>
-  <configuration default="false" name="Deploy - DEV" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="cd ~/IdeaProjects/cyber-sentinel/ansible &amp;&amp; ~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini 00_main.yml --limit dev_vm" />
+  <configuration default="false" name="Deploy - PROD" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="cd ~/IdeaProjects/cyber-sentinel/ansible &amp;&amp; ~/ansible_mint_venv/bin/ansible-playbook -i hosts.ini 00_main.yml --limit rpi5" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />
