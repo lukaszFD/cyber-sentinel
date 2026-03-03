@@ -44,10 +44,10 @@ cyber-sentinel/
 │   ├── 03_setup_system.yml         # Task: Docker Engine and prerequisite installation
 │   ├── 04_1_prepare_stack.yml      # Task: Directory structure and config sync
 │   ├── 04_2_deploy_containers.yml  # Task: Docker Compose stack deployment
-│   ├── 04_3_provision_vault.yml    # Task: HashiCorp Vault initialization and secret injection
-│   ├── 04_4_db_create.yml          # Task: MySQL schema and user provisioning
-│   ├── 04_5_post_config.yml        # Task: Service initialization (Pi-hole, n8n, Portainer)
+│   ├── 04_3_db_create.yml          # Task: MySQL schema and user provisioning
+│   ├── 04_4_post_config.yml        # Task: Service initialization (Pi-hole, n8n, Portainer)
 │   ├── 05_deploy_proxy.yml         # Task: Nginx Reverse Proxy & SSL certificates deployment
+│   ├── 06_provision_vault.yml    # Task: HashiCorp Vault initialization and secret injection
 │   ├── ansible.cfg                 # Ansible runtime configuration
 │   ├── group_vars/
 │   │   └── all/
