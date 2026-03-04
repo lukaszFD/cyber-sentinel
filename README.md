@@ -38,6 +38,7 @@ The system follows a hybrid deployment strategy, managed entirely via **Ansible*
 ```text
 cyber-sentinel/
 ├── ansible/                        # Infrastructure as Code (IaC) layer
+│   ├── .vault_pass                 # 🔐 Ansible Vault encrypted bootstrap secrets - > README_VAULT.md
 │   ├── 00_main.yml                 # Master playbook orchestrating the full deployment
 │   ├── 01_setup_secrets.yml        # Task: Environment and local secret preparation
 │   ├── 02_setup_security.yml       # Task: UFW Firewall and system hardening
@@ -47,12 +48,13 @@ cyber-sentinel/
 │   ├── 04_3_db_create.yml          # Task: MySQL schema and user provisioning
 │   ├── 04_4_post_config.yml        # Task: Service initialization (Pi-hole, n8n, Portainer)
 │   ├── 05_deploy_proxy.yml         # Task: Nginx Reverse Proxy & SSL certificates deployment
-│   ├── 06_provision_vault.yml    # Task: HashiCorp Vault initialization and secret injection
+│   ├── 06_1_initialize_vault.yml   # Task: HashiCorp Vault initialization 
+│   ├── 06_2_provision_vault.yml    # Task: HashiCorp Vault secret injection
 │   ├── ansible.cfg                 # Ansible runtime configuration
 │   ├── group_vars/
 │   │   └── all/
 │   │       ├── all_servers.yml     # Non-sensitive global variables and service definitions
-│   │       └── vault.yml           # 🔐 Ansible Vault encrypted bootstrap secrets
+│   │       └── vault.yml           # 🔐 Ansible Vault encrypted bootstrap secrets - > README_VAULT.md
 │   ├── hosts.ini                   # Inventory file (Proxmox VM: 192.168.0.5)
 │   └── templates/
 │       ├── env.j2                  # Template for Docker containers' .env files
@@ -113,6 +115,8 @@ The project has moved from local port forwarding to a professional **Nginx Rever
 ```
 
 ## 🔐 Secrets and Access Management
+
+🔐 Ansible Vault encrypted bootstrap secrets -> [README_VAULT.md](README_VAULT.md).
 
 Deployment secrets (database passwords, API keys) are managed using **Ansible Vault**. To view or edit the secrets:
 
