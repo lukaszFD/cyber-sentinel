@@ -7,19 +7,22 @@ This guide explains how to manage sensitive secrets for the **Cyber AI Sentinel*
 The following variables must be defined in `ansible/group_vars/all/vault.yml`. These secrets are crucial for both the automated infrastructure deployment and the **HashiCorp Vault** provisioning process.
 
 ### 1. Infrastructure & App Credentials
-| Variable | Description |
-| :--- | :--- |
-| `ansible_become_password` | Sudo password for the remote host (VM/RPi). |
+| Variable | Description                                  |
+| :--- |:---------------------------------------------|
+| `ansible_become_password` | Sudo password for the remote host (VM/RPi).  |
 | `vault_mysql_app_user` | Application user for MySQL (e.g., `hunter`). |
-| `vault_mysql_password` | Password for the application MySQL user. |
-| `vault_mysql_root_password`| Root password for MySQL 8.0 container. |
-| `vault_mongodb_password` | Password for MongoDB threat data lake. |
-| `vault_pihole_admin_password`| Web UI password for Pi-hole. |
-| `vault_n8n_password` | Owner account password for n8n. |
-| `vault_grafana_password` | Admin password for Grafana. |
-| `vault_portainer_password` | Admin password for Portainer. |
-| `vault_virus_total_token` | API Key for VirusTotal enrichment. |
-| `vault_gemini_api_key`    | API Key for AI workflow. |
+| `vault_mysql_password` | Password for the application MySQL user.     |
+| `vault_mysql_root_password`| Root password for MySQL 8.0 container.       |
+| `vault_mongodb_password` | Password for MongoDB threat data lake.       |
+| `vault_pihole_admin_password`| Web UI password for Pi-hole.                 |
+| `vault_n8n_password` | Owner account password for n8n.              |
+| `vault_grafana_password` | Admin password for Grafana.                  |
+| `vault_portainer_password` | Admin password for Portainer.                |
+| `vault_virus_total_token` | API Key for VirusTotal enrichment.           |
+| `vault_gemini_api_key`    | API Key for AI workflow.                     |
+| `vault_root_token`    | HashiCorp Vault Root key.                    |
+| `vault_unseal_keys`    | Keys to unseal HashiCorp Vault - a list of three                    |
+
 
 ### 2. HashiCorp Vault Management Keys
 These keys are required for the automated unsealing and provisioning of the HashiCorp Vault container.
