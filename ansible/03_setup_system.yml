@@ -87,11 +87,10 @@
       block:
         - name: Download Argon NEO 5 for RPi 5 script
           ansible.builtin.get_url:
-            url: https://download.argon40.com/argonone-setup-raspberry-pi-5.sh
+            url: https://download.argon40.com/argon1.sh
             dest: /tmp/argon_rpi5.sh
             mode: '0755'
             force: yes
-            follow_redirects: yes 
 
         - name: Run Argon NEO 5 installation script
           ansible.builtin.shell: /tmp/argon_rpi5.sh
