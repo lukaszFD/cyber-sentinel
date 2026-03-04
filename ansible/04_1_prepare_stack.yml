@@ -21,6 +21,7 @@
         group: "{{ deployment_user }}"
         mode: '0755'
       loop:
+        - "config/prometheus"
         - "config/nginx/conf.d"
         - "config/nginx/certs"
         - "config/nginx/html"
@@ -118,3 +119,19 @@
         owner: "100"
         group: "1000"
         mode: '0700'
+
+    - name: Copy Prometheus configuration file
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/prometheus/prometheus.yml"
+        dest: "{{ remote_deploy_base }}/config/prometheus/prometheus.yml"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy Dashboard JSON files to the main dashboard folder
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/grafana/provisioning/dashboards/"
+        dest: "{{ remote_deploy_base }}/config/grafana/dashboards/"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
