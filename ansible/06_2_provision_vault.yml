@@ -62,7 +62,27 @@
         status_code: [200, 204]
       no_log: true
 
-    - name: Task 2.3 - Write Certificates for Services
+    - name: Task 2.2 - Write Abuse API Token
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/abuse/api-key"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body: { data: { token: "{{ vault_abuse_api_key }}" } }
+        body_format: json
+        status_code: [200, 204]
+      no_log: true
+
+    - name: Task 2.2 - Write Grafana API Token
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/grafana/api-key"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body: { data: { token: "{{ vault_grafana_api_key }}" } }
+        body_format: json
+        status_code: [200, 204]
+      no_log: true
+
+    - name: Task 2.5 - Write Certificates for Services
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/certs/{{ item.name }}"
         method: POST
@@ -101,3 +121,5 @@
         - { path: "mysql/root", value: "{{ vault_mysql_root_password }}", user: "root" }
         - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}", user: "{{ vault_mysql_app_user }}" }
         - { path: "mongodb/admin", value: "{{ vault_mongodb_password }}", user: "admin" }
+        # Email
+        - { path: "gmail/l94524506", value: "{{ vault_n8n_gmail }}", user: "l94524506" }
