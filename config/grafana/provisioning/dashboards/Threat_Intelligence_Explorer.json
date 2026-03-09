@@ -1,0 +1,91 @@
+{
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "PCF4C4661FE7E0A44"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "pieType": "donut",
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT provider, COUNT(*) as detections FROM v_grafana_threat_explorer WHERE $__timeFilter(timestamp) GROUP BY provider",
+          "refId": "A"
+        }
+      ],
+      "title": "CTI Provider Efficacy (Detections)",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "PCF4C4661FE7E0A44"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT fqdn, COUNT(*) as hits FROM v_grafana_threat_explorer WHERE $__timeFilter(timestamp) GROUP BY fqdn ORDER BY hits DESC LIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 10 Targeted Malicious FQDNs",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "mysql",
+        "uid": "PCF4C4661FE7E0A44"
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [ { "displayName": "timestamp", "desc": true } ]
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT timestamp, source_ip, fqdn, request_url, threat_label, threat_score FROM v_grafana_threat_explorer WHERE $__timeFilter(timestamp) ORDER BY timestamp DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Malicious Network Events",
+      "type": "table"
+    }
+  ],
+  "schemaVersion": 40,
+  "tags": ["security", "threat-intel"],
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "Cyber Sentinel - Threat Explorer",
+  "uid": "threat-intel-explorer"
+}

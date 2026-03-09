@@ -1,10 +1,10 @@
-// Switch to the target database
+// Switch to the target database for Cyber Sentinel telemetry
 db = db.getSiblingDB('threat_data_lake');
 
-// Check if collection already exists before creating
-const collectionName = 'virustotal_raw';
+const collectionName = 'threat_data_raw';
 const collections = db.getCollectionNames();
 
+// Check if the collection exists to prevent unnecessary creation steps
 if (!collections.includes(collectionName)) {
     print('Collection ' + collectionName + ' does not exist. Creating...');
     db.createCollection(collectionName);
@@ -12,8 +12,13 @@ if (!collections.includes(collectionName)) {
     print('Collection ' + collectionName + ' already exists. Skipping creation.');
 }
 
-// Indexes in MongoDB are idempotent by default (createIndex only creates if not exists)
-db.virustotal_raw.createIndex({ "resource": 1 }, { unique: true });
-db.virustotal_raw.createIndex({ "scan_date": -1 });
+// Create a compound index for efficient searching by resource and latest scan date
+// resource: 1 (IP, FQDN, or Hash)
+// scan_date: -1 (Descending order to find the most recent scan quickly)
+db.threat_data_raw.createIndex({ "resource": 1, "scan_date": -1 });
 
-print('MongoDB Threat Data Lake initialization check completed successfully.');
+// Create an index for the source provider to speed up filtered queries 
+// (e.g., finding all reports specifically from VirusTotal or ThreatFox)
+db.threat_data_raw.createIndex({ "source_provider": 1 });
+
+print('MongoDB Threat Data Lake initialization completed.');

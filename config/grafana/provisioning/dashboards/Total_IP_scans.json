@@ -83,7 +83,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n    -- Total number of all scans\n    COUNT(id) AS total_scans,\n    \n    -- Total number of scans where positives > 0\n    SUM(CASE WHEN threat_score > 0 THEN 1 ELSE 0 END) AS total_malicious_scans,\n    \n    -- Calculate the percentage of malicious scans\n    (SUM(CASE WHEN threat_score > 0 THEN 1 ELSE 0 END) / COUNT(id)) * 100 AS malicious_percentage\nFROM\n    cyber_intelligence.threat_indicators\nWHERE\n    $__timeFilter(last_scan);",
+          "rawSql": "SELECT \n    total_scans, \n    total_malicious_scans, \n    malicious_percentage \nFROM \n    v_grafana_malicious_stats \nWHERE \n    $__timeFilter(last_scan);",
           "refId": "A",
           "sql": {
             "columns": [
@@ -195,7 +195,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n    -- Calculate the start of the day in UNIX timestamp format\n    UNIX_TIMESTAMP(DATE(last_scan)) AS time_sec,\n    \n    -- Count the number of positive scans (Malicious Scans)\n    SUM(threat_score) AS total_positive\nFROM\n    cyber_intelligence.threat_indicators\nWHERE\n    -- Grafana time range filter\n    $__timeFilter(last_scan)\nGROUP BY\n    time_sec\nORDER BY\n    time_sec ASC;",
+          "rawSql": "SELECT \n    time_sec, \n    total_scans_per_day, \n    total_positives_per_day \nFROM \n    v_grafana_daily_trends \nWHERE \n    $__timeFilter(scan_date)\nORDER BY \n    time_sec ASC;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -299,7 +299,7 @@
       "pluginVersion": "12.3.1",
       "targets": [
         {
-          "dataset": "virus_total",
+          "dataset": "threat_indicators",
           "datasource": {
             "type": "mysql",
             "uid": "ef38gfkoqjvggc"
@@ -363,7 +363,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Virus total scans",
+  "title": "Total IP scans",
   "uid": "df38ilm8v3oxse",
   "version": 6
 }

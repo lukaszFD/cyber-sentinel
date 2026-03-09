@@ -109,7 +109,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n    -- Group by hour (truncate timestamp to the beginning of the hour and convert to UNIX)\n    UNIX_TIMESTAMP(DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00')) AS time_sec,\n    \n    -- Count the total number of DNS queries in that hour\n    COUNT(id) AS total_dns_new_queries_per_hour\nFROM\n    cyber_intelligence.dns_queries\nWHERE\n    $__timeFilter(timestamp)\nGROUP BY\n    time_sec\nORDER BY\n    time_sec ASC;",
+          "rawSql": "SELECT\n    time_sec,\n    total_queries AS total_dns_new_queries_per_hour\nFROM\n    v_grafana_dns_hourly_traffic\nWHERE\n    $__timeFilter(raw_time)\nORDER BY\n    time_sec ASC;",
           "refId": "A",
           "sql": {
             "columns": [
@@ -147,7 +147,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Virus total - queries_per_hour",
+  "title": "Total new DNS queries per hour",
   "uid": "af38n72chkjcwe",
   "version": 4
 }
