@@ -1,0 +1,2686 @@
+[
+  {
+    "resource": "140.82.121.4",
+    "type": "FQDN",
+    "source_provider": "Abuse_URLhaus",
+    "scan_date": "2026-03-10T16:50:50.239Z",
+    "raw_data": {
+      "query_status": "ok",
+      "urlhaus_reference": "https://urlhaus.abuse.ch/host/github.com/",
+      "host": "github.com",
+      "firstseen": "2018-05-18 14:50:13 UTC",
+      "url_count": "6280",
+      "blacklists": {
+        "spamhaus_dbl": "not listed",
+        "surbl": "not listed"
+      },
+      "urls": [
+        {
+          "id": "3793395",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3793395/",
+          "url": "https://github.com/pesanuntukanda/chatgpt-enterprise-premium-unlocked/raw/branch/scourwort/unlocked_chatgpt_premium_enterprise_1.9.zip",
+          "url_status": "online",
+          "date_added": "2026-03-10 06:49:08 UTC",
+          "threat": "malware_download",
+          "reporter": "anonymous",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            " chatgpt",
+            " github",
+            " loader",
+            " zip",
+            "infostealer"
+          ]
+        },
+        {
+          "id": "3792941",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792941/",
+          "url": "https://github.com/CAMUNLOCK/Silentum-Spoofer/raw/refs/heads/main/Silentum_Spoofer.exe",
+          "url_status": "online",
+          "date_added": "2026-03-09 08:34:18 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "BRAT",
+            "exe"
+          ]
+        },
+        {
+          "id": "3792939",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792939/",
+          "url": "https://github.com/exapikemanupgrade83/world-of-tanks-external/releases/download/new/WOT-Cheat-5.2.2-Win64.rar",
+          "url_status": "online",
+          "date_added": "2026-03-09 08:33:25 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "pw-2201",
+            "rar"
+          ]
+        },
+        {
+          "id": "3792908",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792908/",
+          "url": "https://github.com/ddandjohnnyfilms/ftp-client/raw/refs/heads/main/ehex.txt",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:51:13 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader"
+          ]
+        },
+        {
+          "id": "3792906",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792906/",
+          "url": "https://github.com/ddandjohnnyfilms/ftp-client/raw/refs/heads/main/size.txt",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:51:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader"
+          ]
+        },
+        {
+          "id": "3792900",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792900/",
+          "url": "https://github.com/Heaven323555/typescript-sdk/raw/refs/heads/main/src/typescript-sdk-v1.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:40:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792898",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792898/",
+          "url": "https://github.com/jonat-han-tech/ddc-ci-control-bridge/raw/refs/heads/main/bin/ci_ddc_bridge_control_3.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:39:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792895",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792895/",
+          "url": "https://github.com/alyamani18/mcp-agent-bridge/raw/refs/heads/main/config/mcp_agent_bridge_encyclopedial.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:36:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792893",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792893/",
+          "url": "https://github.com/boat077/mail-mcp-bridge/raw/refs/heads/main/imprestable/mail-mcp-bridge-3.6.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:34:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792888",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792888/",
+          "url": "https://github.com/Racersaravanaa/temple-bridge/raw/refs/heads/main/src/temple_bridge_v2.3.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:33:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792887",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792887/",
+          "url": "https://github.com/tkboys123/whatsapp-bridge-mcp/raw/refs/heads/master/bridge/whatsapp_mcp_bridge_washhouse.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:31:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792884",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792884/",
+          "url": "https://github.com/SWIT2025/context-bridge-mcp/raw/refs/heads/main/src/context_bridge_mcp_v3.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:30:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792883",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792883/",
+          "url": "https://github.com/VaibhavDhopte/claudecode-telegram/raw/refs/heads/main/hooks/claudecode-telegram-3.7.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:28:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792879",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792879/",
+          "url": "https://github.com/Betinhocapoeira/mcp-bsl-lsp-bridge/raw/refs/heads/main/directories/mcp-bsl-lsp-bridge-v2.7.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:27:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792877",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792877/",
+          "url": "https://github.com/hari11v/20-God-Tier-AI-Coding-Extensions-Part-1/raw/refs/heads/main/discipular/Coding-Extensions-Part-A-Tier-God-v3.6.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:26:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792875",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792875/",
+          "url": "https://github.com/Itzzwojx/claude-telegram-relay/raw/refs/heads/master/daemon/relay_telegram_claude_2.8.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:23:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792873",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792873/",
+          "url": "https://github.com/evilgrou-tech/drive/raw/refs/heads/main/OneDriveSetup.dat",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:21:18 UTC",
+          "threat": "malware_download",
+          "reporter": "JAMESWT_WT",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": null
+        },
+        {
+          "id": "3792870",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792870/",
+          "url": "https://github.com/jowafanene123-cmyk/mcp-accessibility-bridge/raw/refs/heads/main/examples/playwright-github-tests/tests/mcp-accessibility-bridge-v3.6.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:21:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792863",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792863/",
+          "url": "https://github.com/beamstar/cheatengine-mcp-bridge/raw/refs/heads/main/MCP_Server/cheatengine_bridge_mcp_3.6.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:08:05 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792861",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792861/",
+          "url": "https://github.com/parroalex01/Dumper-FiveM-And-Custom-Launcher/raw/refs/heads/main/dissever/And_Launcher_Dumper_Five_Custom_v2.9.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 07:06:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792849",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792849/",
+          "url": "https://github.com/garatagirassol/Showdown-game-hacks-weapon-upgrade/raw/refs/heads/main/whoo/weapon_game_hacks_upgrade_Showdown_v1.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:37:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792843",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792843/",
+          "url": "https://github.com/Pheap123/Blum-Crypto-Trading-Bot-P2P-Chain-Exchange-blumcrypto-Farm-Hack-Cheat-4l/raw/refs/heads/main/extinguishable/Trading-Crypto-Bot-l-Exchange-Blum-Cheat-Hack-Farm-blumcrypto-Chain-1.4.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:33:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792841",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792841/",
+          "url": "https://github.com/ravigurjar21/PC-Fields-of-Mistria-cheats/raw/refs/heads/main/downcast/Fields_Mistria_cheats_of_P_3.9.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:31:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792836",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792836/",
+          "url": "https://github.com/Shonieeee/code/raw/refs/heads/main/bytes/1024.txt",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:23:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader"
+          ]
+        },
+        {
+          "id": "3792833",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792833/",
+          "url": "https://github.com/Toheed2004/Bloodline-mod-set-jump-height-cheat/raw/refs/heads/main/preumbonal/set_Bloodline_jump_height_cheat_mod_3.8.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:20:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792831",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792831/",
+          "url": "https://github.com/wshaikh2804/Seekers-of-Tokane-Cheat-Crypto-Bot-Auto-Farm-Clicker-Game-Api-Hack/raw/refs/heads/main/Seekers-of-Tokane-Exp/Seekers.Tests/Bot_Api_Cheat_Seekers_of_Game_Farm_Auto_Clicker_Crypto_Hack_Tokane_1.7.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:18:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792829",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792829/",
+          "url": "https://github.com/Admv9/repo-cheat-modpack/raw/refs/heads/main/calculary/modpack_repo_cheat_v3.0.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 06:16:15 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792798",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792798/",
+          "url": "https://github.com/RepublicOfBotv109/llm-engineering-cheatsheet/raw/refs/heads/main/byreman/llm_engineering_cheatsheet_v3.4.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 05:57:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792796",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792796/",
+          "url": "https://github.com/1o-s/Forgotten-Runiverse-Crypto-Bot-Crypto-Game-Auto-Farm-Clicker-Cheat-Api/raw/refs/heads/main/Forgotten-Runiverse-Bot/Utils/Clicker_Cheat_Api_Game_Bot_Auto_Forgotten_Runiverse_Farm_Crypto_lozengeways.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 05:54:13 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792789",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792789/",
+          "url": "https://github.com/zulkox/Atlyss-Cheats/raw/refs/heads/main/neoclassic/Cheats_Atlyss_v2.6.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 05:44:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792786",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792786/",
+          "url": "https://github.com/kolorado772/Pixel-Gun-3D/raw/refs/heads/master/Source-Code/Pixel_Gun_D_v3.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 05:39:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792774",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792774/",
+          "url": "https://github.com/Sacapalabanda/VALORANT-EFI-DRIVVER-Cheat-Hack/raw/refs/heads/main/Hyprism/workflows/Cheat-DRIVVE-Hack-VALORAN-EF-spondaical.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 05:17:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792771",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792771/",
+          "url": "https://github.com/rutvikpatel8854/Ultra-Game-Performance-Kit/raw/refs/heads/main/sibness/Game-Ultra-Performance-Kit-v1.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-09 05:12:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792769",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792769/",
+          "url": "https://github.com/magmaworkerpruner/valorant-external-3.0/releases/download/new/ValorantExternal-3.0-x64.rar",
+          "url_status": "offline",
+          "date_added": "2026-03-09 05:10:16 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": "122211",
+          "tags": [
+            "pw-valorant_git",
+            "rar"
+          ]
+        },
+        {
+          "id": "3792387",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792387/",
+          "url": "https://github.com/even88813-hash/anticheat/raw/refs/heads/main/Scottish/Software_2.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 16:33:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3792382",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3792382/",
+          "url": "https://github.com/Sof1st1s/Astralis-Client/releases/download/1.0.3/Astralis.exe",
+          "url_status": "online",
+          "date_added": "2026-03-08 16:22:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "exe",
+            "ToxicEye"
+          ]
+        },
+        {
+          "id": "3791900",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791900/",
+          "url": "https://github.com/ziznem3269/NullHooks/raw/refs/heads/main/src/dependencies/utilities/console/Null_Hooks_1.8.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:44:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791896",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791896/",
+          "url": "https://github.com/Tien18020/fullyexternal-cs2/raw/refs/heads/main/questorial/cs_fullyexternal_2.9-alpha.3.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:40:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791891",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791891/",
+          "url": "https://github.com/FiberWeaverAssess/CS2-Cheat-2026-External/releases/download/new/External-2.5.1-win64.rar",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:24:19 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "pw-cs2026",
+            "rar"
+          ]
+        },
+        {
+          "id": "3791883",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791883/",
+          "url": "https://github.com/Bond004/Mutah-Gambling-Script-Hack-Cheat-Predictor-Strategies-Keydrop-csmoney-csgoskins/raw/refs/heads/main/biceps/Hack_Predictor_Script_Keydrop_csmoney_csgoskins_Gambling_Strategies_Mutah_Cheat_3.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:15:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791880",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791880/",
+          "url": "https://github.com/lezer10/cheatcode/raw/refs/heads/main/frontend/src/hooks/react-query/threads/Software_2.8.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:08:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791876",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791876/",
+          "url": "https://github.com/UMARi4u2get-cmd/encoder/raw/refs/heads/main/include/encoder1.txt",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:06:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader"
+          ]
+        },
+        {
+          "id": "3791875",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791875/",
+          "url": "https://github.com/YelitzaMarcano79/DOOMQL/raw/refs/heads/main/data/Software_3.8-beta.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 05:04:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791848",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791848/",
+          "url": "https://github.com/sartakayy/cardian/raw/refs/heads/main/docs/Software-2.0.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 04:06:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791849",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791849/",
+          "url": "https://github.com/MasSareh/PokePath-Cheat/raw/refs/heads/MasSareh/unhazarding/Cheat-Path-Poke-2.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 04:06:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791844",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791844/",
+          "url": "https://github.com/Abbashussain5/Hacking-Cheatsheets/raw/refs/heads/main/Responder/Cheatsheets_Hacking_3.4.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:59:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791842",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791842/",
+          "url": "https://github.com/m25s5/Chibi-Clash-Crypto-Bot-Crypto-Game-Auto-Farm-Clicker-Cheat-Token-Hack-Api/raw/refs/heads/main/Chibi-Clash-Exp/ChibiApp/Hack_Auto_Clicker_Chibi_Crypto_Cheat_Clash_Token_Game_Bot_Farm_Api_v1.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:55:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791840",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791840/",
+          "url": "https://github.com/jesusmiguelito/DungeonRampageCheat/raw/refs/heads/master/screenshots/Dungeon_Rampage_Cheat_1.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:54:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791838",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791838/",
+          "url": "https://github.com/AkashAdhikari01/StomCheat/raw/refs/heads/main/stomcheat/src/main/java/me/athulsib/stomcheat/extension/Cheat-Stom-v1.5-beta.5.zip",
+          "url_status": "offline",
+          "date_added": "2026-03-08 03:53:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": "126289",
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791835",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791835/",
+          "url": "https://github.com/yenohjio/teach-JavaScript/raw/refs/heads/main/tanistry/Java-Script-teach-v3.9.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:52:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791833",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791833/",
+          "url": "https://github.com/I-Krushna/typingmonkey/raw/refs/heads/main/assets/Software-1.4.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:50:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791831",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791831/",
+          "url": "https://github.com/ryanpheonix09/Cosmo-Legacy/raw/refs/heads/main/Arctostaphylos/Cosmo-Legacy-2.0-alpha.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:48:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791828",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791828/",
+          "url": "https://github.com/kripansh2006/WaryasSWHE/raw/refs/heads/main/variant/Waryas-SWHE-v2.0-beta.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:46:12 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791826",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791826/",
+          "url": "https://github.com/moelekkkk/Pandas_Notes/raw/refs/heads/main/mainlander/Pandas-Notes-v2.0.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:43:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791822",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791822/",
+          "url": "https://github.com/Coker10/Apeiron-Nft-Bot-Crypto-Cheat-Auto-Farm-Clicker-Game-Api-Hack/raw/refs/heads/main/.vs/Apeiron-Nft-Bot/FileContentIndex/Farm-Bot-Clicker-Crypto-Cheat-Nft-Apeiron-Auto-Game-Api-Hack-v2.1-alpha.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:41:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791820",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791820/",
+          "url": "https://github.com/elroxu/Qorpo-World-Crypto-Bot-Crypto-Game-Auto-Farm-Clicker-Cheat-Token-Hack-Api/raw/refs/heads/main/.vs/Qorpo.World-Robot/Game-Cheat-Token-World-Crypto-Bot-Auto-Clicker-Qorpo-Hack-Farm-Api-v1.0.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:38:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791815",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791815/",
+          "url": "https://github.com/Toroto753/Turan-Gambling-Script-Hack-Cheat-Predictor-Strategies-Keydrop-Skinbaron-hellcase/raw/refs/heads/main/LeapAI.Net/obj/hellcase_Script_Hack_Skinbaron_Gambling_Cheat_Keydrop_Predictor_Turan_Strategies_2.6.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:35:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791809",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791809/",
+          "url": "https://github.com/albeiroval/Wild-Forest-Crypto-Bot-Crypto-Game-Auto-Farm-Clicker-Cheat-Token-Hack-Api/raw/refs/heads/main/sideboard/Bot-Crypto-Farm-Auto-Clicker-Game-Api-Token-Wild-Forest-Hack-Cheat-3.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:21:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791805",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791805/",
+          "url": "https://github.com/iYagamiGTPS4/nginx-cheatsheet/raw/refs/heads/main/Advanced/cheatsheet-nginx-v1.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:14:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791802",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791802/",
+          "url": "https://github.com/gokulakrishnan611/docker-cheatsheet/raw/refs/heads/main/undercrest/cheatsheet-docker-1.4-beta.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:11:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791799",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791799/",
+          "url": "https://github.com/selwanhasnaoui-max/Valorant-Plus-Cheat/raw/refs/heads/main/Valorant%20Plus/drectx/Valorant-Cheat-Plus-2.3.zip",
+          "url_status": "online",
+          "date_added": "2026-03-08 03:06:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791535",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791535/",
+          "url": "https://github.com/adyvot/update/raw/refs/heads/main/0urkspr63xoryra2.exe",
+          "url_status": "online",
+          "date_added": "2026-03-07 16:56:08 UTC",
+          "threat": "malware_download",
+          "reporter": "JAMESWT_WT",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SheetRAT"
+          ]
+        },
+        {
+          "id": "3791532",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791532/",
+          "url": "https://github.com/ademmartinez71-cmd/test/raw/refs/heads/main/XClient.exe",
+          "url_status": "online",
+          "date_added": "2026-03-07 16:56:07 UTC",
+          "threat": "malware_download",
+          "reporter": "anonymous",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "AsyncRAT",
+            "rat",
+            "xworm"
+          ]
+        },
+        {
+          "id": "3791483",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791483/",
+          "url": "https://github.com/shura-gh0st69/peer_hire_hackhazards_25/raw/refs/heads/main/smart_contracts/contracts/utils/hire-peer-hackhazards-3.3-beta.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 15:33:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791480",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791480/",
+          "url": "https://github.com/argadia38/LAMPA-Client/raw/refs/heads/main/Eridanid/LAMP_Client_v2.8.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 15:31:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791479",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791479/",
+          "url": "https://github.com/Thesigma10/revbshell/raw/refs/heads/main/ko/Software-1.6-beta.2.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 15:31:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791472",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791472/",
+          "url": "https://github.com/Skardavid86/rpc/raw/refs/heads/main/packet/1.txt",
+          "url_status": "online",
+          "date_added": "2026-03-07 15:22:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader"
+          ]
+        },
+        {
+          "id": "3791461",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791461/",
+          "url": "https://github.com/nobo8/ROBLOX-MACRO-V3.0.0/raw/refs/heads/main/Language/MACR_ROBLO_v3.0-beta.5.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 14:44:12 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791459",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791459/",
+          "url": "https://github.com/AlHayaza/Codex-Roblox/raw/refs/heads/main/pietism/Roblox_Codex_v2.8-alpha.1.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 14:40:13 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791455",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791455/",
+          "url": "https://github.com/ounissi-meriem/axon/raw/refs/heads/main/src/core/Software-v1.8.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 14:33:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791429",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791429/",
+          "url": "https://github.com/nasernazem/TInjector_Symbi/raw/refs/heads/master/stub/Injector_Symbi_T_v3.3.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 13:50:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791422",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791422/",
+          "url": "https://github.com/weedgirl08/Roblox-Scripts/raw/refs/heads/main/terrifyingly/Roblox_Scripts_2.0.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 13:38:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791419",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791419/",
+          "url": "https://github.com/yurism123/rbxfpsunlocker/raw/refs/heads/main/puppetman/Software_1.4-beta.3.zip",
+          "url_status": "online",
+          "date_added": "2026-03-07 13:36:12 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3791399",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791399/",
+          "url": "https://github.com/bluexxim/FiveM-Spoofer/raw/refs/heads/main/CFXBypass.exe",
+          "url_status": "online",
+          "date_added": "2026-03-07 12:22:11 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "BRAT",
+            "exe"
+          ]
+        },
+        {
+          "id": "3791397",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791397/",
+          "url": "https://github.com/chesst1s/Silentum-Spoofer/raw/refs/heads/main/Silentum_Spoofer.exe",
+          "url_status": "online",
+          "date_added": "2026-03-07 12:21:12 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "BRAT",
+            "exe"
+          ]
+        },
+        {
+          "id": "3791393",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3791393/",
+          "url": "https://github.com/b1tcherss/FiveM-Spoofer/raw/refs/heads/main/CFXBypass.exe",
+          "url_status": "online",
+          "date_added": "2026-03-07 12:19:12 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "BRAT",
+            "exe"
+          ]
+        },
+        {
+          "id": "3788303",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3788303/",
+          "url": "https://github.com/ozaik/testagent/releases/download/w3d/update.3.bat",
+          "url_status": "offline",
+          "date_added": "2026-03-02 04:28:06 UTC",
+          "threat": "malware_download",
+          "reporter": "Bitsight",
+          "larted": "true",
+          "takedown_time_seconds": "119214",
+          "tags": [
+            "dropped-by-amadey",
+            "fbf543"
+          ]
+        },
+        {
+          "id": "3788066",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3788066/",
+          "url": "https://github.com/elitehint/Fluxus-Roblox-Executor/raw/refs/heads/main/Fluxus%20V7.exe",
+          "url_status": "online",
+          "date_added": "2026-03-01 14:28:17 UTC",
+          "threat": "malware_download",
+          "reporter": "burger",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "BRAT",
+            "exe",
+            "SantaStealer"
+          ]
+        },
+        {
+          "id": "3787761",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787761/",
+          "url": "https://github.com/IronTraderKnow/RLoader/raw/refs/heads/main/RLoader.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 23:40:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "pw-500600",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787757",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787757/",
+          "url": "https://github.com/faishal10/backup-files/raw/refs/heads/main/archives/1.rar",
+          "url_status": "offline",
+          "date_added": "2026-02-28 23:31:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": "56161",
+          "tags": [
+            "SmartLoader"
+          ]
+        },
+        {
+          "id": "3787743",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787743/",
+          "url": "https://github.com/drnxx2/Pet-Simulator-99/raw/refs/heads/main/colorful/Simulator_Pet_v3.5.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 22:13:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787741",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787741/",
+          "url": "https://github.com/Karenmoreno12/Pet-Simulator-99/raw/refs/heads/main/subject/Simulator_Pet_2.9.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 22:09:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787739",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787739/",
+          "url": "https://github.com/laouysalma/Roblox-Blind-Shot-Script/raw/refs/heads/main/fosteringly/Roblox_Shot_Blind_Script_v1.6.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 22:08:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787736",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787736/",
+          "url": "https://github.com/r4hm4candy-cyber/Roblox-Knife-Arena-Script/raw/refs/heads/main/Spaniardo/Script-Knife-Arena-Roblox-2.6-alpha.4.zip",
+          "url_status": "offline",
+          "date_added": "2026-02-28 22:03:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": "317046",
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787735",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787735/",
+          "url": "https://github.com/NaoMeEsquece/Blox-Fruits/raw/refs/heads/main/catastrophically/Fruits_Blox_1.1.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 22:02:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787733",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787733/",
+          "url": "https://github.com/zinebaitaddi/Bee-Swarm-Simulator-Script/raw/refs/heads/main/freehearted/Script_Simulator_Swarm_Bee_1.8.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 22:00:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787731",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787731/",
+          "url": "https://github.com/mastercode07/Fisch-Script/raw/refs/heads/main/bungee/Fisch_Script_siper.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 21:58:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787727",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787727/",
+          "url": "https://github.com/Thanh762003/Roblox-Blind-Shot-Script/raw/refs/heads/main/representant/Script-Blind-Roblox-Shot-v3.2.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 21:57:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787291",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787291/",
+          "url": "https://github.com/DreamBursarStretch9/Battlefield-6/releases/download/Latest/Azuro.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 02:30:20 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "pw-azuro",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787288",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787288/",
+          "url": "https://github.com/meneater69/R6-Recoil-Reducer/raw/refs/heads/main/poncelet/Recoil-Reducer-v1.4.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 02:15:13 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787284",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787284/",
+          "url": "https://github.com/IronTraderKnow/World-of-Tanks/raw/refs/heads/main/Loader.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 01:41:09 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "pw-500600",
+            "ScarfaceStealer",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787281",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787281/",
+          "url": "https://github.com/yutangru1114/hwidtool/raw/refs/heads/main/src/Software_1.9-beta.1.zip",
+          "url_status": "online",
+          "date_added": "2026-02-28 01:36:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787207",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787207/",
+          "url": "https://github.com/Andreamana25/Roblox-Delta/raw/refs/heads/master/sparch/Delta_Roblox_v2.3.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:54:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787204",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787204/",
+          "url": "https://github.com/ltaycn301/Roblox-Zenith/raw/refs/heads/master/Gurneyite/Zenith-Roblox-v1.6.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:53:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787201",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787201/",
+          "url": "https://github.com/NusaibaTworat2005/AlyaBot-MD/raw/refs/heads/main/commands/utils/MD-Alya-Bot-v1.9.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:47:05 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787195",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787195/",
+          "url": "https://github.com/Sammy18032100/QuantDinger/raw/refs/heads/main/quantdinger_vue/src/mock/services/Dinger_Quant_v2.5.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:28:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787192",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787192/",
+          "url": "https://github.com/hamigua8964/Luna/raw/refs/heads/main/Executor/Resources/Software-v3.5.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:25:08 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787189",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787189/",
+          "url": "https://github.com/tahahosseini8/untaken/raw/refs/heads/main/acidoproteolytic/Software-v2.0-beta.3.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:24:07 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787186",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787186/",
+          "url": "https://github.com/franklainkoloko/Roblox-multi-tool/raw/refs/heads/main/data/Roblox_multi_tool_v2.4.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:22:06 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        },
+        {
+          "id": "3787185",
+          "urlhaus_reference": "https://urlhaus.abuse.ch/url/3787185/",
+          "url": "https://github.com/hamzaifan789/ROBLOX-MACRO-V3.0.0/raw/refs/heads/main/Language/ROBLO_MACR_v3.3-alpha.2.zip",
+          "url_status": "online",
+          "date_added": "2026-02-27 22:21:10 UTC",
+          "threat": "malware_download",
+          "reporter": "tcains1",
+          "larted": "true",
+          "takedown_time_seconds": null,
+          "tags": [
+            "SmartLoader",
+            "zip"
+          ]
+        }
+      ]
+    },
+    "_id": "69b04bea1eeaca379eaadfbb",
+    "id": "69b04bea1eeaca379eaadfbb"
+  },
+  {
+    "resource": "140.82.121.4",
+    "type": "FQDN",
+    "source_provider": "Abuse_ThreatFox",
+    "scan_date": "2026-03-10T16:50:53.709Z",
+    "raw_data": {
+      "query_status": "no_result",
+      "data": "Your search did not yield any results"
+    },
+    "_id": "69b04bed1eeaca379eaadfbc",
+    "id": "69b04bed1eeaca379eaadfbc"
+  },
+  {
+    "resource": "140.82.121.4",
+    "type": "IP",
+    "source_provider": "VirusTotal",
+    "scan_date": "2026-03-10T16:50:54.321Z",
+    "raw_data": {
+      "id": "140.82.121.4",
+      "type": "ip_address",
+      "links": {
+        "self": "https://www.virustotal.com/api/v3/ip_addresses/140.82.121.4"
+      },
+      "attributes": {
+        "whois_date": 1771089382,
+        "last_modification_date": 1773160640,
+        "last_https_certificate": {
+          "cert_signature": {
+            "signature_algorithm": "1.2.840.10045.4.3.2",
+            "signature": "304402202cc4c3aa0d9ffbe97bef9c358c1cbd952c0b9ff735824fdb037c61815a3eb10f022058a45231e250188e90f242c7a4b3460215ca7347274b2f653f1799e7e15ef4b0"
+          },
+          "extensions": {
+            "authority_key_identifier": {
+              "keyid": "1799a804c16fe42d70a80a103d03d3e91ab82663"
+            },
+            "subject_key_identifier": "081382d104b97d006ba2b1812283c7c7dc4f8cdc",
+            "key_usage": [
+              "digitalSignature"
+            ],
+            "CA": false,
+            "extended_key_usage": [
+              "serverAuth"
+            ],
+            "certificate_policies": [
+              "1.3.6.1.4.1.6449.1.2.2.7",
+              "2.23.140.1.2.1"
+            ],
+            "ca_information_access": {
+              "CA Issuers": "http://crt.sectigo.com/SectigoPublicServerAuthenticationCADVE36.crt",
+              "OCSP": "http://ocsp.sectigo.com"
+            },
+            "1.3.6.1.4.1.11129.2.4.2": "0481f100ef0076000e5794bcf3aea93e331b2c9907b3f790df9bc23d713225dd",
+            "subject_alternative_name": [
+              "github.com",
+              "www.github.com"
+            ]
+          },
+          "validity": {
+            "not_after": "2026-06-03 23:59:59",
+            "not_before": "2026-03-06 00:00:00"
+          },
+          "size": 1007,
+          "version": "V3",
+          "public_key": {
+            "algorithm": "EC",
+            "ec": {
+              "oid": "secp256r1",
+              "pub": "3059301306072a8648ce3d020106082a8648ce3d030107034200043d4a7df8befb3de46c732cc503e717eb76469e45c6d56cb2412a32c89ae579eb5a484d05c9422db2636b7ac275c41949e97a273307f70826659f127c382e565a"
+            }
+          },
+          "thumbprint_sha256": "9716d39441ca651c51be78e969ca385ec213ec17715b8c91f01ee652f90fc62c",
+          "thumbprint": "ab58ea128ba92ca69a31b36b4e545653eed2a6cf",
+          "serial_number": "1dc289c1eadafb04e9d1cf53d5d72253",
+          "issuer": {
+            "C": "GB",
+            "O": "Sectigo Limited",
+            "CN": "Sectigo Public Server Authentication CA DV E36"
+          },
+          "subject": {
+            "CN": "github.com"
+          }
+        },
+        "regional_internet_registry": "RIPE NCC",
+        "country": "DE",
+        "continent": "EU",
+        "jarm": "27d27d27d00027d00041d41d000000aa5feb68b57d31b6dc713b6917a988e3",
+        "network": "140.82.112.0/20",
+        "total_votes": {
+          "harmless": 0,
+          "malicious": 0
+        },
+        "last_analysis_stats": {
+          "malicious": 2,
+          "suspicious": 0,
+          "undetected": 34,
+          "harmless": 58,
+          "timeout": 0
+        },
+        "last_analysis_results": {
+          "Acronis": {
+            "method": "blacklist",
+            "engine_name": "Acronis",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "0xSI_f33d": {
+            "method": "blacklist",
+            "engine_name": "0xSI_f33d",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Abusix": {
+            "method": "blacklist",
+            "engine_name": "Abusix",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ADMINUSLabs": {
+            "method": "blacklist",
+            "engine_name": "ADMINUSLabs",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Axur": {
+            "method": "blacklist",
+            "engine_name": "Axur",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "ChainPatrol": {
+            "method": "blacklist",
+            "engine_name": "ChainPatrol",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Criminal IP": {
+            "method": "blacklist",
+            "engine_name": "Criminal IP",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "AILabs (MONITORAPP)": {
+            "method": "blacklist",
+            "engine_name": "AILabs (MONITORAPP)",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "AlienVault": {
+            "method": "blacklist",
+            "engine_name": "AlienVault",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "alphaMountain.ai": {
+            "method": "blacklist",
+            "engine_name": "alphaMountain.ai",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "AlphaSOC": {
+            "method": "blacklist",
+            "engine_name": "AlphaSOC",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Antiy-AVL": {
+            "method": "blacklist",
+            "engine_name": "Antiy-AVL",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ArcSight Threat Intelligence": {
+            "method": "blacklist",
+            "engine_name": "ArcSight Threat Intelligence",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "AutoShun": {
+            "method": "blacklist",
+            "engine_name": "AutoShun",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "benkow.cc": {
+            "method": "blacklist",
+            "engine_name": "benkow.cc",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Bfore.Ai PreCrime": {
+            "method": "blacklist",
+            "engine_name": "Bfore.Ai PreCrime",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "BitDefender": {
+            "method": "blacklist",
+            "engine_name": "BitDefender",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Bkav": {
+            "method": "blacklist",
+            "engine_name": "Bkav",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Blueliv": {
+            "method": "blacklist",
+            "engine_name": "Blueliv",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Certego": {
+            "method": "blacklist",
+            "engine_name": "Certego",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Chong Lua Dao": {
+            "method": "blacklist",
+            "engine_name": "Chong Lua Dao",
+            "category": "malicious",
+            "result": "malicious"
+          },
+          "CINS Army": {
+            "method": "blacklist",
+            "engine_name": "CINS Army",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Cluster25": {
+            "method": "blacklist",
+            "engine_name": "Cluster25",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "CRDF": {
+            "method": "blacklist",
+            "engine_name": "CRDF",
+            "category": "malicious",
+            "result": "malicious"
+          },
+          "CSIS Security Group": {
+            "method": "blacklist",
+            "engine_name": "CSIS Security Group",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Snort IP sample list": {
+            "method": "blacklist",
+            "engine_name": "Snort IP sample list",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "CMC Threat Intelligence": {
+            "method": "blacklist",
+            "engine_name": "CMC Threat Intelligence",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Cyan": {
+            "method": "blacklist",
+            "engine_name": "Cyan",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Cyble": {
+            "method": "blacklist",
+            "engine_name": "Cyble",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "CyRadar": {
+            "method": "blacklist",
+            "engine_name": "CyRadar",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "DNS8": {
+            "method": "blacklist",
+            "engine_name": "DNS8",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Dr.Web": {
+            "method": "blacklist",
+            "engine_name": "Dr.Web",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Ermes": {
+            "method": "blacklist",
+            "engine_name": "Ermes",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "ESET": {
+            "method": "blacklist",
+            "engine_name": "ESET",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ESTsecurity": {
+            "method": "blacklist",
+            "engine_name": "ESTsecurity",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "EmergingThreats": {
+            "method": "blacklist",
+            "engine_name": "EmergingThreats",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Emsisoft": {
+            "method": "blacklist",
+            "engine_name": "Emsisoft",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Forcepoint ThreatSeeker": {
+            "method": "blacklist",
+            "engine_name": "Forcepoint ThreatSeeker",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Fortinet": {
+            "method": "blacklist",
+            "engine_name": "Fortinet",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "G-Data": {
+            "method": "blacklist",
+            "engine_name": "G-Data",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "GCP Abuse Intelligence": {
+            "method": "blacklist",
+            "engine_name": "GCP Abuse Intelligence",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Google Safebrowsing": {
+            "method": "blacklist",
+            "engine_name": "Google Safebrowsing",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "GreenSnow": {
+            "method": "blacklist",
+            "engine_name": "GreenSnow",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "GreyNoise": {
+            "method": "blacklist",
+            "engine_name": "GreyNoise",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Gridinsoft": {
+            "method": "blacklist",
+            "engine_name": "Gridinsoft",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Guardpot": {
+            "method": "blacklist",
+            "engine_name": "Guardpot",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Heimdal Security": {
+            "method": "blacklist",
+            "engine_name": "Heimdal Security",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Hunt.io Intelligence": {
+            "method": "blacklist",
+            "engine_name": "Hunt.io Intelligence",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "IPsum": {
+            "method": "blacklist",
+            "engine_name": "IPsum",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Juniper Networks": {
+            "method": "blacklist",
+            "engine_name": "Juniper Networks",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Kaspersky": {
+            "method": "blacklist",
+            "engine_name": "Kaspersky",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Lionic": {
+            "method": "blacklist",
+            "engine_name": "Lionic",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Lumu": {
+            "method": "blacklist",
+            "engine_name": "Lumu",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "MalwarePatrol": {
+            "method": "blacklist",
+            "engine_name": "MalwarePatrol",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "MalwareURL": {
+            "method": "blacklist",
+            "engine_name": "MalwareURL",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Malwared": {
+            "method": "blacklist",
+            "engine_name": "Malwared",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Mimecast": {
+            "method": "blacklist",
+            "engine_name": "Mimecast",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Netcraft": {
+            "method": "blacklist",
+            "engine_name": "Netcraft",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "OpenPhish": {
+            "method": "blacklist",
+            "engine_name": "OpenPhish",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Phishing Database": {
+            "method": "blacklist",
+            "engine_name": "Phishing Database",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "PhishFort": {
+            "method": "blacklist",
+            "engine_name": "PhishFort",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "PhishLabs": {
+            "method": "blacklist",
+            "engine_name": "PhishLabs",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Phishtank": {
+            "method": "blacklist",
+            "engine_name": "Phishtank",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "PREBYTES": {
+            "method": "blacklist",
+            "engine_name": "PREBYTES",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "PrecisionSec": {
+            "method": "blacklist",
+            "engine_name": "PrecisionSec",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Quick Heal": {
+            "method": "blacklist",
+            "engine_name": "Quick Heal",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Quttera": {
+            "method": "blacklist",
+            "engine_name": "Quttera",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "SafeToOpen": {
+            "method": "blacklist",
+            "engine_name": "SafeToOpen",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Sansec eComscan": {
+            "method": "blacklist",
+            "engine_name": "Sansec eComscan",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Scantitan": {
+            "method": "blacklist",
+            "engine_name": "Scantitan",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "SCUMWARE.org": {
+            "method": "blacklist",
+            "engine_name": "SCUMWARE.org",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Seclookup": {
+            "method": "blacklist",
+            "engine_name": "Seclookup",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "SecureBrain": {
+            "method": "blacklist",
+            "engine_name": "SecureBrain",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "SOCRadar": {
+            "method": "blacklist",
+            "engine_name": "SOCRadar",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Sophos": {
+            "method": "blacklist",
+            "engine_name": "Sophos",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Spam404": {
+            "method": "blacklist",
+            "engine_name": "Spam404",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "StopForumSpam": {
+            "method": "blacklist",
+            "engine_name": "StopForumSpam",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Sucuri SiteCheck": {
+            "method": "blacklist",
+            "engine_name": "Sucuri SiteCheck",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ThreatHive": {
+            "method": "blacklist",
+            "engine_name": "ThreatHive",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Trustwave": {
+            "method": "blacklist",
+            "engine_name": "Trustwave",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "URLhaus": {
+            "method": "blacklist",
+            "engine_name": "URLhaus",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "URLQuery": {
+            "method": "blacklist",
+            "engine_name": "URLQuery",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "Viettel Threat Intelligence": {
+            "method": "blacklist",
+            "engine_name": "Viettel Threat Intelligence",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "VIPRE": {
+            "method": "blacklist",
+            "engine_name": "VIPRE",
+            "category": "undetected",
+            "result": "unrated"
+          },
+          "VX Vault": {
+            "method": "blacklist",
+            "engine_name": "VX Vault",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ViriBack": {
+            "method": "blacklist",
+            "engine_name": "ViriBack",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Webroot": {
+            "method": "blacklist",
+            "engine_name": "Webroot",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Yandex Safebrowsing": {
+            "method": "blacklist",
+            "engine_name": "Yandex Safebrowsing",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ZeroCERT": {
+            "method": "blacklist",
+            "engine_name": "ZeroCERT",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "desenmascara.me": {
+            "method": "blacklist",
+            "engine_name": "desenmascara.me",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "malwares.com URL checker": {
+            "method": "blacklist",
+            "engine_name": "malwares.com URL checker",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "securolytics": {
+            "method": "blacklist",
+            "engine_name": "securolytics",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "Xcitium Verdict Cloud": {
+            "method": "blacklist",
+            "engine_name": "Xcitium Verdict Cloud",
+            "category": "harmless",
+            "result": "clean"
+          },
+          "ZeroFox": {
+            "method": "blacklist",
+            "engine_name": "ZeroFox",
+            "category": "undetected",
+            "result": "unrated"
+          }
+        },
+        "whois": "inetnum: 140.79.0.0 - 140.83.255.255\nnetname: NON-RIPE-NCC-MANAGED-ADDRESS-BLOCK\ndescr: IPv4 address block not managed by the RIPE NCC\nremarks: ------------------------------------------------------\nremarks:\nremarks: For registration information,\nremarks: you can consult the following sources:\nremarks:\nremarks: IANA\nremarks: http://www.iana.org/assignments/ipv4-address-space\nremarks: http://www.iana.org/assignments/iana-ipv4-special-registry\nremarks: http://www.iana.org/assignments/ipv4-recovered-address-space\nremarks:\nremarks: AFRINIC (Africa)\nremarks: http://www.afrinic.net/ whois.afrinic.net\nremarks:\nremarks: APNIC (Asia Pacific)\nremarks: http://www.apnic.net/ whois.apnic.net\nremarks:\nremarks: ARIN (Northern America)\nremarks: http://www.arin.net/ whois.arin.net\nremarks:\nremarks: LACNIC (Latin America and the Carribean)\nremarks: http://www.lacnic.net/ whois.lacnic.net\nremarks:\nremarks: ------------------------------------------------------\ncountry: EU # Country is really world wide\nadmin-c: IANA1-RIPE\ntech-c: IANA1-RIPE\nstatus: ALLOCATED UNSPECIFIED\nmnt-by: RIPE-NCC-HM-MNT\ncreated: 2019-01-07T10:45:13Z\nlast-modified: 2019-01-07T10:45:13Z\nsource: RIPE\nrole: Internet Assigned Numbers Authority\naddress: see http://www.iana.org.\nadmin-c: IANA1-RIPE\ntech-c: IANA1-RIPE\nnic-hdl: IANA1-RIPE\nremarks: For more information on IANA services\nremarks: go to IANA web site at http://www.iana.org.\nmnt-by: RIPE-NCC-MNT\ncreated: 1970-01-01T00:00:00Z\nlast-modified: 2001-09-22T09:31:27Z\nsource: RIPE # Filtered\n",
+        "asn": 36459,
+        "as_owner": "GitHub, Inc.",
+        "rdap": {
+          "object_class_name": "ip network",
+          "handle": "NET-140-82-112-0-1",
+          "start_address": "140.82.112.0",
+          "end_address": "140.82.127.255",
+          "ip_version": "v4",
+          "name": "GITHU",
+          "type": "DIRECT ALLOCATION",
+          "parent_handle": "NET-140-0-0-0-0",
+          "status": [
+            "active"
+          ],
+          "links": [
+            {
+              "href": "https://rdap.arin.net/registry/ip/140.82.112.0",
+              "rel": "self",
+              "type": "application/rdap+json",
+              "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+              "title": "",
+              "media": "",
+              "href_lang": []
+            },
+            {
+              "href": "https://whois.arin.net/rest/net/NET-140-82-112-0-1",
+              "rel": "alternate",
+              "type": "application/xml",
+              "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+              "title": "",
+              "media": "",
+              "href_lang": []
+            }
+          ],
+          "notices": [
+            {
+              "title": "Terms of Service",
+              "description": [
+                "By using the ARIN RDAP/Whois service, you are agreeing to the RDAP/Whois Terms of Use"
+              ],
+              "links": [
+                {
+                  "href": "https://www.arin.net/resources/registry/whois/tou/",
+                  "rel": "terms-of-service",
+                  "type": "text/html",
+                  "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                  "title": "",
+                  "media": "",
+                  "href_lang": []
+                }
+              ],
+              "type": ""
+            },
+            {
+              "title": "Whois Inaccuracy Reporting",
+              "description": [
+                "If you see inaccuracies in the results, please visit: "
+              ],
+              "links": [
+                {
+                  "href": "https://www.arin.net/resources/registry/whois/inaccuracy_reporting/",
+                  "rel": "inaccuracy-report",
+                  "type": "text/html",
+                  "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                  "title": "",
+                  "media": "",
+                  "href_lang": []
+                }
+              ],
+              "type": ""
+            },
+            {
+              "title": "Copyright Notice",
+              "description": [
+                "Copyright 1997-2026, American Registry for Internet Numbers, Ltd."
+              ],
+              "links": [],
+              "type": ""
+            }
+          ],
+          "events": [
+            {
+              "event_action": "last changed",
+              "event_date": "2021-12-14T20:28:48-05:00",
+              "event_actor": "",
+              "links": []
+            },
+            {
+              "event_action": "registration",
+              "event_date": "2018-04-25T15:34:18-04:00",
+              "event_actor": "",
+              "links": []
+            }
+          ],
+          "rdap_conformance": [
+            "nro_rdap_profile_0",
+            "rdap_level_0",
+            "cidr0",
+            "arin_originas0"
+          ],
+          "entities": [
+            {
+              "object_class_name": "entity",
+              "handle": "GITHU",
+              "vcard_array": [
+                {
+                  "name": "version",
+                  "type": "text",
+                  "values": [
+                    "4.0"
+                  ],
+                  "parameters": {}
+                },
+                {
+                  "name": "fn",
+                  "type": "text",
+                  "values": [
+                    "GitHub, Inc."
+                  ],
+                  "parameters": {}
+                },
+                {
+                  "name": "adr",
+                  "parameters": {
+                    "label": [
+                      "88 Colin P Kelly Jr Street\nSan Francisco\nCA\n94107\nUnited States"
+                    ]
+                  },
+                  "type": "text",
+                  "values": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                  ]
+                },
+                {
+                  "name": "kind",
+                  "type": "text",
+                  "values": [
+                    "org"
+                  ],
+                  "parameters": {}
+                }
+              ],
+              "roles": [
+                "registrant"
+              ],
+              "entities": [
+                {
+                  "object_class_name": "entity",
+                  "handle": "GITHU-ARIN",
+                  "vcard_array": [
+                    {
+                      "name": "version",
+                      "type": "text",
+                      "values": [
+                        "4.0"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "adr",
+                      "parameters": {
+                        "label": [
+                          "88 Colin P Kelly Jr St\nSan Francisco\nCA\n94107\nUnited States"
+                        ]
+                      },
+                      "type": "text",
+                      "values": [
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        ""
+                      ]
+                    },
+                    {
+                      "name": "fn",
+                      "type": "text",
+                      "values": [
+                        "GitHub Ops"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "org",
+                      "type": "text",
+                      "values": [
+                        "GitHub Ops"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "kind",
+                      "type": "text",
+                      "values": [
+                        "group"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "email",
+                      "type": "text",
+                      "values": [
+                        "hostmaster@github.com"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "tel",
+                      "parameters": {
+                        "type": [
+                          "work",
+                          "voice"
+                        ]
+                      },
+                      "type": "text",
+                      "values": [
+                        "+1-415-735-4488"
+                      ]
+                    }
+                  ],
+                  "roles": [
+                    "administrative",
+                    "noc",
+                    "technical"
+                  ],
+                  "remarks": [
+                    {
+                      "title": "Registration Comments",
+                      "description": [
+                        "GitHub Network Operations"
+                      ],
+                      "links": [],
+                      "type": ""
+                    },
+                    {
+                      "title": "Unvalidated POC",
+                      "description": [
+                        "ARIN has attempted to validate the data for this POC, but has received no response from the POC since 2023-08-01"
+                      ],
+                      "links": [],
+                      "type": ""
+                    }
+                  ],
+                  "links": [
+                    {
+                      "href": "https://rdap.arin.net/registry/entity/GITHU-ARIN",
+                      "rel": "self",
+                      "type": "application/rdap+json",
+                      "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                      "title": "",
+                      "media": "",
+                      "href_lang": []
+                    },
+                    {
+                      "href": "https://whois.arin.net/rest/poc/GITHU-ARIN",
+                      "rel": "alternate",
+                      "type": "application/xml",
+                      "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                      "title": "",
+                      "media": "",
+                      "href_lang": []
+                    }
+                  ],
+                  "events": [
+                    {
+                      "event_action": "last changed",
+                      "event_date": "2022-08-01T07:18:17-04:00",
+                      "event_actor": "",
+                      "links": []
+                    },
+                    {
+                      "event_action": "registration",
+                      "event_date": "2012-10-22T15:41:49-04:00",
+                      "event_actor": "",
+                      "links": []
+                    }
+                  ],
+                  "port43": "whois.arin.net",
+                  "public_ids": [],
+                  "entities": [],
+                  "as_event_actor": [],
+                  "status": [],
+                  "networks": [],
+                  "autnums": [],
+                  "url": "",
+                  "lang": "",
+                  "rdap_conformance": []
+                },
+                {
+                  "object_class_name": "entity",
+                  "handle": "GITHU1-ARIN",
+                  "vcard_array": [
+                    {
+                      "name": "version",
+                      "type": "text",
+                      "values": [
+                        "4.0"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "adr",
+                      "parameters": {
+                        "label": [
+                          "88 Colin P Kelly Jr Street\nSan Francisco\nCA\n94104\nUnited States"
+                        ]
+                      },
+                      "type": "text",
+                      "values": [
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        ""
+                      ]
+                    },
+                    {
+                      "name": "fn",
+                      "type": "text",
+                      "values": [
+                        "GitHub Abuse"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "org",
+                      "type": "text",
+                      "values": [
+                        "GitHub Abuse"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "kind",
+                      "type": "text",
+                      "values": [
+                        "group"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "email",
+                      "type": "text",
+                      "values": [
+                        "noc@github.com"
+                      ],
+                      "parameters": {}
+                    },
+                    {
+                      "name": "tel",
+                      "parameters": {
+                        "type": [
+                          "work",
+                          "voice"
+                        ]
+                      },
+                      "type": "text",
+                      "values": [
+                        "+1-415-857-5430"
+                      ]
+                    }
+                  ],
+                  "roles": [
+                    "abuse"
+                  ],
+                  "links": [
+                    {
+                      "href": "https://rdap.arin.net/registry/entity/GITHU1-ARIN",
+                      "rel": "self",
+                      "type": "application/rdap+json",
+                      "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                      "title": "",
+                      "media": "",
+                      "href_lang": []
+                    },
+                    {
+                      "href": "https://whois.arin.net/rest/poc/GITHU1-ARIN",
+                      "rel": "alternate",
+                      "type": "application/xml",
+                      "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                      "title": "",
+                      "media": "",
+                      "href_lang": []
+                    }
+                  ],
+                  "events": [
+                    {
+                      "event_action": "last changed",
+                      "event_date": "2025-02-18T15:36:34-05:00",
+                      "event_actor": "",
+                      "links": []
+                    },
+                    {
+                      "event_action": "registration",
+                      "event_date": "2013-01-03T12:26:15-05:00",
+                      "event_actor": "",
+                      "links": []
+                    }
+                  ],
+                  "status": [
+                    "validated"
+                  ],
+                  "port43": "whois.arin.net",
+                  "public_ids": [],
+                  "entities": [],
+                  "remarks": [],
+                  "as_event_actor": [],
+                  "networks": [],
+                  "autnums": [],
+                  "url": "",
+                  "lang": "",
+                  "rdap_conformance": []
+                }
+              ],
+              "remarks": [
+                {
+                  "title": "Registration Comments",
+                  "description": [
+                    "https://github.com\r",
+                    "Please contact us directly for matters pertaining to abuse.\r",
+                    "Urgent matters including DDoS are handled 24x7."
+                  ],
+                  "links": [],
+                  "type": ""
+                }
+              ],
+              "links": [
+                {
+                  "href": "https://rdap.arin.net/registry/entity/GITHU",
+                  "rel": "self",
+                  "type": "application/rdap+json",
+                  "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                  "title": "",
+                  "media": "",
+                  "href_lang": []
+                },
+                {
+                  "href": "https://whois.arin.net/rest/org/GITHU",
+                  "rel": "alternate",
+                  "type": "application/xml",
+                  "value": "https://rdap.arin.net/registry/ip/140.82.121.4",
+                  "title": "",
+                  "media": "",
+                  "href_lang": []
+                }
+              ],
+              "events": [
+                {
+                  "event_action": "last changed",
+                  "event_date": "2024-11-25T11:09:46-05:00",
+                  "event_actor": "",
+                  "links": []
+                },
+                {
+                  "event_action": "registration",
+                  "event_date": "2012-10-22T14:48:45-04:00",
+                  "event_actor": "",
+                  "links": []
+                }
+              ],
+              "port43": "whois.arin.net",
+              "public_ids": [],
+              "as_event_actor": [],
+              "status": [],
+              "networks": [],
+              "autnums": [],
+              "url": "",
+              "lang": "",
+              "rdap_conformance": []
+            }
+          ],
+          "port43": "whois.arin.net",
+          "cidr0_cidrs": [
+            {
+              "v4prefix": "140.82.112.0",
+              "length": 20,
+              "v6prefix": ""
+            }
+          ],
+          "country": "",
+          "arin_originas0_originautnums": [],
+          "remarks": []
+        },
+        "tags": [],
+        "reputation": 0,
+        "last_https_certificate_date": 1773160623,
+        "last_analysis_date": 1773156239
+      }
+    },
+    "_id": "69b04bee1eeaca379eaadfbd",
+    "id": "69b04bee1eeaca379eaadfbd"
+  }
+]
