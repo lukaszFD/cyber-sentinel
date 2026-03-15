@@ -95,7 +95,6 @@ cyber-sentinel/
 │   │       └── datasources/        # Automatic MySQL/Mongo connection setup
 │   ├── mongo/
 │   │   └── init_mongo.js           # Threat Data Lake initialization script
-│   │ 
 │   ├── mysql/
 │   │   ├── db_deployment.sql           # Master initialization script (Schema, Users, Privileges)
 │   │   ├── table/                      # Core relational table definitions
@@ -114,6 +113,9 @@ cyber-sentinel/
 │   │       ├── v_grafana_threat_explorer.sql  # Deep-dive view for security event investigation
 │   │       ├── v_latest_threat_reports.sql    # Filters the most recent scan per unique indicator
 │   │       └── v_pending_analysis.sql         # Work queue for n8n to identify non-scanned observables
+│   ├── n8n/                    
+│   │   └── workflows/           
+│   │       └── Automated Domain & IP Reputation Guard with HashiCorp Vault.json
 │   ├── pihole/
 │   │   └── adlists.txt             # Pre-configured blocklists for DNS filtering
 │   └── unbound/
