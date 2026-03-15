@@ -66,23 +66,37 @@ CREATE TABLE IF NOT EXISTS cyber_intelligence.dns_queries (
     INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Main table for threat indicators
--- Linked to dns_queries and dictionaries via Foreign Keys
+CREATE TABLE IF NOT EXISTS cyber_intelligence.ai_analysis_results (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    threat_score INT NOT NULL,
+    threat_label VARCHAR(50),
+    verdict_summary_en TEXT,
+    analysis_pl TEXT,
+    CONSTRAINT fk_threat_level_results FOREIGN KEY (threat_score) REFERENCES cyber_intelligence.dic_threat_levels(score)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS cyber_intelligence.threat_indicators (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    dns_query_id INT NOT NULL, -- FK to dns_queries table
-    type_id INT NOT NULL,      -- FK to dic_indicator_types
-    source_id INT NOT NULL,    -- FK to dic_source_providers
-    threat_score INT NOT NULL, -- FK to dic_threat_levels
-    verdict_summary TEXT,      -- Summary of the scan result
-    mongo_ref_id VARCHAR(50),  -- Reference to raw data in MongoDB
+    dns_query_id INT NOT NULL,
+    type_id INT NOT NULL,
+    analysis_result_id INT NOT NULL,
     last_scan DATETIME DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_dns_query FOREIGN KEY (dns_query_id) REFERENCES cyber_intelligence.dns_queries(id),
     CONSTRAINT fk_indicator_type FOREIGN KEY (type_id) REFERENCES cyber_intelligence.dic_indicator_types(id),
-    CONSTRAINT fk_source_provider FOREIGN KEY (source_id) REFERENCES cyber_intelligence.dic_source_providers(id),
-    CONSTRAINT fk_threat_level FOREIGN KEY (threat_score) REFERENCES cyber_intelligence.dic_threat_levels(score)
+    CONSTRAINT fk_analysis_result FOREIGN KEY (analysis_result_id) REFERENCES cyber_intelligence.ai_analysis_results(id)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS cyber_intelligence.threat_indicator_details (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    indicator_id INT NOT NULL,
+    source_id INT NOT NULL,
+    mongo_ref_id VARCHAR(50),  -- Reference to raw data in MongoDB
+    FOREIGN KEY (indicator_id) REFERENCES cyber_intelligence.threat_indicators(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_id) REFERENCES cyber_intelligence.dic_source_providers(id)
+);
+
+CREATE INDEX idx_mongo_ref ON cyber_intelligence.threat_indicator_details(mongo_ref_id);
 
 -- Universal table for network events (IDS/IPS, Scapy, Sniffers)
 -- Stores specific actions like clicked URLs, downloaded files, or triggered alerts
@@ -127,16 +141,22 @@ WHERE ti.id IS NULL
 
 -- View to get only the most recent scan per DNS query
 CREATE OR REPLACE VIEW cyber_intelligence.v_latest_threat_reports AS
-SELECT ti.*
+SELECT
+    ti.id,
+    ti.dns_query_id,
+    ti.type_id,
+    ti.analysis_result_id,
+    ti.last_scan,
+    ar.threat_score,
+    ar.verdict_summary_en,
+    ar.analysis_pl
 FROM cyber_intelligence.threat_indicators ti
+JOIN cyber_intelligence.ai_analysis_results ar ON ti.analysis_result_id = ar.id
 INNER JOIN (
-    -- Group by dns_query_id and source_id to get latest scan per provider
-    SELECT dns_query_id, source_id, MAX(last_scan) as max_scan
+    SELECT dns_query_id, MAX(last_scan) as max_scan
     FROM cyber_intelligence.threat_indicators
-    GROUP BY dns_query_id, source_id
-) latest ON ti.dns_query_id = latest.dns_query_id
-         AND ti.source_id = latest.source_id
-         AND ti.last_scan = latest.max_scan;
+    GROUP BY dns_query_id
+) latest ON ti.dns_query_id = latest.dns_query_id AND ti.last_scan = latest.max_scan;
 
 -- View for global malicious scan statistics
 CREATE OR REPLACE VIEW cyber_intelligence.v_grafana_malicious_stats AS
@@ -184,12 +204,15 @@ SELECT
     dq.domain AS fqdn,
     ne.source_ip,
     ne.request_url,
-    sp.name AS provider,
+    (SELECT GROUP_CONCAT(sp.name SEPARATOR ', ')
+     FROM cyber_intelligence.threat_indicator_details tid
+     JOIN cyber_intelligence.dic_source_providers sp ON tid.source_id = sp.id
+     WHERE tid.indicator_id = ti.id) AS providers,
     tl.description AS threat_label,
-    ti.threat_score
+    ar.threat_score
 FROM cyber_intelligence.network_events ne
 JOIN cyber_intelligence.dns_queries dq ON ne.dns_query_id = dq.id
 JOIN cyber_intelligence.threat_indicators ti ON ne.threat_indicator_id = ti.id
-JOIN cyber_intelligence.dic_source_providers sp ON ti.source_id = sp.id
-JOIN cyber_intelligence.dic_threat_levels tl ON ti.threat_score = tl.score
-WHERE ti.threat_score > 5; -- Only suspicious or malicious
+JOIN cyber_intelligence.ai_analysis_results ar ON ti.analysis_result_id = ar.id
+JOIN cyber_intelligence.dic_threat_levels tl ON ar.threat_score = tl.score
+WHERE ar.threat_score > 5;

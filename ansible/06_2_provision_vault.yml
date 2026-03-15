@@ -62,7 +62,7 @@
         status_code: [200, 204]
       no_log: true
 
-    - name: Task 2.2 - Write Abuse API Token
+    - name: Task 2.3 - Write Abuse API Token
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/abuse/api-key"
         method: POST
@@ -72,7 +72,7 @@
         status_code: [200, 204]
       no_log: true
 
-    - name: Task 2.2 - Write Grafana API Token
+    - name: Task 2.4 - Write Grafana API Token
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/grafana/api-key"
         method: POST
@@ -82,7 +82,17 @@
         status_code: [200, 204]
       no_log: true
 
-    - name: Task 2.5 - Write Certificates for Services
+    - name: Task 2.4 - Write urlscan.io API Token
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/urlscanio/api-key"
+        method: POST
+        headers: { X-Vault-Token: "{{ vault_root_token | trim }}" }
+        body: { data: { token: "{{ vault_urlscanio_api_key }}" } }
+        body_format: json
+        status_code: [200, 204]
+      no_log: true
+
+    - name: Task 2.6 - Write Certificates for Services
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/certs/{{ item.name }}"
         method: POST

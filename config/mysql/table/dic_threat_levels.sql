@@ -1,12 +1,12 @@
 -- Dictionary for threat levels (Scoring Policy)
 -- Defines risk levels from 1 to 10 with descriptive actions
-CREATE TABLE IF NOT EXISTS dic_threat_levels (
+CREATE TABLE IF NOT EXISTS cyber_intelligence.dic_threat_levels (
     score INT PRIMARY KEY,
     description VARCHAR(100) NOT NULL,
     is_malicious_flag BOOLEAN DEFAULT FALSE
 );
 
-INSERT IGNORE INTO dic_threat_levels (score, description, is_malicious_flag) VALUES
+INSERT IGNORE INTO cyber_intelligence.dic_threat_levels (score, description, is_malicious_flag) VALUES
 (1, 'Safe / Clean', FALSE),
 (2, 'Low Risk', FALSE),
 (3, 'Informational / CDN', FALSE),

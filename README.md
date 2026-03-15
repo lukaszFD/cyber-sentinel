@@ -153,6 +153,19 @@ show dbs
 use threat_data_lake
 show collections
 
+mongodb://hunter:PASS@10.10.10.8:27017/threat_data_lake?authSource=admin
+
+# Clear all data
+db.virustotal_raw.deleteMany({})
+# Get total number of analyzed threats.
+db.virustotal_raw.countDocuments({})
+# Find detailed analysis for a specific indicator.
+db.virustotal_raw.find({resource: "IP"})`
+# Delete a specific record by its ID
+db.virustotal_raw.deleteOne({ "_id": ObjectId("your_id_here") });
+# Delete all records for a specific IP
+db.virustotal_raw.deleteMany({ "resource": "1.2.3.4" });
+
 # Monitor incoming DNS queries in MySQL
 docker exec -t mysql_db mysql -u root -p"password" -e "SELECT * FROM cyber_intelligence.v_pending_analysis;"
 docker exec -t mysql_db mysql -u root -p"password" -e "SELECT * FROM cyber_intelligence.v_security_alerts;"

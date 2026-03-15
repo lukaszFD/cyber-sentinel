@@ -1,6 +1,6 @@
 -- Universal table for network events (IDS/IPS, Scapy, Sniffers)
 -- Stores specific actions like clicked URLs, downloaded files, or triggered alerts
-CREATE TABLE IF NOT EXISTS network_events (
+CREATE TABLE IF NOT EXISTS cyber_intelligence.network_events (
     id INT AUTO_INCREMENT PRIMARY KEY,
     timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     dns_query_id INT NULL,          -- FK to DNS query context (optional)
@@ -26,5 +26,5 @@ CREATE TABLE IF NOT EXISTS network_events (
 ) ENGINE=InnoDB;
 
 -- Indexing for high-performance correlation queries
-CREATE INDEX idx_network_event_ips ON network_events(source_ip, dest_ip);
-CREATE INDEX idx_network_event_time ON network_events(timestamp);
+CREATE INDEX idx_network_event_ips ON cyber_intelligence.network_events(source_ip, dest_ip);
+CREATE INDEX idx_network_event_time ON cyber_intelligence.network_events(timestamp);

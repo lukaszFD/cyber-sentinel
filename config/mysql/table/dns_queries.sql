@@ -1,6 +1,6 @@
 -- Passive DNS History table
 -- Populated by your Python dns_log_processor.py
-CREATE TABLE IF NOT EXISTS dns_queries (
+CREATE TABLE IF NOT EXISTS cyber_intelligence.dns_queries (
     id INT AUTO_INCREMENT PRIMARY KEY,
     timestamp DATETIME NOT NULL,
     query_type VARCHAR(10) NOT NULL,
