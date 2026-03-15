@@ -33,6 +33,30 @@ The system follows a hybrid deployment strategy, managed entirely via **Ansible*
     * **MongoDB 8.2:** Acts as the `threat_data_lake` for storing raw JSON reports from external providers like VirusTotal.
 * **Monitoring:** Grafana dashboards provisioned automatically to visualize VirusTotal scans and DNS traffic patterns.
 
+## 🏗️ Database Logic & 3NF Architecture
+
+The **Cyber AI Sentinel** database is designed for scalability and analytical depth, moving away from flat tables to a structured **3NF (Third Normal Form)** relational model.
+
+### 1. Relational Intelligence Layer
+Instead of storing repetitive AI summaries, the system uses the `ai_analysis_results` table.
+* **Efficiency:** This allows the **Gemini AI** to generate a single technical verdict that can be referenced by multiple network events if the same threat is detected across different timeframes.
+* **Rich Content:** Fields like `verdict_summary_en` and `analysis_pl` are stored as **TEXT** to accommodate long-form technical reports and reference URLs.
+
+### 2. The Threat Correlation Engine
+* **threat_indicators:** This is the central hub. It links a specific `dns_query_id` to a unique `analysis_result_id`.
+* **threat_indicator_details:** This table bridges the SQL and NoSQL worlds. It stores the `mongo_ref_id`, allowing you to jump from a MySQL record directly to the raw, unformatted JSON report stored in the **MongoDB Threat Data Lake**.
+
+### 3. Automated Scoring & Alerting
+The system implements a standardized scoring policy via `dic_threat_levels`:
+* **Scores 1-5:** Classified as low risk or suspicious but not inherently malicious (`is_malicious_flag = FALSE`).
+* **Scores 6-10:** Classified as malicious or critical threats (`is_malicious_flag = TRUE`).
+* **Automation:** Any record reaching this threshold triggers **automated email alerts** in the **n8n** workflow.
+
+### 4. Analytical Views for Grafana
+The `views/` directory contains pre-calculated logic to offload processing from the dashboarding layer:
+* **v_pending_analysis:** A dynamic queue that identifies new DNS queries that haven't been scanned by CTI providers yet.
+* **v_grafana_threat_explorer:** A complex join that provides a **"Security Analyst View"**, combining domain names, source IPs, threat scores, and the names of providers that flagged the indicator.
+
 ## 📂 Project Structure Explained
 
 ```text
@@ -71,8 +95,25 @@ cyber-sentinel/
 │   │       └── datasources/        # Automatic MySQL/Mongo connection setup
 │   ├── mongo/
 │   │   └── init_mongo.js           # Threat Data Lake initialization script
+│   │ 
 │   ├── mysql/
-│   │   └── db_deployment.sql       # SQL Schema and analytic views (CTI logic)
+│   │   ├── db_deployment.sql           # Master initialization script (Schema, Users, Privileges)
+│   │   ├── table/                      # Core relational table definitions
+│   │   │   ├── ai_analysis_results.sql # AI-generated verdicts, scores, and bilingual summaries
+│   │   │   ├── dic_indicator_types.sql # Dictionary for FQDN, IP, and HASH types
+│   │   │   ├── dic_source_providers.sql# Dictionary for CTI sources (VT, ThreatFox, URLhaus)
+│   │   │   ├── dic_threat_levels.sql   # Scoring policy definitions (1-10) and malicious flags
+│   │   │   ├── dns_queries.sql         # Passive DNS history captured from network traffic
+│   │   │   ├── network_events.sql      # High-level security events (IDS alerts, intercepted URLs)
+│   │   │   ├── threat_indicators.sql   # Main bridge linking DNS queries to AI analysis results
+│   │   │   └── threat_indicator_details.sql # CTI metadata linking MySQL records to MongoDB raw JSON
+│   │   └── views/                      # Analytical layer for Grafana and n8n orchestration
+│   │       ├── v_grafana_daily_trends.sql     # Aggregated daily scan statistics and risk trends
+│   │       ├── v_grafana_dns_hourly_traffic.sql# Time-series data for network intensity monitoring
+│   │       ├── v_grafana_malicious_stats.sql  # High-level KPIs: Total scans vs. Malicious ratio
+│   │       ├── v_grafana_threat_explorer.sql  # Deep-dive view for security event investigation
+│   │       ├── v_latest_threat_reports.sql    # Filters the most recent scan per unique indicator
+│   │       └── v_pending_analysis.sql         # Work queue for n8n to identify non-scanned observables
 │   ├── pihole/
 │   │   └── adlists.txt             # Pre-configured blocklists for DNS filtering
 │   └── unbound/
