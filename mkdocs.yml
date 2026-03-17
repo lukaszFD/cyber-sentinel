@@ -1,0 +1,28 @@
+site_name: Cyber Sentinel
+site_url: https://lukaszfd.github.io/cyber-sentinel/
+repo_url: https://github.com/lukaszFD/cyber-sentinel
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: pl
+  palette:
+    - scheme: slate
+      primary: blue grey
+      accent: cyan
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Releases: releases.md
+  - Ansible_Vault : ansibleVault.md
