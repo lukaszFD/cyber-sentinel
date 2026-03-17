@@ -18,7 +18,7 @@ By orchestrating these Docker containers, the system provides a structured pipel
 The system uses **n8n** as its central security orchestration engine, which automates the process from the detection of a DNS query to the final AI verdict.
 
 ##### Pipeline Overview
-[<img src="assets/n8n.png" width="450" alt="n8n Workflow Preview">](assets/n8n.png)
+[<img src="./assets/n8n.png" width="450" alt="n8n Workflow Preview">](./assets/n8n.png)
 *Click the image to enlarge.*
 
 * **Orchestration & Data Ingestion:** Fetches pending tasks from the `v_pending_analysis` view and securely retrieves API keys from **HashiCorp Vault**.
