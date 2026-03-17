@@ -13,6 +13,20 @@ By orchestrating these Docker containers, the system provides a structured pipel
 * **Security First:** Integration with **HashiCorp Vault** for enterprise-grade secrets management and 
 * **Nginx SSL Proxy** for secure service access.
 
+## 🤖 AI Workflow Automation (n8n)
+
+The system uses **n8n** as its central security orchestration engine, which automates the process from the detection of a DNS query to the final AI verdict.
+
+##### Pipeline Overview
+[<img src="assets/n8n.png" width="450" alt="n8n Workflow Preview">](assets/n8n.png)
+*Click the image to enlarge.*
+
+* **Orchestration & Data Ingestion:** Fetches pending tasks from the `v_pending_analysis` view and securely retrieves API keys from **HashiCorp Vault**.
+* **Multi-Source Enrichment:** Performs parallel reputation lookups for domains and IP addresses across CTI providers such as VirusTotal, ThreatFox, and URLhaus.
+* **Dual-Layer Persistence:** Stores raw JSON reports in the **MongoDB Threat Data Lake** while updating operational statuses in the **MySQL** relational database.
+* **AI Synthesis:** Leverages the **Google Gemini** model to perform technical analysis of the gathered data and generate bilingual (EN/PL) summaries.
+* **Incident Reporting:** Automatically triggers email alerts for high-priority threats based on the `is_malicious_flag` threshold.
+
 ## 🏗️ Architecture Overview
 
 The system follows a hybrid deployment strategy, managed entirely via **Ansible** and **Docker Compose**. It distinguishes between development and production environments to ensure stability:
