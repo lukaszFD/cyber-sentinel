@@ -1,0 +1,16 @@
+# 1. Stwórz plik skryptu
+sudo nano /usr/local/bin/sentinel_backup.sh
+
+# 2. Wklej treść skryptu z poprzedniej wiadomości (pamiętaj o zapisaniu: Ctrl+O, Enter, Ctrl+X)
+
+# 3. Nadaj uprawnienia do wykonywania (kluczowy krok!)
+sudo chmod +x /usr/local/bin/sentinel_backup.sh
+
+# 4. Przetestuj, czy działa "na sucho"
+sudo /usr/local/bin/sentinel_backup.sh
+
+# Otwórz edytor crontab dla roota
+sudo crontab -e
+
+# Wklej tę linię na samym dole:
+0 2 * * 0 /usr/local/bin/sentinel_backup.sh >> /var/log/sentinel_backup.log 2>&1
