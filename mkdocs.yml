@@ -5,16 +5,19 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  language: pl
+  language: en
   palette:
     - scheme: slate
-      primary: blue grey
-      accent: cyan
+      primary: green
+      accent: deep purple
+    - scheme: default
+      primary: blue
+      accent: deep orange
   features:
     - navigation.tabs
     - navigation.sections
     - content.code.copy
-    - content.code.annotate
+    - navigation.footer
 
 plugins:
   - search
@@ -24,5 +27,40 @@ plugins:
 nav:
   - Home: index.md
   - Architecture: architecture.md
-  - Releases: releases.md
-  - Ansible_Vault : ansibleVault.md
+  - "n8n Workflow": n8n.md
+#  - Secret Management: ansibleVault.md
+  - Project Releases: releases.md
+extra:
+  social:
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/in/lukaszfd84/
+      name: My LinkedIn Profile
+    - icon: fontawesome/solid/globe
+      link: https://lukaszfd.github.io/ICYB_PW/
+      name: My Cybersecurity Blog
+    - icon: fontawesome/brands/github
+      link: https://github.com/lukaszFD
+      name: My GitHub Projects
+
+markdown_extensions:
+  - attr_list
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+
+copyright: Copyright &copy; 2026 Lukasz Dejko
