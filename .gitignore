@@ -1,6 +1,24 @@
-/.idea
+# IDE - IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+.run/
+
 /ansible/.vault_pass
 /ansible/group_vars/all/vault.yml
 .tmp
 ai/.
-site/.
+
+
+# MkDocs build directory
+site/
+
+# System / sensitive files
+.env
+*.log
+
+# Python virtual environments & cache
+venv/
+.venv/
+__pycache__/
+*.pyc
