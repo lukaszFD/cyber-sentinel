@@ -1,9 +1,20 @@
 ## 🏗️ Architecture Overview
 
-The system follows a hybrid deployment strategy, managed entirely via **Ansible** and **Docker Compose**. It distinguishes between development and production environments to ensure stability:
+The **Cyber Sentinel** ecosystem is built on a containerized microservices architecture, ensuring modularity, scalability, and high security. The entire lifecycle of the project—from infrastructure provisioning to service configuration—is managed through **Ansible**, providing a consistent and reproducible deployment process.
 
-* **Development & Testing:** Deployed on a **Proxmox Virtual Machine [vm-prox-dev]** running **Debian**. This is where new AI workflows in n8n and security hardening rules are tested before rollout.
-* **Production:** Deployed on a **Raspberry Pi 5 [rpi5-prod]**. This is the primary environment handling real-time network traffic and long-term CTI (Cyber Threat Intelligence) data storage.
+### Core Technology Stack
+
+* **Containerization (Docker):** Every component of the system, including the AI engine, databases, and network guards, runs as a dedicated Docker container. This ensures environment isolation and simplifies dependency management.
+* **Infrastructure as Code (Ansible):** All deployment tasks, firewall rules (UFW), and system hardening are fully automated via Ansible playbooks, ensuring the environment is secure and consistent.
+* **Secrets Management (HashiCorp Vault):** To maintain a "zero-secrets" policy within the code and n8n workflows, all sensitive data (API keys, database credentials) is stored and retrieved dynamically from **HashiCorp Vault**.
+* **Advanced DNS Layer:** The system implements a multi-stage DNS filtering and analysis mechanism:
+    * **Pi-hole:** Acts as the primary DNS sinkhole for ad-blocking and initial filtering.
+    * **Unbound:** Provides recursive DNS resolution for increased privacy and security.
+    * **Passive DNS:** Intercepts and logs DNS traffic to feed the CTI (Cyber Threat Intelligence) analysis pipeline.
+* **Data Persistence Layer:**
+    * **MySQL:** Stores relational data, including the work queue for analysis, network event logs, and final AI-generated threat verdicts.
+    * **MongoDB:** Serves as a high-capacity Data Lake for storing raw JSON responses from CTI providers (VirusTotal, ThreatFox, etc.) for deep forensics.
+  
 
 ## 📂 Project Structure Explained
 

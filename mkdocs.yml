@@ -28,7 +28,7 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - "n8n Workflow": n8n.md
-#  - Secret Management: ansibleVault.md
+  - "Database Schema": db.md
   - Project Releases: releases.md
 extra:
   social:

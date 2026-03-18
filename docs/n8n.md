@@ -173,16 +173,37 @@ const url = `https://www.virustotal.com/api/v3/ip_addresses/${observable_ip}`;
 
 ### Components
 
-* IF nodes
+* IF node — VirusTotal (`malicious > 0 OR suspicious > 0`)
+* IF node — ThreatFox (`query_status = ok`)
+* IF node — URLHaus (`query_status = ok`)
 
 ### Description
 
-Each CTI response is evaluated:
+Each CTI provider uses a dedicated IF node with a different condition, because each API returns data in a different format.
 
-* `query_status = ok` → process data
-* otherwise → register **NO_DATA** (clean baseline)
+**VirusTotal** — evaluates raw `last_analysis_stats` fields directly:
 
-This prevents unnecessary processing and API waste.
+```json title="if-virustotal.json" linenums="1"
+{
+  "combinator": "or",
+  "conditions": [
+    { "leftValue": "={{ $json.data.attributes.last_analysis_stats.malicious }}", "operator": "gt", "rightValue": 0 },
+    { "leftValue": "={{ $json.data.attributes.last_analysis_stats.suspicious }}", "operator": "gt", "rightValue": 0 }
+  ]
+}
+```
+
+**ThreatFox & URLHaus** — evaluate the `query_status` field returned by the Abuse.ch API:
+
+```json title="if-abusech.json" linenums="1"
+{
+  "conditions": [
+    { "leftValue": "={{ $json.query_status }}", "operator": "equals", "rightValue": "ok" }
+  ]
+}
+```
+
+If the condition is **false**, the workflow branches to an `Insert a clear scan` MySQL node, which registers a baseline score of `1` (Safe) for that provider. This prevents redundant API calls on already-clean observables and maintains full relational integrity.
 
 ---
 
@@ -190,12 +211,19 @@ This prevents unnecessary processing and API waste.
 
 ### Components
 
-* MongoDB nodes
-* Transformation Code nodes
+* MongoDB nodes (`Insert doc VirusTotal`, `Insert doc ThreatFox`, `Insert doc URLHaus`)
+* Transformation Code nodes (`Edit Json for Mongo - *`)
+* MySQL nodes (`Insert a clear scan - VirusTotal`, `Insert a clear scan - ThreatFox`, `Insert a clear scan - URLHaus`)
 
 ### Description
 
-All raw API responses are stored in:
+The storage layer has two parallel paths depending on the IF node result.
+
+**Path A — Data found:** Raw API response is transformed and archived in MongoDB, then the enriched result proceeds to the normalization layer.
+
+**Path B — No data (clean result):** A baseline scan record with `threat_score = 1` is written directly to MySQL. This short-circuits the full AI pipeline and prevents redundant API calls for already-clean observables.
+
+All MongoDB documents are inserted into:
 
 ```
 collection: threat_data_raw
@@ -209,7 +237,7 @@ Used for:
 
 ---
 
-### Example Transformation
+### 6.1 Example Transformation
 
 ```js title="mongo-transform.js" linenums="1"
 // Prepare structured document for MongoDB
@@ -224,25 +252,78 @@ return {
 
 ---
 
+### 6.2 Clean Scan — MySQL Fallback
+
+When a provider returns no data, a safe baseline is written immediately:
+
+```sql title="insert-clean-scan.sql" linenums="1"
+-- Register a safe baseline verdict (score = 1) for referential integrity
+INSERT INTO cyber_intelligence.ai_analysis_results (
+    threat_score, verdict_summary_en, analysis_pl
+) VALUES (1, null, null);
+
+SET @last_clean_result_id = LAST_INSERT_ID();
+
+-- Log the scan event in threat_indicators
+INSERT INTO cyber_intelligence.threat_indicators (
+    dns_query_id, type_id, analysis_result_id, last_scan
+) VALUES (
+    {{ $('Select rows from a table').item.json.dns_query_id }},
+    (SELECT id FROM cyber_intelligence.dic_indicator_types WHERE name = 'IP'),
+    @last_clean_result_id,
+    NOW()
+);
+```
+
+---
+
 ## 7. Data Normalization Layer
 
 ### Components
 
-* Code nodes (per provider)
+* Code nodes (per provider): `Data reduction and aggregation - VirusTotal / ThreatFox / Urlhaus`
 * Merge node
-* Aggregation node
+* Aggregation node (`Code for Merge`)
 
 ### Description
 
-Each provider response is normalized into a unified structure:
+Each provider response is reduced into a compact, structured object before being passed to the AI. Raw API payloads are large — normalization extracts only the fields relevant for threat scoring.
 
-* `virustotal`
-* `threatfox`
-* `urlhaus`
+**VirusTotal** extracts:
+
+| Field | Description |
+|---|---|
+| `vt_report` | Human-readable summary string |
+| `vt_stats` | Raw counts: `malicious`, `suspicious`, `undetected` |
+| `vt_owner` | AS owner name (e.g. `Google LLC`) |
+| `vt_is_big_player` | `true` if owner matches known trusted providers |
+| `vt_malicious_count` | Number of malicious engine detections |
+| `vt_scan_date` | Freshness of the data |
+| `no_data` | `true` if VirusTotal has no record for this resource |
+
+**ThreatFox** extracts:
+
+| Field | Description |
+|---|---|
+| `threatfox_report` | Identified malware families and threat types |
+| `threatfox_active` | `true` if an actively confirmed threat exists |
+| `threatfox_max_confidence` | Reliability score of the report |
+| `no_data` | `true` if ThreatFox has no record |
+
+**URLHaus** extracts:
+
+| Field | Description |
+|---|---|
+| `urlhaus_report` | Details on active malware distribution |
+| `is_active_threat` | `true` if payload URL is currently online |
+| `urlhaus_reference` | Direct evidence link |
+| `no_data` | `true` if URLHaus has no record |
 
 ---
 
-### Aggregation Logic
+### 7.1 Aggregation Logic
+
+All three normalized objects are merged into a single context object for the AI prompt:
 
 ```js title="merge.js" linenums="1"
 // Merge all CTI sources into one object
@@ -450,6 +531,8 @@ Final structured intelligence is stored in relational tables:
 * `ai_analysis_results`
 * `threat_indicators`
 * `threat_indicator_details`
+
+Every AI decision is linked back to the original DNS query and raw provider data via MongoDB Object IDs, creating a complete audit trail.
 
 ---
 
