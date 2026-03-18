@@ -3,3 +3,4 @@
 /ansible/group_vars/all/vault.yml
 .tmp
 ai/.
+site/.
