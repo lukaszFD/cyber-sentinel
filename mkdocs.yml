@@ -27,9 +27,23 @@ plugins:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Deployment:
+      - Overview: deployment.md
+      - "Config Reference": ansible-00-config.md
+      - "01 · Secrets & Env": ansible-01-secrets.md
+      - "02 · Firewall (UFW)": ansible-02-security.md
+      - "03 · System & Docker": ansible-03-system.md
+      - "04.1–2 · Stack & Containers": ansible-04-stack.md
+      - "04.3 · Database Init": ansible-04-db.md
+      - "04.4 · Post-Config": ansible-04-post-config.md
+      - "04.5 · AI Suite (Ollama)": ansible-04-ai.md
+      - "05 · Nginx & SSL": ansible-05-proxy.md
+      - "06 · HashiCorp Vault": ansible-06-vault.md
+  - "Docker components": components.md
   - "n8n Workflow": n8n.md
   - "Database Schema": db.md
   - Project Releases: releases.md
+
 extra:
   social:
     - icon: fontawesome/brands/linkedin

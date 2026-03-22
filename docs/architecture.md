@@ -1,8 +1,8 @@
-## 🏗️ Architecture Overview
+## 1. Architecture Overview
 
 The **Cyber Sentinel** ecosystem is built on a containerized microservices architecture, ensuring modularity, scalability, and high security. The entire lifecycle of the project—from infrastructure provisioning to service configuration—is managed through **Ansible**, providing a consistent and reproducible deployment process.
 
-### Core Technology Stack
+## 2. Core Technology Stack
 
 * **Containerization (Docker):** Every component of the system, including the AI engine, databases, and network guards, runs as a dedicated Docker container. This ensures environment isolation and simplifies dependency management.
 * **Infrastructure as Code (Ansible):** All deployment tasks, firewall rules (UFW), and system hardening are fully automated via Ansible playbooks, ensuring the environment is secure and consistent.
@@ -15,54 +15,7 @@ The **Cyber Sentinel** ecosystem is built on a containerized microservices archi
     * **MySQL:** Stores relational data, including the work queue for analysis, network event logs, and final AI-generated threat verdicts.
     * **MongoDB:** Serves as a high-capacity Data Lake for storing raw JSON responses from CTI providers (VirusTotal, ThreatFox, etc.) for deep forensics.
 
----
-
-## 🔗 Service Dependency Map
-
-All services run on a shared Docker bridge network (`internal_network: 10.10.10.0/24`). The tables below list every container grouped by functional layer, with its assigned IP, port, role and key connections.
-
-> **Legend:** `→` write / send &nbsp;|&nbsp; `←` read / pull &nbsp;|&nbsp; `⇢` DNS only
-
-### Layer 1 — DNS `10.10.10.2–.4`
-
-| # | Container | IP | Port | Role | Connections |
-|---|-----------|-----|------|------|-------------|
-| 1 | `pihole` | `10.10.10.4` | `53/tcp+udp` | Primary DNS sinkhole, ad-block | `→ passive_dns` (depends_on) · `→ unbound` (depends_on) |
-| 2 | `passive_dns` | `10.10.10.3` | — | dnsmasq DNS sniffer, writes `/var/log/dns.log` | `→ unbound :53` (upstream) |
-| 3 | `unbound` | `10.10.10.2` | `53` | Recursive DNS resolver | — (upstream terminus) |
-
----
-
-### Layer 2 — Ingestion & Orchestration `10.10.10.5–.7`
-
-| # | Container | IP | Port | Role | Connections |
-|---|-----------|-----|------|------|-------------|
-| 4 | `dns_log_processor` | `10.10.10.6` | — | Python: tails `dns.log`, writes `dns_queries` | `← passive_dns` (log file) · `→ mysqldb` (write) · `⇢ pihole` |
-| 5 | `firefox` | `10.10.10.5` | — | Isolated browser client (LinuxServer) | `⇢ pihole` (DNS) |
-| 6 | `n8n` | `10.10.10.7` | `5678` | AI workflow engine, runs every 15 min | `← mysqldb` (v_pending_analysis) · `→ mongo` (CTI JSON) · `→ mysqldb` (verdicts) · `← vault` (secrets) · `⇢ pihole` |
-
----
-
-### Layer 3 — Data Storage `10.10.10.8–.12`
-
-| # | Container | IP | Port | Role | Connections |
-|---|-----------|-----|------|------|-------------|
-| 7 | `mongo` | `10.10.10.8` | — | MongoDB 4.4 — CTI raw JSON data lake (`threat_data_raw`) | `← n8n` (insert) · `← grafana` (read) |
-| 8 | `mysqldb` | `10.10.10.9` | — | MySQL 8.0 — relational store (`cyber_intelligence`) | `← dns_log_processor` · `← n8n` (read + write) · `← grafana` (read) |
-| 9 | `vault` | `10.10.10.12` | `8200` | HashiCorp Vault — zero-secrets policy, UI enabled | `← n8n` (fetch API keys + DB creds) |
-
----
-
-### Layer 4 — Monitoring & Management `10.10.10.10–.14`
-
-| # | Container | IP | Port | Role | Connections |
-|---|-----------|-----|------|------|-------------|
-| 10 | `portainer` | `10.10.10.10` | — | Portainer CE — Docker management via socket | mounts `/var/run/docker.sock` · `⇢ pihole` |
-| 11 | `grafana` | `10.10.10.11` | — | Grafana — threat + DNS dashboards, auto-provisioned | `← mysqldb` (v_grafana_* views) · `← mongo` (CTI lake) · `⇢ pihole` |
-| 12 | `prometheus` | `10.10.10.13` | — | Prometheus — metrics collection | `← node_exporter` (scrape) · `⇢ pihole` |
-| 13 | `node_exporter` | `10.10.10.14` | — | Host OS metrics (CPU, RAM, disk, net) | mounts `/proc`, `/sys`, `/` (read-only) |
-
-### Data Flow: End-to-End
+## 3. Data Flow: End-to-End
 
 The following describes the complete path from a network event to a security verdict:
 
@@ -73,9 +26,7 @@ The following describes the complete path from a network event to a security ver
 5. **AI analysis** — `n8n` normalizes CTI data and sends it to Google Gemini; the AI verdict (score 1–10, bilingual summary) is written back to `mysqldb` (`ai_analysis_results`, `threat_indicators`).
 6. **Visualization** — `grafana` reads `mysqldb` views (`v_grafana_*`) and `mongo` to render threat intelligence and DNS traffic dashboards.
 
----
-
-## 📂 Project Structure Explained
+##  3. Project Structure Explained
 
 ```text
 cyber-sentinel/
