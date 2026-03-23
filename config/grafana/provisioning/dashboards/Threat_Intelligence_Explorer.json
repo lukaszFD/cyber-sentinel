@@ -27,7 +27,7 @@
         {
           "editorMode": "code",
           "format": "table",
-          "rawSql": "SELECT provider, COUNT(*) as detections FROM v_grafana_threat_explorer WHERE $__timeFilter(timestamp) GROUP BY provider",
+          "rawSql": "SELECT providers, COUNT(*) as detections FROM v_grafana_threat_explorer WHERE $__timeFilter(timestamp) GROUP BY providers",
           "refId": "A"
         }
       ],

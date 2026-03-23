@@ -308,7 +308,7 @@
           "format": "table",
           "hide": false,
           "rawQuery": true,
-          "rawSql": "SELECT\n    UNIX_TIMESTAMP(DATE(last_scan)) AS time_sec,\n    COUNT(id) AS total_scans_per_day,\n    SUM(threat_score) AS total_positives_per_day\nFROM\n    cyber_intelligence.threat_indicators\nWHERE\n    $__timeFilter(last_scan) \nGROUP BY\n    time_sec\nORDER BY\n    time_sec ASC;",
+          "rawSql": "SELECT\n    time_sec,\n    total_scans_per_day,\n    total_positives_per_day\nFROM\n    cyber_intelligence.v_grafana_daily_trends\nWHERE\n    $__timeFilter(scan_date)\nORDER BY\n    time_sec ASC;",
           "refId": "A",
           "sql": {
             "columns": [

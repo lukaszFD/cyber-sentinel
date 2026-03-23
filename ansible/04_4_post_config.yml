@@ -11,11 +11,30 @@
             dest: /etc/fail2ban/jail.local
             content: |
               [sshd]
+              # Enables the specific jail for SSH monitoring
               enabled = true
+              
+              # Specifies the port to monitor (default SSH port 22)
               port = ssh
+              
+              # Uses 'aggressive' mode to detect more than just failed passwords.
+              # It catches connection drops where no public key was offered, 
+              # which is common when password login is disabled.
+              mode = aggressive
+              
+              # Defines the number of failed attempts allowed before a ban is issued.
+              # In this case, 3 strikes and the IP is out.
               maxretry = 3
+              
+              # The duration for which the offending IP is blocked (1 hour).
               bantime = 1h
+              
+              # The time window during which the 3 failures must occur to trigger a ban.
               findtime = 10m
+              
+              # Uses systemd as the backend to read logs directly from the journal.
+              # This is the most efficient method for Debian/Ubuntu systems.
+              backend = systemd
             owner: root
             group: root
             mode: '0644'
@@ -43,8 +62,8 @@
         - name: Task 2.3 - Add Adlists to Pi-hole database (via Host)
           ansible.builtin.shell:
             cmd: >
-              sqlite3 {{ remote_deploy_base }}/pihole/gravity.db 
-              "INSERT OR IGNORE INTO adlist (address, enabled, comment) 
+              sqlite3 {{ remote_deploy_base }}/pihole/gravity.db
+              "INSERT OR IGNORE INTO adlist (address, enabled, comment)
               VALUES ('{{ item.strip() }}', 1, 'Added by Ansible Sentinel');"
           loop: "{{ lookup('file', main_repo_source_dir + '/config/pihole/adlists.txt').splitlines() }}"
           when: item.strip() | length > 0
@@ -89,3 +108,30 @@
           until: n8n_init.status in [200, 409]
           retries: 15
           delay: 10
+
+    - name: Section 4 - Import n8n Workflows
+      block:
+        - name: Task 4.1 - Read workflow JSON file
+          set_fact:
+            workflow_content: "{{ lookup('file', '../config/n8n/workflows/Automated Domain & IP Reputation Guard with HashiCorp Vault.json') | from_json }}"
+
+        - name: Task 4.2 - Copy workflow file to remote host (tmp)
+          ansible.builtin.copy:
+            content: "{{ workflow_content | to_json }}"
+            dest: "/tmp/workflow_to_import.json"
+            mode: '0644'
+
+        - name: Task 4.3 - Copy file from host to n8n container
+          ansible.builtin.shell:
+            cmd: "docker cp /tmp/workflow_to_import.json n8n-server:/tmp/workflow_to_import.json"
+
+        - name: Task 4.4 - Import workflow via n8n CLI
+          ansible.builtin.shell:
+            cmd: "docker exec -u node n8n-server n8n import:workflow --input=/tmp/workflow_to_import.json"
+          register: cli_result
+          changed_when: "'Successfully imported' in cli_result.stdout"
+
+        - name: Task 4.5 - Cleanup temporary files (host & container)
+          ansible.builtin.shell:
+            cmd: "rm -f /tmp/workflow_to_import.json && docker exec -u root n8n-server rm -f /tmp/workflow_to_import.json"
+          changed_when: false
