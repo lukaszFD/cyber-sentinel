@@ -1,5 +1,8 @@
 # Automated Domain & IP Reputation Guard (n8n Workflow)
 
+Officially verified and published in the **n8n Workflow Library**.
+Check it out here: [Score DNS Threats with VirusTotal, Abuse.ch, HashiCorp Vault, and Gemini](https://n8n.io/workflows/14127-score-dns-threats-with-virustotal-abusech-hashicorp-vault-and-gemini/)
+
 ## Overview
 
 This workflow is a core component of the **Cyber Sentinel** platform.
