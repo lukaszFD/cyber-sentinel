@@ -15,44 +15,24 @@
   </div>
 </div>
 
-**Cyber Sentinel** is an AI-native security orchestration platform designed to bridge the gap between raw network telemetry and autonomous threat response. It integrates multi-source CTI providers — **VirusTotal**, **ThreatFox**, and **URLHaus** — with an AI synthesis layer powered by **Google Gemini** to deliver automated threat scoring, bilingual security verdicts (EN/PL), and real-time email alerting. The entire stack is deployed on a hardened Linux server (x86 or ARM) via a single Ansible command.
-
----
-
 ## 🎯 Project Purpose
 
-### Core problems solved
+**Cyber Sentinel** is an AI-native security orchestration platform designed to bridge the gap between raw network telemetry and autonomous threat response. It transforms passive monitoring into an active, intelligent defense layer.
 
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 1rem 0 1.5rem;">
+### 🛡️ Core Problems Solved
+* **Analysis Fatigue:** Automates the evaluation of thousands of DNS queries, using AI to identify malicious patterns that traditional signature-based systems miss.
+* **Data Fragmentation:** Consolidates disparate CTI (Cyber Threat Intelligence) sources into a unified, AI-ready intelligence pool.
+* **Manual Response Lag:** Eliminates the "human-in-the-loop" delay by triggering autonomous security playbooks the moment a threat is verified by AI.
+* **Secrets:** Solves the risk of exposed API keys and credentials across distributed containers by centralizing all sensitive data in [**HashiCorp Vault**](https://www.hashicorp.com/en/products/vault).
 
-  <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>Analysis fatigue</strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Automates evaluation of thousands of DNS queries using AI to identify malicious patterns that signature-based systems miss.</span>
-  </div>
+### 🚀 The Evolution of Sentinel
+By orchestrating a high-performance Docker stack, the system provides a structured pipeline where DNS traffic is captured, processed, and enriched. The key pillars of this version are:
 
-  <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>Data fragmentation</strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Consolidates disparate CTI sources into a unified, AI-ready intelligence pool.</span>
-  </div>
+* **AI engine:** The system is not limited to simply storing logs, but treats data as a ‘Neural Lake’. It uses analysis based on LLM models (via Gemini/n8n) to create behavioural profiles and generate bilingual security assessments (English/Polish) for each detected indicator.
+* **Autonomous coordination:** Centralises the entire threat lifecycle — from detection to mitigation — within **n8n** workflows, acting as a modular SOAR (Security Orchestration, Automation, and Response) system.
+* **Predictive CTI:** Transforms raw, passive DNS logs into predictive intelligence, identifying potential infrastructure before it is used in an active attack.
+* **Hardened infrastructure:** Secured by **HashiCorp Vault** for enterprise-grade secret lifecycle management and **Nginx SSL Proxy** to ensure encrypted communication across all service nodes.
 
-  <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>Manual response lag</strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Eliminates the human-in-the-loop delay by triggering autonomous security playbooks the moment a threat is verified by AI.</span>
-  </div>
-
-  <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>Secrets management</strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Solves the risk of exposed API keys across distributed containers by centralising all sensitive data in <a href="https://www.hashicorp.com/en/products/vault">HashiCorp Vault</a>.</span>
-  </div>
-
-</div>
-
-### Key capabilities
-
-* **AI engine** — treats DNS data as a "Neural Lake". Uses Gemini/n8n to create behavioural profiles and generate bilingual security assessments (EN/PL) for each detected indicator.
-* **Autonomous coordination** — centralises the entire threat lifecycle from detection to mitigation within **n8n** workflows, acting as a modular SOAR (Security Orchestration, Automation, and Response) system.
-* **Predictive CTI** — transforms raw, passive DNS logs into predictive intelligence, identifying potential infrastructure before it is used in an active attack.
-* **Hardened infrastructure** — secured by **HashiCorp Vault** for enterprise-grade secret lifecycle management and **Nginx SSL Proxy** to ensure encrypted communication across all service nodes.
 
 ---
 
