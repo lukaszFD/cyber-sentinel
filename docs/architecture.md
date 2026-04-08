@@ -1,5 +1,4 @@
 ## 1. Architecture Overview
-
 The **Cyber Sentinel** ecosystem is built on a containerized microservices architecture, ensuring modularity, scalability, and high security. The entire lifecycle of the project—from infrastructure provisioning to service configuration—is managed through **Ansible**, providing a consistent and reproducible deployment process.
 
 ## 2. Core Technology Stack
@@ -16,6 +15,14 @@ The **Cyber Sentinel** ecosystem is built on a containerized microservices archi
     * **MongoDB:** Serves as a high-capacity Data Lake for storing raw JSON responses from CTI providers (VirusTotal, ThreatFox, etc.) for deep forensics.
 
 ## 3. Data Flow: End-to-End
+
+
+<a href="../assets/cyber_sentinel_flow.png" class="glightbox">
+  <img src="../assets/cyber_sentinel_flow.png" alt="Cyber Sentinel Architecture Flow" width="600" style="display: block; margin: 20px auto; border-radius: 8px; cursor: zoom-in;">
+</a>
+
+<p align="center"><i>Block diagram of data flow in the Cyber Sentinel system (click to enlarge).</i></p>
+
 
 The following describes the complete path from a network event to a security verdict:
 

@@ -36,6 +36,12 @@ plugins:
   - search
   - minify:
       minify_html: true
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: zoom
+      width: 100%
+      height: auto
 
 nav:
   - Home: index.md
