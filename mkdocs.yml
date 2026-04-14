@@ -63,6 +63,9 @@ nav:
   - "Database Schema": db.md
   - Project Releases: releases.md
   - Future Roadmap: future-roadmap.md
+  - License & Security :
+      - Open Source Policy: license.md
+      - Security Policy: SECURITY.md
 
 extra:
   social:
