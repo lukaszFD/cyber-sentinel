@@ -62,6 +62,7 @@ nav:
   - "n8n Workflow": n8n.md
   - "Database Schema": db.md
   - Project Releases: releases.md
+  - Future Roadmap: future-roadmap.md
 
 extra:
   social:
