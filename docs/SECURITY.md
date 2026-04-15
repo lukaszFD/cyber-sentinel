@@ -31,4 +31,3 @@ Please include the following information in your initial message or subsequent s
 If you report a vulnerability, I commit to the following:
 * **Acknowledgment**: I will acknowledge receipt of your message within **48 hours**.
 * **Investigation**: I will provide a detailed response and a planned fix within **7-10 business days**.
-* **Credit**: I will credit you for the discovery in our `CHANGELOG.md` (unless you prefer to remain anonymous).
