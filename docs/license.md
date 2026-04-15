@@ -2,7 +2,7 @@
 
 This document outlines the legal terms and community guidelines for the **Cyber Sentinel** project.
 
-## MIT License
+## License
 
 Copyright (c) 2026 Łukasz Dejko
 
