@@ -18,8 +18,8 @@ The above copyright notice and this permission notice shall be included in all c
 
 To make it clear how you can use this project, here is a summary of the MIT License terms:
 
-* **Permissions**: Commercial use, modification, distribution, and private use are all permitted.
-* **Conditions**: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+1. **Permissions**: Commercial use, modification, distribution, and private use are all permitted.
+2. **Conditions**: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 ---
 
@@ -30,11 +30,12 @@ We welcome community contributions to **Cyber Sentinel**! Our goal is to build a
 ### How to contribute
 Please submit **Pull Requests (PRs)** for review. To maintain high standards, we follow these guidelines:
 
-* **Areas of focus**: We are specifically looking for:
-    * New **Ansible playbooks** for infrastructure hardening.
-    * Innovative **n8n AI security workflows**.
-    * Advanced **security hardening configurations** (Nginx, Database, OS).
-* **Process**:
-    1. Ensure your code follows the existing project structure.
-    2. All code comments and documentation within the code must be in **English**.
-    3. Test your changes in a development environment (e.g., Proxmox) before submission.
+**Areas of focus**: We are specifically looking for:
+1. New **Ansible playbooks** for infrastructure hardening.
+2. Innovative **n8n AI security workflows**.
+3. Advanced **security hardening configurations** (Nginx, Database, OS).
+
+**Process**:
+1. Ensure your code follows the existing project structure.
+2. All code comments and documentation within the code must be in **English**.
+3. Test your changes in a development environment (e.g., Proxmox) before submission.
