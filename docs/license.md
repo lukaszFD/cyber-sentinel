@@ -31,11 +31,13 @@ We welcome community contributions to **Cyber Sentinel**! Our goal is to build a
 Please submit **Pull Requests (PRs)** for review. To maintain high standards, we follow these guidelines:
 
 **Areas of focus**: We are specifically looking for:
+
 1. New **Ansible playbooks** for infrastructure hardening.
 2. Innovative **n8n AI security workflows**.
 3. Advanced **security hardening configurations** (Nginx, Database, OS).
 
 **Process**:
+
 1. Ensure your code follows the existing project structure.
 2. All code comments and documentation within the code must be in **English**.
 3. Test your changes in a development environment (e.g., Proxmox) before submission.
