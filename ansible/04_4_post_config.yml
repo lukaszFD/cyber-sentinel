@@ -26,8 +26,8 @@
               # In this case, 3 strikes and the IP is out.
               maxretry = 3
               
-              # The duration for which the offending IP is blocked (1 hour).
-              bantime = 1h
+              # The duration for which the offending IP is blocked (24 hour).
+              bantime = 24h
               
               # The time window during which the 3 failures must occur to trigger a ban.
               findtime = 10m
