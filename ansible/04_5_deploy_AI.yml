@@ -1,5 +1,5 @@
 ---
-- name: Deploy AI Suite for Cyber Sentinel
+- name: Deploy AI Suite for Cyber Sentinel (RPi 5 Optimized)
   hosts: all_servers
   become: yes
 
@@ -8,6 +8,8 @@
     ai_models:
       - "llama3.2:3b"
       - "deepseek-coder:1.3b"
+    max_memory: "4g"
+    cpu_quota: 200000
 
   tasks:
     - name: Task 4.1 - Ensure Docker network exists
@@ -20,7 +22,7 @@
         name: ollama_data
         state: present
 
-    - name: Task 4.3 - Run Ollama Container
+    - name: Task 4.3 - Run Ollama Container with Hardware Limits
       community.docker.docker_container:
         name: ollama
         image: ollama/ollama:latest
@@ -32,7 +34,9 @@
           - "11434:11434"
         volumes:
           - "ollama_data:/root/.ollama"
-        memory: 4g
+        memory: "{{ max_memory }}"
+        cpu_quota: "{{ cpu_quota }}"
+        container_default_behavior: no_defaults
 
     - name: Task 4.4 - Wait for Ollama API to be ready
       ansible.builtin.uri:
@@ -40,8 +44,8 @@
         status_code: 200
       register: result
       until: result.status == 200
-      retries: 10
-      delay: 5
+      retries: 15
+      delay: 10
 
     - name: Task 4.5 - Pull AI Models (Llama and DeepSeek)
       command: "docker exec ollama ollama pull {{ item }}"
@@ -55,4 +59,4 @@
 
     - name: Debug - Show Installed Models
       debug:
-        msg: "Installed AI Models: {{ models_list.stdout }}"
+        msg: "Installed AI Models on RPi 5: {{ models_list.stdout }}"

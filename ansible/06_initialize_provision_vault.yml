@@ -5,8 +5,6 @@
     vault_url: "http://{{ ansible_host }}:8200"
 
   tasks:
-    # --- SEKCJA 1: INICJALIZACJA ---
-
     - name: Check if Vault is initialized
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/init"
@@ -21,11 +19,8 @@
 
     - name: Parse Vault Credentials
       ansible.builtin.set_fact:
-        # Parsujemy JSON tylko jeśli inicjalizacja faktycznie się odbyła
         vault_creds: "{{ vault_init_raw.stdout | from_json }}"
       when: vault_init_raw.changed
-
-    # --- SEKCJA 2: AUTOMATYCZNY UNSEAL ---
 
     - name: Unseal Vault automatically after init
       ansible.builtin.uri:
@@ -36,8 +31,6 @@
       loop: "{{ vault_creds.unseal_keys_b64 }}"
       when: vault_init_raw.changed
       no_log: true
-
-    # --- SEKCJA 3: KONFIGURACJA (PROVISIONING) ---
 
     - name: Ensure KV Secrets Engine is enabled
       ansible.builtin.uri:
@@ -57,17 +50,14 @@
           X-Vault-Token: "{{ vault_creds.root_token if vault_init_raw.changed else vault_root_token }}"
         body:
           data:
-            user: "{{ item.user | default('hunter') }}" # Użycie Twojej domyślnej wartości
+            user: "{{ item.user | default('hunter') }}"
             password: "{{ item.value }}"
         body_format: json
         status_code: [200, 204]
       no_log: true
       loop:
-        - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}", user: "hunter" } # mysql_app_user to hunter
+        - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}", user: "hunter" }
         - { path: "pihole", value: "{{ vault_pihole_admin_password }}" }
-        # Dodaj resztę swoich sekretów tutaj...
-
-    # --- SEKCJA 4: PODSUMOWANIE DLA UŻYTKOWNIKA ---
 
     - name: Display Vault Credentials for Backup
       ansible.builtin.debug:

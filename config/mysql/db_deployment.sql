@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS cyber_intelligence.dns_queries (
     id INT AUTO_INCREMENT PRIMARY KEY,
     timestamp DATETIME NOT NULL,
     query_type VARCHAR(10) NOT NULL,
+    record_type VARCHAR(10),
     domain VARCHAR(255) NOT NULL,
     source_ip VARCHAR(45) NOT NULL,
     response_ip VARCHAR(45),
@@ -81,7 +82,6 @@ CREATE TABLE IF NOT EXISTS cyber_intelligence.threat_indicators (
     type_id INT NOT NULL,
     analysis_result_id INT NOT NULL,
     last_scan DATETIME DEFAULT CURRENT_TIMESTAMP,
-
     CONSTRAINT fk_dns_query FOREIGN KEY (dns_query_id) REFERENCES cyber_intelligence.dns_queries(id),
     CONSTRAINT fk_indicator_type FOREIGN KEY (type_id) REFERENCES cyber_intelligence.dic_indicator_types(id),
     CONSTRAINT fk_analysis_result FOREIGN KEY (analysis_result_id) REFERENCES cyber_intelligence.ai_analysis_results(id)
@@ -128,16 +128,17 @@ CREATE TABLE IF NOT EXISTS cyber_intelligence.network_events (
 -- Updated view for analysis queue
 -- Uses FQDN naming and links to source_ip for better context
 CREATE OR REPLACE VIEW cyber_intelligence.v_pending_analysis AS
-SELECT DISTINCT
+SELECT
     dq.id AS dns_query_id,
     dq.source_ip,
     dq.domain AS fqdn,
-    dq.response_ip AS observable_ip,
-    dq.timestamp AS first_seen
+    GROUP_CONCAT(DISTINCT dq.response_ip ORDER BY dq.response_ip SEPARATOR ', ') AS observable_ip,
+    MIN(dq.timestamp) AS first_seen
 FROM cyber_intelligence.dns_queries dq
-LEFT JOIN cyber_intelligence.threat_indicators ti ON dq.id = ti.dns_query_id
+         LEFT JOIN cyber_intelligence.threat_indicators ti ON dq.id = ti.dns_query_id
 WHERE ti.id IS NULL
-  AND dq.response_ip REGEXP '^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$';
+  AND dq.response_ip REGEXP '^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+GROUP BY dq.id, dq.source_ip, dq.domain;
 
 -- View to get only the most recent scan per DNS query
 CREATE OR REPLACE VIEW cyber_intelligence.v_latest_threat_reports AS
@@ -216,3 +217,26 @@ JOIN cyber_intelligence.threat_indicators ti ON ne.threat_indicator_id = ti.id
 JOIN cyber_intelligence.ai_analysis_results ar ON ti.analysis_result_id = ar.id
 JOIN cyber_intelligence.dic_threat_levels tl ON ar.threat_score = tl.score
 WHERE ar.threat_score > 5;
+
+CREATE OR REPLACE VIEW cyber_intelligence.v_grafana_threat_alerts AS
+SELECT
+    ti.id AS indicator_id,
+    dq.timestamp AS detection_time,
+    dq.domain AS fqdn,
+    dq.record_type,
+    dq.response_ip AS observable_ip,
+    ar.threat_score,
+    tl.description AS threat_label,
+    tl.is_malicious_flag,
+    ar.verdict_summary_en AS verdict_en,
+    ar.analysis_pl
+FROM
+    cyber_intelligence.threat_indicators ti
+        JOIN
+    cyber_intelligence.dns_queries dq ON ti.dns_query_id = dq.id
+        JOIN
+    cyber_intelligence.ai_analysis_results ar ON ti.analysis_result_id = ar.id
+        JOIN
+    cyber_intelligence.dic_threat_levels tl ON ar.threat_score = tl.score
+ORDER BY
+    dq.timestamp DESC;

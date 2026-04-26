@@ -135,3 +135,17 @@
         owner: "{{ deployment_user }}"
         group: "{{ deployment_user }}"
         mode: '0644'
+
+    - name: Copy Dockerfile for Vault Unsealer
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/hcv/Dockerfile.unsealer"
+        dest: "{{ remote_deploy_base }}/Dockerfile.unsealer"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: Copy Vault Unsealer script
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/hcv/unsealer.py"
+        dest: "{{ remote_deploy_base }}/unsealer.py"
+        owner: "{{ deployment_user }}"
+        mode: '0644'

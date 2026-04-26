@@ -166,7 +166,7 @@ services:
     restart: unless-stopped
 
   vault:
-    image: hashicorp/vault:latest
+    image: hashicorp/vault:1.21.3
     container_name: hashicorp_vault
     ports:
       - "8200:8200"
@@ -218,6 +218,22 @@ services:
         ipv4_address: 10.10.10.14
     dns: 10.10.10.4
     restart: unless-stopped
+
+  vault_unsealer:
+    build:
+      context: .
+      dockerfile: Dockerfile.unsealer
+      args:
+        - V_KEY1=${VAULT_KEY1}
+        - V_KEY2=${VAULT_KEY2}
+        - V_KEY3=${VAULT_KEY3}
+    container_name: vault_unsealer
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.15
+    restart: unless-stopped
+    depends_on:
+      - vault
 
 networks:
   internal_network:

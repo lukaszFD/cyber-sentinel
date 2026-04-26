@@ -1,0 +1,18 @@
+# Dockerfile.unsealer
+FROM python:3.9-slim
+
+ARG V_KEY1
+ARG V_KEY2
+ARG V_KEY3
+
+WORKDIR /app
+RUN pip install --no-cache-dir requests
+
+COPY unsealer.py .
+
+ENV VAULT_KEY1=$V_KEY1
+ENV VAULT_KEY2=$V_KEY2
+ENV VAULT_KEY3=$V_KEY3
+ENV VAULT_ADDR="http://vault:8200"
+
+CMD ["python", "unsealer.py"]
