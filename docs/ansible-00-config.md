@@ -52,11 +52,11 @@ The Ansible inventory file. Defines three target environments: production Raspbe
 ```ini title="ansible/hosts.ini" linenums="1"
 # --- PROD env ---
 [rpi5-prod]
-rpi5 ansible_host=192.168.0.2 ansible_user=hunter
+rpi5 ansible_host=192.168.XX.XX ansible_user=hunter
 
 # --- DEV env ---
 [vm-prox-dev]
-dev_vm ansible_host=192.168.0.5 ansible_user=hunter
+dev_vm ansible_host=192.168.XX.XX ansible_user=hunter
 
 # --- Local DEV VM env ---
 [local-vm]
@@ -71,12 +71,12 @@ local-vm
 
 ### Environments
 
-| Group | Host alias | IP | Port | Description |
-|-------|----------|-----|------|-------------|
-| `rpi5-prod` | `rpi5` | `192.168.0.2` | `22` | Production — Raspberry Pi 5 |
-| `vm-prox-dev` | `dev_vm` | `192.168.0.5` | `22` | Development — Proxmox VM |
-| `local-vm` | `local_vm` | `127.0.0.1` | `2222` | Local VM via SSH port forward |
-| `all_servers` | *(parent)* | — | — | All three environments combined |
+| Group | Host alias | IP              | Port | Description |
+|-------|----------|-----------------|------|-------------|
+| `rpi5-prod` | `rpi5` | `192.168.XX.XX` | `22` | Production — Raspberry Pi 5 |
+| `vm-prox-dev` | `dev_vm` | `192.168.XX.XX` | `22` | Development — Proxmox VM |
+| `local-vm` | `local_vm` | `127.0.0.1`     | `2222` | Local VM via SSH port forward |
+| `all_servers` | *(parent)* | —               | — | All three environments combined |
 
 !!! note "domain_suffix logic"
 In playbook `05_deploy_proxy.yml`, the variable `domain_suffix` is set to `local` when the target host is in the `vm-prox-dev` group, and `prod` otherwise. This controls which subdomain pattern Nginx uses for SSL virtual hosts.
@@ -223,7 +223,6 @@ GRAFANA_PASSWORD={{ vault_grafana_password }}
 
 # HashiCorp Vault
 VAULT_ROOT_TOKEN={{ vault_root_token }}
-VAULT_ADDR=http://0.0.0.0:8200
 ```
 
 ### Variable mapping
@@ -239,7 +238,6 @@ VAULT_ADDR=http://0.0.0.0:8200
 | `MYSQL_ROOT_PASSWORD` | `vault_mysql_root_password` | `vault.yml` (encrypted) |
 | `GRAFANA_PASSWORD` | `vault_grafana_password` | `vault.yml` (encrypted) |
 | `VAULT_ROOT_TOKEN` | `vault_root_token` | `vault.yml` (encrypted) |
-| `VAULT_ADDR` | *(static)* | Vault container address `http://0.0.0.0:8200` |
 
 !!! note "File permissions"
 The rendered `.env` file is written with `mode: '0600'` by playbook `01`. The same restriction is enforced again in playbook `04_1` via `lineinfile`. Never commit the rendered `.env` to version control — it is listed in `.gitignore`.

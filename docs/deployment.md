@@ -11,14 +11,17 @@ Before running any playbook, make sure your **control machine** (your laptop or 
 === "Control machine"
 
     ```bash
-    # Install Ansible
-    pip3 install ansible
-
-    # Install required Python libraries for Vault and Docker modules
-    pip3 install hvac docker
-
-    # Verify
-    ansible --version
+    # Update the local package index to ensure we have the latest metadata
+    sudo apt update
+    
+    # Install pipx to manage Python-based CLI applications in isolated environments
+    sudo apt install pipx
+    
+    # Install Ansible along with its core dependencies using pipx for isolation
+    pipx install --include-deps ansible
+    
+    # Inject specific Python libraries required for HashiCorp Vault (hvac) and Docker automation
+    pipx inject ansible hvac docker
     ```
 
 === "Target server"
@@ -31,7 +34,7 @@ Before running any playbook, make sure your **control machine** (your laptop or 
     | Architecture | `x86_64` (amd64) or `aarch64` (arm64) |
     | SSH access | Key-based authentication required |
     | User | Must have `sudo` privileges |
-    | Minimum RAM | 4 GB (8 GB recommended for AI workloads) |
+    | Minimum RAM | 4 GB (8 GB recommended for local AI workloads) |
     | Minimum disk | 32 GB |
 
 ---
@@ -44,10 +47,10 @@ Ansible automatically detects the target architecture and adjusts the Docker ins
 |---|---|---|
 | `x86_64` | `amd64` | Standard PC / VM / cloud server |
 | `aarch64` | `arm64` | Raspberry Pi 4 / 5, ARM server |
-| `armv7l` | `armhf` | Raspberry Pi 3 (32-bit) |
+
 
 !!! note "Raspberry Pi 5 — Argon NEO 5"
-If you are running on a **Raspberry Pi 5** with an **Argon NEO 5** case, playbook `03` automatically installs and configures the fan controller with thresholds optimised for AI workloads (`55°C → 100%`, `65°C → 100%`).
+If you are running on a **Raspberry Pi 5** with an **Argon NEO 5** case, playbook `03` automatically installs and configures the fan controller with thresholds optimised for AI workloads (`55°C → 50%`, `65°C → 100%`).
 
 ---
 
@@ -58,11 +61,11 @@ Edit `ansible/hosts.ini` to point to your target server. The repository ships wi
 ```ini title="ansible/hosts.ini"
 # --- PROD env ---
 [rpi5-prod]
-rpi5 ansible_host=192.168.0.2 ansible_user=hunter
+rpi5 ansible_host=192.168.XX.XX ansible_user=hunter
 
 # --- DEV env ---
 [vm-prox-dev]
-dev_vm ansible_host=192.168.0.5 ansible_user=hunter
+dev_vm ansible_host=192.168.XX.XX ansible_user=hunter
 
 # --- Local DEV VM env ---
 [local-vm]
@@ -125,8 +128,10 @@ This single command runs all playbooks in sequence:
 - import_playbook: 04_2_deploy_containers.yml
 - import_playbook: 04_3_db_create.yml
 - import_playbook: 04_4_post_config.yml
+# This module is currently under testing and not yet fully deployed
+#- import_playbook: 04_5_deploy_AI.yml
 - import_playbook: 05_deploy_proxy.yml
-- import_playbook: 06_1_initialize_vault.yml
+- import_playbook: 06_initialize_provision_vault.yml
 ```
 
 ---
@@ -135,19 +140,18 @@ This single command runs all playbooks in sequence:
 
 The full deployment consists of **9 playbooks** executed in order. Each playbook is self-contained and can also be run individually for partial re-deployments.
 
-| Step | Playbook | Description | Details |
-|------|----------|-------------|---------|
+| Step | Playbook | Description                              | Details |
+|------|----------|------------------------------------------|---------|
 | 1 | `01_setup_secrets.yml` | Generate `.env` from Ansible Vault secrets | [→ Playbook 01](ansible-01-secrets.md) |
-| 2 | `02_setup_security.yml` | Configure UFW firewall rules | [→ Playbook 02](ansible-02-security.md) |
-| 3 | `03_setup_system.yml` | Install Docker Engine + system packages | [→ Playbook 03](ansible-03-system.md) |
+| 2 | `02_setup_security.yml` | Configure UFW firewall rules             | [→ Playbook 02](ansible-02-security.md) |
+| 3 | `03_setup_system.yml` | Install Docker Engine + system packages  | [→ Playbook 03](ansible-03-system.md) |
 | 4 | `04_1_prepare_stack.yml` | Create directories, copy configs and Dockerfiles | [→ Playbook 04.1](ansible-04-stack.md) |
 | 5 | `04_2_deploy_containers.yml` | Pull images and start Docker Compose stack | [→ Playbook 04.2](ansible-04-stack.md#42-deploy-containers) |
-| 6 | `04_3_db_create.yml` | Initialize MySQL schema and users | [→ Playbook 04.3](ansible-04-db.md) |
-| 7 | `04_4_post_config.yml` | Post-start: Fail2Ban, Pi-hole, accounts | [→ Playbook 04.4](ansible-04-post-config.md) |
+| 6 | `04_3_db_create.yml` | Initialize MySQL schema and users        | [→ Playbook 04.3](ansible-04-db.md) |
+| 7 | `04_4_post_config.yml` | Post-start: Fail2Ban, Pi-hole, accounts  | [→ Playbook 04.4](ansible-04-post-config.md) |
 | 7.5 | `04_5_deploy_AI.yml` | Deploy Ollama + local AI models (optional) | [→ Playbook 04.5](ansible-04-ai.md) |
 | 8 | `05_deploy_proxy.yml` | Deploy Nginx reverse proxy + SSL certificates | [→ Playbook 05](ansible-05-proxy.md) |
-| 9 | `06_1_initialize_vault.yml` | Initialize HashiCorp Vault | [→ Playbook 06](ansible-06-vault.md) |
-| 10 | `06_2_provision_vault.yml` | Provision all secrets into Vault | [→ Playbook 06](ansible-06-vault.md#62-provision-vault) |
+| 9 | `06_initialize_provision_vault.yml` | Initialize and provision HashiCorp Vault | [→ Playbook 06](ansible-06-vault.md) |
 
 ---
 

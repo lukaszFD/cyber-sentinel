@@ -103,7 +103,7 @@
             dest: /etc/argononed.conf
             content: |
               # Argon Fan Speed Configuration (CPU)
-              55=100
+              55=50
               65=100
             owner: root
             group: root
