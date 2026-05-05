@@ -1,0 +1,266 @@
+---
+- name: Deploy Database Partitioning & Retention Policy
+  hosts: all_servers
+  become: yes
+
+  vars:
+    retention_script: "{{ main_repo_source_dir }}/config/mysql/db_partitioning_retention.sql"
+    retention_log: "{{ remote_deploy_base }}/partition_setup.log"
+
+  tasks:
+    # ============================================
+    # SECTION 1: PRE-FLIGHT CHECKS
+    # ============================================
+    - name: Section 1 - Pre-flight Checks
+      block:
+        - name: Task 1.1 - Check if MySQL container is running
+          ansible.builtin.command:
+            cmd: docker ps --filter name=mysql_db --format "{{ '{{' }}.Names{{ '}}' }}"
+          register: mysql_container
+          changed_when: false
+
+        - name: Task 1.2 - Verify MySQL container exists
+          ansible.builtin.fail:
+            msg: "MySQL container 'mysql_db' is not running!"
+          when: "'mysql_db' not in mysql_container.stdout"
+
+        - name: Task 1.3 - Check MySQL connectivity
+          ansible.builtin.command:
+            cmd: docker exec mysql_db mysqladmin ping -h localhost -u root -p'{{ vault_mysql_root_password }}'
+          register: mysql_ping
+          changed_when: false
+          no_log: true
+
+    # ============================================
+    # SECTION 2: ENABLE EVENT SCHEDULER
+    # ============================================
+    - name: Section 2 - Enable Event Scheduler
+      block:
+        - name: Task 2.1 - Check event scheduler status
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -sN
+              -e "SELECT @@global.event_scheduler;"
+          register: event_scheduler_status
+          changed_when: false
+          no_log: true
+
+        - name: Task 2.2 - Enable event scheduler if disabled
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -e "SET GLOBAL event_scheduler = ON;"
+          when: "'ON' not in event_scheduler_status.stdout"
+          changed_when: true
+          no_log: true
+
+        - name: Task 2.3 - Display event scheduler status
+          ansible.builtin.debug:
+            msg: "Event Scheduler is {{ 'ON' if 'ON' in event_scheduler_status.stdout else 'now ENABLED' }}"
+
+    # ============================================
+    # SECTION 3: COPY PARTITIONING SCRIPT
+    # ============================================
+    - name: Section 3 - Deploy Partition Script
+      block:
+        - name: Task 3.1 - Copy partitioning script to server
+          ansible.builtin.copy:
+            src: "{{ retention_script }}"
+            dest: "{{ remote_deploy_base }}/db_partitioning_retention.sql"
+            owner: "{{ deployment_user }}"
+            mode: '0600'
+
+    # ============================================
+    # SECTION 4: EXECUTE PARTITIONING SETUP
+    # ============================================
+    - name: Section 4 - Setup Partitioning
+      block:
+        - name: Task 4.1 - Initialize partition setup log
+          ansible.builtin.shell:
+            cmd: |
+              echo "================================================" > {{ retention_log }}
+              echo "Partition Setup Started: $(date)" >> {{ retention_log }}
+              echo "User: {{ deployment_user }}" >> {{ retention_log }}
+              echo "================================================" >> {{ retention_log }}
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Task 4.2 - Execute partitioning script
+          ansible.builtin.shell:
+            cmd: |
+              docker exec -i mysql_db mysql \
+                -u root -p'{{ vault_mysql_root_password }}' \
+                cyber_intelligence < {{ remote_deploy_base }}/db_partitioning_retention.sql \
+                2>&1 | tee -a {{ retention_log }}
+            executable: /bin/bash
+          register: partition_result
+          failed_when: partition_result.rc != 0
+          no_log: true
+
+        - name: Task 4.3 - Log completion
+          ansible.builtin.shell:
+            cmd: |
+              echo "================================================" >> {{ retention_log }}
+              echo "Partition Setup Status: SUCCESS" >> {{ retention_log }}
+              echo "Completed: $(date)" >> {{ retention_log }}
+              echo "================================================" >> {{ retention_log }}
+            executable: /bin/bash
+          when: partition_result.rc == 0
+          changed_when: false
+
+    # ============================================
+    # SECTION 5: VERIFICATION
+    # ============================================
+    - name: Section 5 - Verify Partitioning
+      block:
+        - name: Task 5.1 - Count partitions on dns_queries
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -sN
+              -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.PARTITIONS 
+                  WHERE TABLE_SCHEMA='cyber_intelligence' 
+                  AND TABLE_NAME='dns_queries' 
+                  AND PARTITION_NAME IS NOT NULL;"
+          register: dns_partitions
+          changed_when: false
+          no_log: true
+
+        - name: Task 5.2 - Count partitions on network_events
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -sN
+              -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.PARTITIONS 
+                  WHERE TABLE_SCHEMA='cyber_intelligence' 
+                  AND TABLE_NAME='network_events' 
+                  AND PARTITION_NAME IS NOT NULL;"
+          register: network_partitions
+          changed_when: false
+          no_log: true
+
+        - name: Task 5.3 - Count partitions on threat_indicators
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -sN
+              -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.PARTITIONS 
+                  WHERE TABLE_SCHEMA='cyber_intelligence' 
+                  AND TABLE_NAME='threat_indicators' 
+                  AND PARTITION_NAME IS NOT NULL;"
+          register: threat_partitions
+          changed_when: false
+          no_log: true
+
+        - name: Task 5.4 - Check stored procedures
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -sN
+              -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.ROUTINES 
+                  WHERE ROUTINE_SCHEMA='cyber_intelligence' 
+                  AND ROUTINE_TYPE='PROCEDURE';"
+          register: procedures_count
+          changed_when: false
+          no_log: true
+
+        - name: Task 5.5 - Check scheduled events
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              -sN
+              -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.EVENTS 
+                  WHERE EVENT_SCHEMA='cyber_intelligence';"
+          register: events_count
+          changed_when: false
+          no_log: true
+
+        - name: Task 5.6 - Display partitioning summary
+          ansible.builtin.debug:
+            msg:
+              - "===== Partitioning Setup Summary ====="
+              - "Status: SUCCESS"
+              - "Partitions Created:"
+              - "  - dns_queries: {{ dns_partitions.stdout }} partitions"
+              - "  - network_events: {{ network_partitions.stdout }} partitions"
+              - "  - threat_indicators: {{ threat_partitions.stdout }} partitions"
+              - "Automation:"
+              - "  - Stored Procedures: {{ procedures_count.stdout }}"
+              - "  - Scheduled Events: {{ events_count.stdout }}"
+              - "Log Location: {{ retention_log }}"
+              - "======================================="
+
+        - name: Task 5.7 - Show partition details
+          ansible.builtin.command:
+            cmd: >
+              docker exec mysql_db mysql
+              -u root -p'{{ vault_mysql_root_password }}'
+              cyber_intelligence
+              -e "SELECT TABLE_NAME, PARTITION_NAME, 
+                  ROUND((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024, 2) AS size_mb
+                  FROM INFORMATION_SCHEMA.PARTITIONS 
+                  WHERE TABLE_SCHEMA='cyber_intelligence' 
+                  AND PARTITION_NAME IS NOT NULL 
+                  ORDER BY TABLE_NAME, PARTITION_NAME 
+                  LIMIT 10;"
+          register: partition_details
+          changed_when: false
+          no_log: true
+
+        - name: Task 5.8 - Display sample partitions
+          ansible.builtin.debug:
+            msg: "{{ partition_details.stdout_lines }}"
+
+    # ============================================
+    # SECTION 6: CLEANUP
+    # ============================================
+    - name: Section 6 - Cleanup
+      block:
+        - name: Task 6.1 - Remove temporary partition script
+          ansible.builtin.file:
+            path: "{{ remote_deploy_base }}/db_partitioning_retention.sql"
+            state: absent
+
+        - name: Task 6.2 - Display next steps
+          ansible.builtin.debug:
+            msg:
+              - "===== Next Steps ====="
+              - "1. Partitions will auto-rotate monthly"
+              - "2. Data older than 6 months will be dropped automatically"
+              - "3. Monitor: SELECT * FROM partition_maintenance_log;"
+              - "4. Check partitions: SELECT * FROM v_partition_info;"
+              - "5. Event scheduler runs: 1st of each month at 2-3 AM"
+              - "======================"
+
+    # ============================================
+    # SECTION 7: ERROR HANDLING
+    # ============================================
+    - name: Section 7 - Handle Errors
+      block:
+        - name: Task 7.1 - Log error details
+          ansible.builtin.shell:
+            cmd: |
+              echo "================================================" >> {{ retention_log }}
+              echo "Partition Setup Status: FAILED" >> {{ retention_log }}
+              echo "Error Time: $(date)" >> {{ retention_log }}
+              echo "================================================" >> {{ retention_log }}
+            executable: /bin/bash
+          when: partition_result.rc != 0
+          changed_when: false
+
+        - name: Task 7.2 - Display error message
+          ansible.builtin.debug:
+            msg:
+              - "===== Partitioning FAILED ====="
+              - "Please check the log file: {{ retention_log }}"
+          when: partition_result.rc != 0
+
+      when: partition_result is defined and partition_result.rc != 0
