@@ -1,68 +1,304 @@
 ---
-- name: Full Vault Lifecycle - Initialize, Unseal and Provision
+# ============================================================
+# Cyber Sentinel — Vault Full Lifecycle Playbook
+# ============================================================
+# Combines: 06_initialize_provision_vault.yml + 06_2_provision_vault.yml
+#
+# Behaviour:
+#   - First run (uninitialized Vault):
+#       * Initializes Vault, captures root_token + unseal_keys
+#       * Auto-unseals using freshly generated keys
+#       * Provisions all secrets, certs, credentials
+#       * Displays root_token + unseal_keys ONCE at the end
+#         (operator must save them manually — never written anywhere)
+#
+#   - Re-run (initialized Vault):
+#       * Skips init
+#       * Auto-unseals from group_vars (vault_unseal_keys) if sealed
+#       * Provisions / updates secrets using vault_root_token from group_vars
+#       * Final message confirms success without exposing keys
+#
+# Security notes:
+#   - Unseal keys are NEVER written to Vault itself (chicken-and-egg)
+#   - All secret-bearing tasks use no_log: true
+#   - Pre-flight check fails fast if required vars are missing
+# ============================================================
+
+- name: Cyber Sentinel — Vault Full Lifecycle (Init + Unseal + Provision)
   hosts: all_servers
+  gather_facts: false
+
   vars:
     vault_url: "http://{{ ansible_host }}:8200"
+    mysql_host: "10.10.10.9"
+    mongo_host: "10.10.10.8"
+
+    # Vars required for re-runs (initialized Vault). Skipped on first run
+    # because the freshly generated creds are used instead.
+    required_vars_rerun:
+      - vault_root_token
+      - vault_unseal_keys
+
+    # Vars required in BOTH scenarios (always needed for provisioning)
+    required_vars_always:
+      - vault_virus_total_token
+      - vault_gemini_api_key
+      - vault_kali_gemini_api_key
+      - vault_abuse_api_key
+      - vault_grafana_api_key
+      - vault_urlscanio_api_key
+      - vault_pihole_admin_password
+      - vault_grafana_password
+      - vault_portainer_password
+      - vault_n8n_password
+      - vault_mysql_root_password
+      - vault_mysql_password
+      - vault_mongodb_password
+      - vault_n8n_gmail
+      - portainer_admin_user
+      - n8n_admin_user
+      - vault_mysql_app_user
+
+    # Cert/key pairs — checked dynamically via lookup
+    required_cert_services:
+      - pihole
+      - n8n
+      - grafana
 
   tasks:
-    - name: Check if Vault is initialized
+
+    # ============================================================
+    # STAGE 0 — PRE-FLIGHT CHECKS
+    # ============================================================
+
+    - name: "[PRE] Check Vault initialization status"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/init"
         method: GET
       register: vault_init_check
 
-    - name: Initialize Vault
+    - name: "[PRE] Set fact — is Vault already initialized"
+      ansible.builtin.set_fact:
+        vault_already_initialized: "{{ vault_init_check.json.initialized }}"
+
+    - name: "[PRE] Verify always-required variables are defined"
+      ansible.builtin.assert:
+        that:
+          - vars[item] is defined
+          - vars[item] | string | length > 0
+        fail_msg: "Required variable '{{ item }}' is missing or empty. Define it in group_vars."
+        quiet: true
+      loop: "{{ required_vars_always }}"
+
+    - name: "[PRE] Verify re-run variables are defined (only if Vault already initialized)"
+      ansible.builtin.assert:
+        that:
+          - vars[item] is defined
+          - vars[item] | string | length > 0
+        fail_msg: "Required variable '{{ item }}' is missing. Vault is already initialized; you must provide existing root_token and unseal_keys in group_vars."
+        quiet: true
+      loop: "{{ required_vars_rerun }}"
+      when: vault_already_initialized
+
+    - name: "[PRE] Verify cert/key pairs exist for each service"
+      ansible.builtin.assert:
+        that:
+          - lookup('vars', 'vault_' + item + '_cert', default='') | length > 0
+          - lookup('vars', 'vault_' + item + '_key',  default='') | length > 0
+        fail_msg: "Missing cert/key for service '{{ item }}'. Expected vars: vault_{{ item }}_cert and vault_{{ item }}_key."
+        quiet: true
+      loop: "{{ required_cert_services }}"
+
+    - name: "[PRE] Pre-flight summary"
+      ansible.builtin.debug:
+        msg:
+          - "Vault host: {{ vault_url }}"
+          - "Already initialized: {{ vault_already_initialized }}"
+          - "Mode: {{ 'RE-RUN (using existing creds)' if vault_already_initialized else 'FIRST INIT (generating new creds)' }}"
+
+    # ============================================================
+    # STAGE 1 — INITIALIZE (only if Vault is fresh)
+    # ============================================================
+
+    - name: "[INIT] Initialize Vault (generates root_token + unseal_keys)"
       ansible.builtin.shell:
         cmd: "docker exec hashicorp_vault vault operator init -format=json"
       register: vault_init_raw
-      when: not vault_init_check.json.initialized
+      when: not vault_already_initialized
+      changed_when: vault_init_raw.rc == 0
 
-    - name: Parse Vault Credentials
+    - name: "[INIT] Parse newly generated credentials"
       ansible.builtin.set_fact:
         vault_creds: "{{ vault_init_raw.stdout | from_json }}"
-      when: vault_init_raw.changed
+      when: not vault_already_initialized
+      no_log: true
 
-    - name: Unseal Vault automatically after init
+    # Unified token used by all subsequent tasks: either freshly generated
+    # (first run) or pulled from group_vars (re-run).
+    - name: "[INIT] Set effective root token for this play"
+      ansible.builtin.set_fact:
+        effective_root_token: >-
+          {{ vault_creds.root_token if not vault_already_initialized
+             else vault_root_token | trim }}
+      no_log: true
+
+    # ============================================================
+    # STAGE 2 — UNSEAL
+    # ============================================================
+
+    - name: "[UNSEAL] Re-check Vault health (after potential init)"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/health"
+        status_code: [200, 429, 501, 503]
+      register: vault_health
+
+    - name: "[UNSEAL] Auto-unseal using freshly generated keys (first run)"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/unseal"
         method: POST
         body: { key: "{{ item }}" }
         body_format: json
       loop: "{{ vault_creds.unseal_keys_b64 }}"
-      when: vault_init_raw.changed
+      when:
+        - not vault_already_initialized
+        - vault_health.status == 503
       no_log: true
 
-    - name: Ensure KV Secrets Engine is enabled
+    - name: "[UNSEAL] Auto-unseal using group_vars keys (re-run, if sealed)"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/unseal"
+        method: POST
+        body: { key: "{{ item }}" }
+        body_format: json
+      loop: "{{ vault_unseal_keys | default([]) }}"
+      when:
+        - vault_already_initialized
+        - vault_health.status == 503
+      no_log: true
+
+    # ============================================================
+    # STAGE 3 — ENABLE KV ENGINE
+    # ============================================================
+
+    - name: "[KV] Ensure KV v2 secrets engine is enabled at /secret"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/mounts/secret"
         method: POST
-        headers:
-          X-Vault-Token: "{{ vault_creds.root_token if vault_init_raw.changed else vault_root_token }}"
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
         body: { type: "kv", options: { version: "2" } }
         body_format: json
-        status_code: [200, 204, 400]
+        status_code: [200, 204, 400]   # 400 = already enabled
+      no_log: true
 
-    - name: Provision Application Secrets
+    # ============================================================
+    # STAGE 4 — API KEYS
+    # ============================================================
+
+    - name: "[API] Provision external API tokens"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/{{ item.path }}"
+        method: POST
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body: { data: { token: "{{ item.value }}" } }
+        body_format: json
+        status_code: [200, 204]
+      no_log: true
+      loop:
+        - { path: "virustotal",                     value: "{{ vault_virus_total_token }}" }
+        - { path: "gemini/home-network-guardian",   value: "{{ vault_gemini_api_key }}" }
+        - { path: "gemini/kali-linux",              value: "{{ vault_kali_gemini_api_key }}" }
+        - { path: "abuse/api-key",                  value: "{{ vault_abuse_api_key }}" }
+        - { path: "grafana/api-key",                value: "{{ vault_grafana_api_key }}" }
+        - { path: "urlscanio/api-key",              value: "{{ vault_urlscanio_api_key }}" }
+
+    # ============================================================
+    # STAGE 5 — CERTIFICATES
+    # ============================================================
+
+    - name: "[CERTS] Provision TLS certs/keys for services"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/certs/{{ item }}"
+        method: POST
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body:
+          data:
+            cert: "{{ lookup('vars', 'vault_' + item + '_cert') }}"
+            key:  "{{ lookup('vars', 'vault_' + item + '_key') }}"
+        body_format: json
+        status_code: [200, 204]
+      loop: "{{ required_cert_services }}"
+      no_log: true
+
+    # ============================================================
+    # STAGE 6 — APP & DATABASE CREDENTIALS
+    # ============================================================
+
+    - name: "[CREDS] Provision application and database credentials"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/credentials/{{ item.path }}"
         method: POST
-        headers:
-          X-Vault-Token: "{{ vault_creds.root_token if vault_init_raw.changed else vault_root_token }}"
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
         body:
           data:
-            user: "{{ item.user | default('hunter') }}"
+            user: "{{ item.user | default('admin') }}"
             password: "{{ item.value }}"
         body_format: json
         status_code: [200, 204]
       no_log: true
       loop:
-        - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}", user: "hunter" }
-        - { path: "pihole", value: "{{ vault_pihole_admin_password }}" }
+        # App passwords
+        - { path: "pihole",            value: "{{ vault_pihole_admin_password }}" }
+        - { path: "grafana",           value: "{{ vault_grafana_password }}" }
+        - { path: "portainer",         value: "{{ vault_portainer_password }}", user: "{{ portainer_admin_user }}" }
+        - { path: "n8n",               value: "{{ vault_n8n_password }}",       user: "{{ n8n_admin_user }}" }
+        # Database roots
+        - { path: "mysql/root",        value: "{{ vault_mysql_root_password }}", user: "root" }
+        - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}",      user: "{{ vault_mysql_app_user }}" }
+        - { path: "mongodb/admin",     value: "{{ vault_mongodb_password }}",    user: "admin" }
+        # Email
+        - { path: "gmail",   value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}" }
 
-    - name: Display Vault Credentials for Backup
+    # ============================================================
+    # STAGE 7 — FINAL MESSAGE
+    # ============================================================
+    # On first init: display creds ONCE so operator can save them manually.
+    # On re-run: just confirm success, never re-display anything sensitive.
+
+    - name: "[DONE] First-init credential display (SAVE THESE NOW — shown only once)"
       ansible.builtin.debug:
         msg:
-          - "VAULT INITIALIZED SUCCESSFULLY"
-          - "Root Token: {{ vault_creds.root_token }}"
-          - "Unseal Keys: {{ vault_creds.unseal_keys_b64 }}"
-      when: vault_init_raw.changed
+          - "============================================================"
+          - "  VAULT INITIALIZED SUCCESSFULLY — SAVE THE FOLLOWING NOW"
+          - "============================================================"
+          - ""
+          - "  Root Token: {{ vault_creds.root_token }}"
+          - ""
+          - "  Unseal Keys (need 3 of 5 to unseal):"
+          - "{{ vault_creds.unseal_keys_b64 | to_nice_yaml(indent=4) }}"
+          - ""
+          - "  ACTION REQUIRED:"
+          - "    1. Copy the values above to a secure offline location"
+          - "       (password manager, encrypted vault, sealed envelope)"
+          - "    2. Add 'vault_root_token' and 'vault_unseal_keys' to your"
+          - "       group_vars (encrypted with ansible-vault) for re-runs"
+          - "    3. These keys will NEVER be displayed again"
+          - ""
+          - "  WARNING: Unseal keys are NOT stored in Vault by design"
+          - "  (chicken-and-egg). Lose them and you lose access to all"
+          - "  Vault data permanently."
+          - "============================================================"
+      when: not vault_already_initialized
+
+    - name: "[DONE] Re-run completion message"
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "  Vault provisioning completed successfully"
+          - "============================================================"
+          - "  Mode:    RE-RUN on existing Vault"
+          - "  Host:    {{ vault_url }}"
+          - "  Action:  Use your stored Root Token to log in via UI or CLI"
+          - "           and back up Unseal Keys if needed."
+          - "  Login:   {{ vault_url }}/ui"
+          - "============================================================"
+      when: vault_already_initialized
