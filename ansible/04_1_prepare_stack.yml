@@ -1,4 +1,38 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 04.1 — Prepare Sentinel Stack
+# ============================================================
+# Purpose:    Stages all configuration files, Dockerfiles, scripts,
+#             and provisioning data on the remote host BEFORE the
+#             docker compose run in playbook 04.2. This is purely
+#             a file-copy / directory-creation playbook — no
+#             services are started here.
+#
+# Depends on: - Playbook 03 (Docker installed, deployment_user in group)
+#             - Playbook 01 (.env file exists at remote_deploy_base)
+#             - Source files present under main_repo_source_dir on
+#               the Ansible control host (config/*, docker/*).
+#
+# Outputs:    Fully populated {{ remote_deploy_base }} tree containing:
+#               - docker-compose YAML
+#               - Dockerfiles for custom images (pdns, log_processor, vault unsealer)
+#               - Service configs (unbound, mongo init, prometheus, grafana)
+#               - Pre-created log file with permissive ownership for DNS container
+#               - Vault data directory with correct UID:GID
+#
+# Errors:     - "Could not find or access" — main_repo_source_dir is
+#               wrong or files are missing in the source repo.
+#             - "Permission denied" on /var-log/dns.log — UID 1000 on
+#               remote does not match the UID baked into the pdns image.
+#             - "Permission denied" on vault/data — UID 100 (vault user
+#               inside container) cannot write; check fix in [04.1.5].
+#
+# Note:       Variables `source_mysql_script` and `mysql_init_log` are
+#             defined but unused in this playbook — they are consumed
+#             by playbook 04.3. Consider removing the duplicates here
+#             in a future cleanup (left as-is per current scope).
+# ============================================================
+
 - name: 04.1 - Prepare Sentinel Stack environment
   hosts: all_servers
   become: yes
@@ -9,11 +43,24 @@
 
     source_docker_compose_file: "{{ main_repo_source_dir }}/docker/{{ docker_compose_file_name }}"
     remote_docker_compose_file: "{{ remote_deploy_base }}/{{ docker_compose_file_name }}"
+
+    # NOTE: The two vars below are unused in this playbook. They are
+    # re-declared and used in 04_3_db_create.yml. Kept here for now
+    # to avoid breaking any external references; review for removal.
     source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
     mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
 
   tasks:
-    - name: Create required directories
+    # ============================================================
+    # SECTION 1 — Directory tree
+    # ------------------------------------------------------------
+    # Single bulk task creates the full directory layout under
+    # remote_deploy_base. Done up front so subsequent file copy
+    # tasks can land into pre-existing destinations without each
+    # task needing to call file: state=directory first.
+    # ============================================================
+
+    - name: "[04.1.1.1] Create required directories"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/{{ item }}"
         state: directory
@@ -21,25 +68,32 @@
         group: "{{ deployment_user }}"
         mode: '0755'
       loop:
-        - "config/prometheus"
-        - "config/nginx/conf.d"
-        - "config/nginx/certs"
-        - "config/nginx/html"
-        - "config/mongo"
-        - "config/mysql"
-        - "config/unbound"
-        - "config/dns/dnsmasq.d"
-        - "config/dns/var-log"
-        - "config/kali"
-        - "portainer_data"
-        - "n8n_data"
-        - "config/vault/data"
-        - "config/vault/config"
-        - "config/grafana/provisioning/datasources"
-        - "config/grafana/provisioning/dashboards"
-        - "config/grafana/dashboards"
+        - "config/prometheus"                          # Prometheus scrape config
+        - "config/nginx/conf.d"                        # Nginx server blocks (populated in 05)
+        - "config/nginx/certs"                         # TLS certs (populated in 05)
+        - "config/nginx/html"                          # Static error pages
+        - "config/mongo"                               # MongoDB init script
+        - "config/mysql"                               # MySQL init scripts (populated in 04.3)
+        - "config/unbound"                             # Recursive DNS resolver config
+        - "config/dns/dnsmasq.d"                       # Pi-hole local DNS overrides
+        - "config/dns/var-log"                         # Passive DNS log volume
+        - "config/kali"                                # Kali container shared dir
+        - "portainer_data"                             # Portainer state volume
+        - "n8n_data"                                   # n8n workflows + credentials volume
+        - "config/vault/data"                          # Vault file-backend storage (UID 100)
+        - "config/vault/config"                        # Vault HCL config files
+        - "config/grafana/provisioning/datasources"    # Auto-provisioned datasources
+        - "config/grafana/provisioning/dashboards"     # Dashboard provisioning manifest
+        - "config/grafana/dashboards"                  # Actual dashboard JSON files
 
-    - name: Copy docker-compose file
+    # ============================================================
+    # SECTION 2 — Stack manifests (docker-compose + Dockerfiles)
+    # ------------------------------------------------------------
+    # Copies the orchestration manifest and all custom Dockerfiles
+    # used by `docker compose up --build` in playbook 04.2.
+    # ============================================================
+
+    - name: "[04.1.2.1] Copy docker-compose file"
       ansible.builtin.copy:
         src: "{{ source_docker_compose_file }}"
         dest: "{{ remote_docker_compose_file }}"
@@ -47,28 +101,51 @@
         group: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Copy Dockerfile for Passive DNS
+    - name: "[04.1.2.2] Copy Dockerfile for Passive DNS sniffer"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.pdns"
         dest: "{{ remote_deploy_base }}/Dockerfile.pdns"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Copy Dockerfile for DNS Log Processor
+    - name: "[04.1.2.3] Copy Dockerfile for DNS log processor"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.log_processor"
         dest: "{{ remote_deploy_base }}/Dockerfile.log_processor"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Copy python script for DNS Log Processor
+    - name: "[04.1.2.4] Copy log processor Python script"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/dns/log_processor.py"
         dest: "{{ remote_deploy_base }}/log_processor.py"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Ensure Secrets are in .env (Vault)
+    - name: "[04.1.2.5] Copy Dockerfile for Vault auto-unsealer"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/hcv/Dockerfile.unsealer"
+        dest: "{{ remote_deploy_base }}/Dockerfile.unsealer"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: "[04.1.2.6] Copy Vault auto-unsealer Python script"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/hcv/unsealer.py"
+        dest: "{{ remote_deploy_base }}/unsealer.py"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
+    # ============================================================
+    # SECTION 3 — Inject DB-related secrets into .env
+    # ------------------------------------------------------------
+    # Appends/updates the three database-tier passwords in the
+    # already-existing .env file (created by playbook 01). Uses
+    # lineinfile with a regexp anchor so re-runs UPDATE rather than
+    # APPEND duplicate lines if values rotate.
+    # ============================================================
+
+    - name: "[04.1.3.1] Ensure DB secrets are present in .env"
       ansible.builtin.lineinfile:
         path: "{{ remote_deploy_base }}/.env"
         regexp: "^{{ item.key }}="
@@ -77,26 +154,43 @@
         owner: "{{ deployment_user }}"
         mode: '0600'
       loop:
-        - { key: 'GRAFANA_PASSWORD', value: "{{ vault_grafana_password }}" }
-        - { key: 'MONGODB_PASSWORD', value: "{{ vault_mongodb_password }}" }
-        - { key: 'MYSQL_ROOT_PASSWORD', value: "{{ vault_mysql_root_password }}" }
+        - { key: 'GRAFANA_PASSWORD',     value: "{{ vault_grafana_password }}" }
+        - { key: 'MONGODB_PASSWORD',     value: "{{ vault_mongodb_password }}" }
+        - { key: 'MYSQL_ROOT_PASSWORD',  value: "{{ vault_mysql_root_password }}" }
       no_log: true
 
-    - name: Copy Unbound configuration file
+    # ============================================================
+    # SECTION 4 — Service configuration files
+    # ------------------------------------------------------------
+    # Copies static config for Unbound (recursive DNS), MongoDB init
+    # script, Prometheus scrape targets, and Grafana provisioning.
+    # Grafana dashboards land in two places intentionally — see
+    # comment on [04.1.4.5].
+    # ============================================================
+
+    - name: "[04.1.4.1] Copy Unbound DNS resolver configuration"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/unbound/unbound.conf"
         dest: "{{ remote_deploy_base }}/config/unbound/unbound.conf"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Copy MongoDB initialization script
+    - name: "[04.1.4.2] Copy MongoDB initialization script"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/mongo/init_mongo.js"
         dest: "{{ remote_deploy_base }}/config/mongo/db_init.js"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Copy Grafana Provisioning (Dashboards & Datasources)
+    - name: "[04.1.4.3] Copy Prometheus scrape configuration"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/prometheus/prometheus.yml"
+        dest: "{{ remote_deploy_base }}/config/prometheus/prometheus.yml"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+
+    - name: "[04.1.4.4] Copy Grafana provisioning tree (datasources + manifests)"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/grafana/provisioning/"
         dest: "{{ remote_deploy_base }}/config/grafana/provisioning/"
@@ -105,30 +199,12 @@
         mode: '0644'
         directory_mode: '0755'
 
-    - name: Prepare DNS log file with correct permissions
-      ansible.builtin.file:
-        path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
-        state: touch
-        owner: "1000"
-        group: "1000"
-        mode: '0666'
-
-    - name: Set permissions for Vault data directory
-      ansible.builtin.file:
-        path: "{{ remote_deploy_base }}/config/vault/data"
-        owner: "100"
-        group: "1000"
-        mode: '0700'
-
-    - name: Copy Prometheus configuration file
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/prometheus/prometheus.yml"
-        dest: "{{ remote_deploy_base }}/config/prometheus/prometheus.yml"
-        owner: "{{ deployment_user }}"
-        group: "{{ deployment_user }}"
-        mode: '0644'
-
-    - name: Copy Dashboard JSON files to the main dashboard folder
+    # Dashboard JSONs live under provisioning/dashboards/ in the repo
+    # but Grafana's file-based provisioning expects them in a separate
+    # directory referenced from dashboards.yml. Copying to BOTH paths
+    # keeps the source-of-truth in one place and satisfies Grafana's
+    # path expectations without symlinks.
+    - name: "[04.1.4.5] Copy dashboard JSONs to Grafana's runtime path"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/grafana/provisioning/dashboards/"
         dest: "{{ remote_deploy_base }}/config/grafana/dashboards/"
@@ -136,16 +212,33 @@
         group: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: Copy Dockerfile for Vault Unsealer
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/hcv/Dockerfile.unsealer"
-        dest: "{{ remote_deploy_base }}/Dockerfile.unsealer"
-        owner: "{{ deployment_user }}"
-        mode: '0644'
+    # ============================================================
+    # SECTION 5 — Container UID/permission fixes
+    # ------------------------------------------------------------
+    # Two container images (pdns, vault) run as non-root UIDs that
+    # don't match deployment_user on the host. Bind-mounted volumes
+    # inherit host ownership, so we pre-create files/dirs with the
+    # UIDs the containers expect — otherwise they fail at startup
+    # with "permission denied" or silently log nothing.
+    # ============================================================
 
-    - name: Copy Vault Unsealer script
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/hcv/unsealer.py"
-        dest: "{{ remote_deploy_base }}/unsealer.py"
-        owner: "{{ deployment_user }}"
-        mode: '0644'
+    # The pdns container writes to dns.log as UID 1000. Mode 0666 is
+    # intentional: the log_processor container reads from the same
+    # file and may run as a different UID.
+    - name: "[04.1.5.1] Pre-create DNS log file with permissive ownership (UID 1000)"
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
+        state: touch
+        owner: "1000"
+        group: "1000"
+        mode: '0666'
+
+    # Vault server runs as UID 100 inside the container. Mode 0700
+    # is required by Vault — it refuses to start with a more
+    # permissive storage backend directory.
+    - name: "[04.1.5.2] Set ownership for Vault data directory (UID 100)"
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/vault/data"
+        owner: "100"
+        group: "1000"
+        mode: '0700'

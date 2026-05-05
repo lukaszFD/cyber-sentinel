@@ -1,28 +1,106 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 04.5 — Local AI Suite (Ollama) [OPTIONAL]
+# ============================================================
+# Purpose:    Deploys the Ollama runtime in a Docker container with
+#             hardware limits suitable for Raspberry Pi 5, then pulls
+#             two compact LLMs (Llama 3.2 3B and DeepSeek Coder 1.3B)
+#             for local inference. Provides an alternative to the
+#             default Google Gemini API path used by the n8n workflow.
+#
+# Status:     DISABLED by default in 00_main.yml. Enable the import
+#             line if you want local AI inference instead of Gemini.
+#             The current production workflow uses Gemini for cost
+#             and quality reasons; this playbook exists for users
+#             with strict data-residency requirements or no internet.
+#
+# Depends on: - Playbook 04.2 (Docker + cyber-sentinel network exists)
+#             - At least 8GB RAM on the host (4GB allocated to Ollama,
+#               rest for the rest of the stack); marginal on RPi 5 8GB.
+#             - Outbound HTTPS access to ollama.com / registry.ollama.ai
+#               for model downloads (~3-4GB total).
+#
+# Outputs:    - Ollama container running on port 11434
+#             - ollama_data Docker volume containing the pulled models
+#             - Two models ready: llama3.2:3b, deepseek-coder:1.3b
+#             - Models available to other containers via the
+#               cyber-sentinel_internal_network at http://ollama:11434
+#
+# Errors:     - "no such network" — playbook 04.2 was not run, or the
+#               compose project name doesn't match. Network is created
+#               here too via [04.5.1.1] as a safety net.
+#             - Model pull timeouts — large downloads on slow links.
+#               Ollama retries automatically; manual `docker exec ollama
+#               ollama pull <model>` can resume an interrupted pull.
+#             - OOMKilled on RPi — 4GB memory limit may be too tight
+#               with both models loaded. Adjust max_memory variable.
+#
+# Performance: Llama 3.2 3B Q4 inference on RPi 5 (8GB):
+#                - Cold start: ~5-8s for first token
+#                - Sustained:  ~3-5 tokens/sec
+#              Adequate for non-realtime threat triage; not adequate
+#              for interactive chat.
+# ============================================================
+
 - name: Deploy AI Suite for Cyber Sentinel (RPi 5 Optimized)
   hosts: all_servers
   become: yes
 
   vars:
+    # Must match the network name created by docker compose in 04.2.
+    # Compose prefixes networks with the project name (cyber-sentinel)
+    # so the actual network is cyber-sentinel_internal_network.
     docker_network: "cyber-sentinel_internal_network"
+
+    # Two complementary models:
+    #   llama3.2:3b           — general reasoning, threat analysis text
+    #   deepseek-coder:1.3b   — lightweight coding model (config gen)
+    # Both are Q4-quantized variants (~2GB and ~800MB respectively).
     ai_models:
       - "llama3.2:3b"
       - "deepseek-coder:1.3b"
+
+    # Hardware caps tuned for RPi 5 8GB. cpu_quota is in microseconds
+    # per 100ms period — 200000 = 2 cores worth of CPU time.
     max_memory: "4g"
     cpu_quota: 200000
 
   tasks:
-    - name: Task 4.1 - Ensure Docker network exists
+    # ============================================================
+    # SECTION 1 — Container infrastructure
+    # ------------------------------------------------------------
+    # Ensures the Docker network and named volume exist. Both are
+    # idempotent (state: present) so re-running this section is safe.
+    # ============================================================
+
+    # Acts as a safety net: if 04.2 created the network already, this
+    # is a no-op. If it didn't (e.g. user runs this playbook standalone),
+    # the network is created here and Ollama can still attach.
+    - name: "[04.5.1.1] Ensure Docker network exists"
       community.docker.docker_network:
         name: "{{ docker_network }}"
         state: present
 
-    - name: Task 4.2 - Ensure Ollama volume exists
+    # Named volume persists model files across container restarts.
+    # Without this, every container restart would re-download ~3GB
+    # of model data.
+    - name: "[04.5.1.2] Ensure Ollama data volume exists"
       community.docker.docker_volume:
         name: ollama_data
         state: present
 
-    - name: Task 4.3 - Run Ollama Container with Hardware Limits
+    # ============================================================
+    # SECTION 2 — Ollama container
+    # ------------------------------------------------------------
+    # Starts the Ollama runtime with strict resource limits and
+    # waits for its API to become responsive before proceeding to
+    # model downloads.
+    # ============================================================
+
+    # container_default_behavior: no_defaults disables Ansible's
+    # opinion-laden defaults (memory_swappiness, cap_drop, etc.)
+    # that can clash with Ollama's expected runtime environment.
+    - name: "[04.5.2.1] Run Ollama container with hardware limits"
       community.docker.docker_container:
         name: ollama
         image: ollama/ollama:latest
@@ -38,7 +116,10 @@
         cpu_quota: "{{ cpu_quota }}"
         container_default_behavior: no_defaults
 
-    - name: Task 4.4 - Wait for Ollama API to be ready
+    # Polls the Ollama API until it responds 200. Cold start can take
+    # 30-60s on RPi 5 (image pull on first run + runtime init).
+    # 15 retries × 10s = 150s grace period.
+    - name: "[04.5.2.2] Wait for Ollama API to become responsive"
       ansible.builtin.uri:
         url: "http://localhost:11434/api/tags"
         status_code: 200
@@ -47,16 +128,26 @@
       retries: 15
       delay: 10
 
-    - name: Task 4.5 - Pull AI Models (Llama and DeepSeek)
+    # ============================================================
+    # SECTION 3 — Model provisioning
+    # ------------------------------------------------------------
+    # Downloads the configured models into the persistent volume.
+    # Each pull is potentially long (Llama 3.2 3B is ~2GB).
+    # ============================================================
+
+    # Sequential pull (loop). Ollama queues internally if multiple
+    # pulls are issued, but doing them one by one gives clearer
+    # progress reporting in the Ansible output.
+    - name: "[04.5.3.1] Pull AI models (Llama and DeepSeek)"
       command: "docker exec ollama ollama pull {{ item }}"
       loop: "{{ ai_models }}"
       register: pull_result
       changed_when: "'success' in pull_result.stdout"
 
-    - name: Task 4.6 - Verify Models Installation
+    - name: "[04.5.3.2] List installed models for verification"
       command: "docker exec ollama ollama list"
       register: models_list
 
-    - name: Debug - Show Installed Models
+    - name: "[04.5.3.3] Display installed models"
       debug:
         msg: "Installed AI Models on RPi 5: {{ models_list.stdout }}"

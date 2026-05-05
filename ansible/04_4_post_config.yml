@@ -1,137 +1,247 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 04.4 — Post-Deployment Configuration
+# ============================================================
+# Purpose:    Runs all "after-the-fact" configuration that requires
+#             containers to be running. Sets passwords, populates
+#             Pi-hole adlists, initializes admin accounts for
+#             Portainer and n8n, and imports the n8n workflow JSON.
+#
+# Depends on: - Playbook 04.2 (all containers running)
+#             - Playbook 04.3 (MySQL schema initialized — n8n needs
+#               its database tables before account init succeeds)
+#             - vault_pihole_admin_password, vault_portainer_password,
+#               vault_n8n_password, n8n_admin_email defined
+#             - Workflow JSON file present in repo at the path
+#               referenced in [04.4.4.1] — see KNOWN ISSUE below.
+#
+# Outputs:    - Fail2Ban running with aggressive SSH protection
+#             - Pi-hole admin password set; adlists imported and
+#               gravity database refreshed
+#             - Portainer owner account created
+#             - n8n owner account created
+#             - n8n workflow imported and ready to be enabled
+#
+# Errors:     - "container not found" — corresponding container failed
+#               to start in 04.2; check `docker ps` and the container
+#               logs before re-running this playbook.
+#             - n8n setup returns 401 — the n8n container is up but
+#               the database isn't seeded yet. The until: loop in
+#               [04.4.3.2] handles this with up to 150s of retries.
+#             - SQLite "database is locked" on adlist insert — Pi-hole
+#               is mid-update; re-run after gravity finishes.
+#
+# KNOWN ISSUES (deferred — do not silently fix during this pass):
+#   * [04.4.2.3] Path "{{ remote_deploy_base }}/pihole/gravity.db"
+#     does not include "config/" prefix used elsewhere in 04.1.
+#     Verify whether gravity.db is actually at this path or under
+#     config/pihole/. If wrong, this task fails silently (sqlite3
+#     creates an empty file at the bogus path).
+#   * [04.4.4.1] Workflow JSON path uses spaces and a relative
+#     "../config/" reference. lookup('file', ...) is computed
+#     relative to the playbook file, not the CWD. Likely fails
+#     after release v1.0.2-rc1 (filename will change for the new
+#     1-5 scale workflow).
+# ============================================================
+
 - name: 04.4 - Post config
   hosts: all_servers
   become: yes
 
   tasks:
-    - name: Section 1 - Fail2Ban
-      block:
-        - name: Task 1.1 - Configure Fail2Ban for SSH
-          ansible.builtin.copy:
-            dest: /etc/fail2ban/jail.local
-            content: |
-              [sshd]
-              # Enables the specific jail for SSH monitoring
-              enabled = true
-              
-              # Specifies the port to monitor (default SSH port 22)
-              port = ssh
-              
-              # Uses 'aggressive' mode to detect more than just failed passwords.
-              # It catches connection drops where no public key was offered, 
-              # which is common when password login is disabled.
-              mode = aggressive
-              
-              # Defines the number of failed attempts allowed before a ban is issued.
-              # In this case, 3 strikes and the IP is out.
-              maxretry = 3
-              
-              # The duration for which the offending IP is blocked (24 hour).
-              bantime = 24h
-              
-              # The time window during which the 3 failures must occur to trigger a ban.
-              findtime = 10m
-              
-              # Uses systemd as the backend to read logs directly from the journal.
-              # This is the most efficient method for Debian/Ubuntu systems.
-              backend = systemd
-            owner: root
-            group: root
-            mode: '0644'
+    # ============================================================
+    # SECTION 1 — Fail2Ban configuration
+    # ------------------------------------------------------------
+    # Configures Fail2Ban with an aggressive SSH jail tuned for
+    # public-facing hosts. "aggressive" mode catches connection
+    # drops from clients that don't offer a public key, which is
+    # the most common probing pattern when password auth is off.
+    # ============================================================
 
-        - name: Task 1.2 - Ensure Fail2Ban is running
-          ansible.builtin.service:
-            name: fail2ban
-            state: restarted
-            enabled: yes
+    # Configuration choices and why they matter:
+    #   - enabled = true     → activate the SSH jail
+    #   - mode = aggressive  → ban probes that don't even try a password
+    #   - maxretry = 3       → 3 strikes; balances strictness vs typos
+    #   - bantime = 24h      → long enough to deter, short enough to
+    #                          recover from accidental self-bans
+    #   - findtime = 10m     → 3 fails within 10min triggers ban
+    #   - backend = systemd  → reads journald directly (no logfile race)
+    - name: "[04.4.1.1] Configure Fail2Ban SSH jail (aggressive mode)"
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          # Enables the specific jail for SSH monitoring
+          enabled = true
 
-    - name: Section 2 - Pihole DNS
-      block:
-        - name: Task 2.1 - Set Pi-hole admin password from Vault
-          ansible.builtin.shell:
-            cmd: "docker exec pihole pihole setpassword '{{ vault_pihole_admin_password }}'"
-          register: pihole_pass_result
-          no_log: true
-          changed_when: "'New password set' in pihole_pass_result.stdout"
+          # Specifies the port to monitor (default SSH port 22)
+          port = ssh
 
-        - name: Task 2.2 - Debug Pi-hole password update
-          ansible.builtin.debug:
-            msg: "Pi-hole web interface password has been updated successfully."
-          when: pihole_pass_result.changed
+          # Uses 'aggressive' mode to detect more than just failed passwords.
+          # It catches connection drops where no public key was offered,
+          # which is common when password login is disabled.
+          mode = aggressive
 
-        - name: Task 2.3 - Add Adlists to Pi-hole database (via Host)
-          ansible.builtin.shell:
-            cmd: >
-              sqlite3 {{ remote_deploy_base }}/pihole/gravity.db
-              "INSERT OR IGNORE INTO adlist (address, enabled, comment)
-              VALUES ('{{ item.strip() }}', 1, 'Added by Ansible Sentinel');"
-          loop: "{{ lookup('file', main_repo_source_dir + '/config/pihole/adlists.txt').splitlines() }}"
-          when: item.strip() | length > 0
-          register: adlist_result
-          changed_when: adlist_result.rc == 0
+          # Defines the number of failed attempts allowed before a ban is issued.
+          # In this case, 3 strikes and the IP is out.
+          maxretry = 3
 
-        - name: Task 2.4 - Update Pi-hole Gravity
-          ansible.builtin.shell:
-            cmd: "docker exec pihole pihole -g"
-          run_once: true
-          when: adlist_result.changed
+          # The duration for which the offending IP is blocked (24 hour).
+          bantime = 24h
 
-    - name: Section 3 - Initial Account Configuration
-      block:
-        - name: Task 3.1 - Initialize Portainer Owner Account via API
-          ansible.builtin.uri:
-            url: "http://10.10.10.10:9000/api/users/admin/init"
-            method: POST
-            body_format: json
-            body:
-              username: "{{ portainer_admin_user }}"
-              password: "{{ vault_portainer_password }}"
-            status_code: [200, 409]
-          register: portainer_init
-          until: portainer_init.status in [200, 409]
-          retries: 12
-          delay: 5
-          changed_when: portainer_init.status == 200
+          # The time window during which the 3 failures must occur to trigger a ban.
+          findtime = 10m
 
-        - name: Task 3.2 - Initialize n8n Owner Account via API
-          ansible.builtin.uri:
-            url: "http://localhost:5678/rest/owner/setup"
-            method: POST
-            body_format: json
-            body:
-              email: "{{ n8n_admin_email }}"
-              password: "{{ vault_n8n_password }}"
-              firstName: "Hunter"
-              lastName: "Sentinel"
-            status_code: [200, 409]
-          register: n8n_init
-          until: n8n_init.status in [200, 409]
-          retries: 15
-          delay: 10
+          # Uses systemd as the backend to read logs directly from the journal.
+          # This is the most efficient method for Debian/Ubuntu systems.
+          backend = systemd
+        owner: root
+        group: root
+        mode: '0644'
 
-    - name: Section 4 - Import n8n Workflows
-      block:
-        - name: Task 4.1 - Read workflow JSON file
-          set_fact:
-            workflow_content: "{{ lookup('file', '../config/n8n/workflows/Automated Domain & IP Reputation Guard with HashiCorp Vault.json') | from_json }}"
+    - name: "[04.4.1.2] Restart and enable Fail2Ban service"
+      ansible.builtin.service:
+        name: fail2ban
+        state: restarted
+        enabled: yes
 
-        - name: Task 4.2 - Copy workflow file to remote host (tmp)
-          ansible.builtin.copy:
-            content: "{{ workflow_content | to_json }}"
-            dest: "/tmp/workflow_to_import.json"
-            mode: '0644'
+    # ============================================================
+    # SECTION 2 — Pi-hole DNS configuration
+    # ------------------------------------------------------------
+    # Sets the admin password (Pi-hole defaults to a random one on
+    # first start), imports custom adlists from a text file in the
+    # repo, and triggers a gravity refresh to apply them.
+    # ============================================================
 
-        - name: Task 4.3 - Copy file from host to n8n container
-          ansible.builtin.shell:
-            cmd: "docker cp /tmp/workflow_to_import.json n8n-server:/tmp/workflow_to_import.json"
+    - name: "[04.4.2.1] Set Pi-hole admin password from Vault"
+      ansible.builtin.shell:
+        cmd: "docker exec pihole pihole setpassword '{{ vault_pihole_admin_password }}'"
+      register: pihole_pass_result
+      no_log: true
+      changed_when: "'New password set' in pihole_pass_result.stdout"
 
-        - name: Task 4.4 - Import workflow via n8n CLI
-          ansible.builtin.shell:
-            cmd: "docker exec -u node n8n-server n8n import:workflow --input=/tmp/workflow_to_import.json"
-          register: cli_result
-          changed_when: "'Successfully imported' in cli_result.stdout"
+    - name: "[04.4.2.2] Confirm Pi-hole password update (debug)"
+      ansible.builtin.debug:
+        msg: "Pi-hole web interface password has been updated successfully."
+      when: pihole_pass_result.changed
 
-        - name: Task 4.5 - Cleanup temporary files (host & container)
-          ansible.builtin.shell:
-            cmd: "rm -f /tmp/workflow_to_import.json && docker exec -u root n8n-server rm -f /tmp/workflow_to_import.json"
-          changed_when: false
+    # KNOWN ISSUE: path may need "config/" prefix to match 04.1 layout.
+    # Reads adlists.txt from the repo, one URL per line. Empty lines
+    # are skipped. The INSERT OR IGNORE prevents duplicate-key errors
+    # on re-runs without needing a separate "exists" check.
+    - name: "[04.4.2.3] Add adlists to Pi-hole gravity database"
+      ansible.builtin.shell:
+        cmd: >
+          sqlite3 {{ remote_deploy_base }}/pihole/gravity.db
+          "INSERT OR IGNORE INTO adlist (address, enabled, comment)
+          VALUES ('{{ item.strip() }}', 1, 'Added by Ansible Sentinel');"
+      loop: "{{ lookup('file', main_repo_source_dir + '/config/pihole/adlists.txt').splitlines() }}"
+      when: item.strip() | length > 0
+      register: adlist_result
+      changed_when: adlist_result.rc == 0
+
+    # `pihole -g` recompiles gravity.db's domain blocklists from all
+    # active adlists. Only triggered when [04.4.2.3] actually changed
+    # state — gravity rebuilds are slow (1-3 minutes on RPi 5).
+    - name: "[04.4.2.4] Refresh Pi-hole gravity database"
+      ansible.builtin.shell:
+        cmd: "docker exec pihole pihole -g"
+      run_once: true
+      when: adlist_result.changed
+
+    # ============================================================
+    # SECTION 3 — Initial admin account provisioning
+    # ------------------------------------------------------------
+    # Both Portainer and n8n require a one-time owner-account setup
+    # via their REST APIs before any other configuration can happen.
+    # Long retry loops accommodate slow container cold-starts on RPi.
+    # ============================================================
+
+    # status_code: [200, 409] — 200 means "account created", 409 means
+    # "already initialized" (re-run on existing deployment). Both are
+    # success states. changed_when: status == 200 makes this idempotent
+    # in Ansible's reporting.
+    - name: "[04.4.3.1] Initialize Portainer owner account via API"
+      ansible.builtin.uri:
+        url: "http://10.10.10.10:9000/api/users/admin/init"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ portainer_admin_user }}"
+          password: "{{ vault_portainer_password }}"
+        status_code: [200, 409]
+      register: portainer_init
+      until: portainer_init.status in [200, 409]
+      retries: 12
+      delay: 5
+      changed_when: portainer_init.status == 200
+
+    # n8n is significantly slower to boot than Portainer (loads its
+    # SQLite DB, runs migrations, starts the worker pool). 15 × 10s
+    # = 150s grace period covers the worst case observed on RPi 5.
+    - name: "[04.4.3.2] Initialize n8n owner account via API"
+      ansible.builtin.uri:
+        url: "http://localhost:5678/rest/owner/setup"
+        method: POST
+        body_format: json
+        body:
+          email: "{{ n8n_admin_email }}"
+          password: "{{ vault_n8n_password }}"
+          firstName: "Hunter"
+          lastName: "Sentinel"
+        status_code: [200, 409]
+      register: n8n_init
+      until: n8n_init.status in [200, 409]
+      retries: 15
+      delay: 10
+
+    # ============================================================
+    # SECTION 4 — Import n8n workflow
+    # ------------------------------------------------------------
+    # Multi-step workflow import:
+    #   1. Read workflow JSON locally
+    #   2. Stage as a temp file on the host
+    #   3. Copy from host into n8n container
+    #   4. Run n8n CLI inside the container to import
+    #   5. Clean up temp files in both host and container
+    # The CLI approach is used (not the REST API) because the API
+    # requires session-based auth, while `n8n import:workflow` runs
+    # with admin privileges by default.
+    # ============================================================
+
+    # KNOWN ISSUE: filename has spaces; relative path "../config/..."
+    # is computed relative to this playbook file. Verify the path
+    # resolves correctly. Likely needs to change for the v1.0.2-rc1
+    # workflow (different filename, dynamic 1-5 scale).
+    - name: "[04.4.4.1] Read workflow JSON from repo into memory"
+      set_fact:
+        workflow_content: "{{ lookup('file', '../config/n8n/workflows/Automated Domain & IP Reputation Guard with HashiCorp Vault.json') | from_json }}"
+
+    # Re-serializes the parsed JSON. This normalizes formatting and
+    # validates that the source file is parseable JSON before we
+    # bother trying to import it.
+    - name: "[04.4.4.2] Stage workflow JSON on host filesystem"
+      ansible.builtin.copy:
+        content: "{{ workflow_content | to_json }}"
+        dest: "/tmp/workflow_to_import.json"
+        mode: '0644'
+
+    - name: "[04.4.4.3] Copy workflow file from host into n8n container"
+      ansible.builtin.shell:
+        cmd: "docker cp /tmp/workflow_to_import.json n8n-server:/tmp/workflow_to_import.json"
+
+    # `-u node` runs as the n8n process user inside the container.
+    # The CLI prints "Successfully imported X workflow(s)" on success.
+    - name: "[04.4.4.4] Import workflow via n8n CLI"
+      ansible.builtin.shell:
+        cmd: "docker exec -u node n8n-server n8n import:workflow --input=/tmp/workflow_to_import.json"
+      register: cli_result
+      changed_when: "'Successfully imported' in cli_result.stdout"
+
+    # Removes the staged workflow JSON from both host and container.
+    # changed_when: false because cleanup is best-effort and shouldn't
+    # mark the play as "changed" just for tidying up.
+    - name: "[04.4.4.5] Remove staged workflow files (host + container)"
+      ansible.builtin.shell:
+        cmd: "rm -f /tmp/workflow_to_import.json && docker exec -u root n8n-server rm -f /tmp/workflow_to_import.json"
+      changed_when: false

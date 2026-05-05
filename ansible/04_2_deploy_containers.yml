@@ -1,4 +1,38 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 04.2 — Deploy Docker Stack
+# ============================================================
+# Purpose:    Builds custom images and starts the entire Cyber Sentinel
+#             container stack via `docker compose up --build -d`.
+#             This is intentionally a thin playbook — all configuration
+#             happens in playbook 04.1, all post-deployment tweaks in
+#             playbook 04.4.
+#
+# Depends on: - Playbook 04.1 completed (compose file + Dockerfiles +
+#               configs all present at remote_deploy_base)
+#             - Playbook 03 (Docker Engine + Compose plugin installed,
+#               deployment_user in docker group)
+#             - .env file present (created in 01, augmented in 04.1)
+#
+# Outputs:    All containers from docker-compose-cyber-sentinel.yml
+#             running in detached mode. The `--build` flag forces
+#             rebuild of custom images (pdns, log_processor, unsealer)
+#             on every run, picking up Dockerfile or script changes.
+#
+# Errors:     - "Cannot connect to Docker daemon" — deployment_user not
+#               in docker group; check that 03.2.7 reset_connection ran.
+#             - "compose file not found" — playbook 04.1 did not run or
+#               failed silently.
+#             - Image build failure — check Dockerfiles in 04.1 and
+#               outbound network access on the target.
+#             - Port conflicts (53, 443, 8200, etc.) — another service
+#               is using a port; check `ss -tlnp` on the host.
+#
+# Note:       This playbook does NOT verify that containers are healthy
+#             after start. Health checks happen implicitly in 04.3 (DB),
+#             04.4 (n8n/Portainer), and 04.6 (partitioning).
+# ============================================================
+
 - name: 04.2 - Deploy Docker stack
   hosts: all_servers
   become: yes
@@ -8,7 +42,21 @@
     docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
 
   tasks:
-    - name: Pull and Start Sentinel Stack
+    # ============================================================
+    # SECTION 1 — Build and start the stack
+    # ------------------------------------------------------------
+    # Single-task section. The shell wrapper around `docker compose`
+    # is used (instead of community.docker.docker_compose_v2) because
+    # the `--build` flag and project-name override are simpler to
+    # express directly. register: deploy_output captures stdout for
+    # debugging if anything goes wrong downstream.
+    # ============================================================
+
+    # The `-p {{ project_name }}` flag pins the compose project name
+    # so container names are predictable (e.g. "pihole" instead of
+    # "<dirname>-pihole-1"). All later playbooks reference containers
+    # by these short names.
+    - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:
         cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up --build -d"
         chdir: "{{ remote_deploy_base }}"

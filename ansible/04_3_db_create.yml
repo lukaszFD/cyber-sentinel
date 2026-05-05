@@ -1,4 +1,39 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 04.3 — MySQL Schema Initialization
+# ============================================================
+# Purpose:    Renders the MySQL schema script through Jinja2 (substituting
+#             {{ vault_mysql_password }} and {{ mysql_user }} placeholders),
+#             pushes it into the running mysql_db container, and executes
+#             it. The schema creates the cyber_intelligence database,
+#             dictionary tables, core data tables, and reporting views.
+#
+# Depends on: - Playbook 04.2 (mysql_db container running)
+#             - vault_mysql_root_password defined (group_vars)
+#             - vault_mysql_password and mysql_user available for
+#               Jinja2 substitution in the source SQL file
+#             - Source SQL at {{ main_repo_source_dir }}/config/mysql/db_deployment.sql
+#
+# Outputs:    - cyber_intelligence database fully provisioned
+#             - {{ remote_deploy_base }}/mysql_init.log with execution
+#               timestamp and any MySQL output (success or errors)
+#             - Rendered SQL temp file is removed after execution
+#               (does not linger on disk with credentials embedded)
+#
+# Errors:     - "Can't connect to MySQL server" — container not yet
+#               healthy. The retry loop [04.3.2.1] handles this with
+#               10 attempts × 10s delay (~100s total grace period).
+#             - ERROR 1007 (database exists) — treated as success by
+#               the until: condition; safe for re-runs.
+#             - Other SQL errors — check mysql_init.log for the full
+#               MySQL stderr output.
+#
+# Security:   The rendered SQL file contains the application user's
+#             password in plaintext during the brief window between
+#             [04.3.1.1] and [04.3.3.1]. Mode 0600 ensures only the
+#             deployment_user can read it during that window.
+# ============================================================
+
 - name: 04.3 - DB create
   hosts: all_servers
   become: yes
@@ -8,14 +43,38 @@
     mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
 
   tasks:
-    - name: Task 4.1 - Render SQL script with actual credentials
+    # ============================================================
+    # SECTION 1 — Render schema with secrets injected
+    # ------------------------------------------------------------
+    # The source SQL file uses Jinja2 placeholders ({{ mysql_user }},
+    # {{ vault_mysql_password }}) which Ansible's template module
+    # substitutes with values from group_vars. The result lands at
+    # init_db_rendered.sql with mode 0600 because it now contains
+    # the app user's password in cleartext.
+    # ============================================================
+
+    - name: "[04.3.1.1] Render SQL script with actual credentials"
       ansible.builtin.template:
         src: "{{ source_mysql_script }}"
         dest: "{{ remote_deploy_base }}/init_db_rendered.sql"
         owner: "{{ deployment_user }}"
         mode: '0600'
 
-    - name: Task 4.2 - Execute SQL and log output
+    # ============================================================
+    # SECTION 2 — Execute schema against MySQL container
+    # ------------------------------------------------------------
+    # Pipes the rendered SQL into `mysql` running inside the
+    # mysql_db container. The retry loop is critical — on cold start
+    # MySQL takes 30-90s before accepting connections, especially on
+    # Raspberry Pi 5. Without retries this task fires too early and
+    # the entire stack deployment fails.
+    # ============================================================
+
+    # Retry condition explained:
+    #   - rc == 0           → SQL executed cleanly
+    #   - stderr ~ ERROR 1007 → "database already exists" (re-run)
+    # Both are treated as success. Any other error retries up to 10x.
+    - name: "[04.3.2.1] Execute SQL and append output to init log"
       ansible.builtin.shell:
         cmd: |
           echo "--- Execution Date: $(date) ---" >> {{ mysql_init_log }}
@@ -25,7 +84,15 @@
       retries: 10
       delay: 10
 
-    - name: Task 4.3 - Cleanup rendered SQL script
+    # ============================================================
+    # SECTION 3 — Cleanup
+    # ------------------------------------------------------------
+    # Removes the rendered SQL file once executed. The file contained
+    # the app user's password in cleartext — it should not persist
+    # on disk after deployment completes.
+    # ============================================================
+
+    - name: "[04.3.3.1] Remove rendered SQL script (contains cleartext password)"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/init_db_rendered.sql"
         state: absent

@@ -1,22 +1,96 @@
-# Local source directory where the Ansible playbook is run from (on the controller host - Linux Mint)
+---
+# ============================================================
+# Cyber Sentinel — Group Variables for `all_servers`
+# ============================================================
+# Purpose:    Defines non-secret variables shared by every host in
+#             the `all_servers` parent group (see hosts.ini). Loaded
+#             automatically by Ansible from group_vars/all_servers/
+#             whenever any playbook runs against this group.
+#
+# Loaded by:  All playbooks (00–06). Variables here are referenced
+#             inside playbooks as {{ variable_name }}.
+#
+# Pairs with: group_vars/all_servers/vault.yml — encrypted file
+#             containing all `vault_*` secrets (API keys, passwords,
+#             certs). This file is for non-sensitive defaults only.
+#
+# KNOWN ISSUES (deferred — do not silently fix during this pass):
+#   * `vault_mysql_app_user: "{{ mysql_user }}"` is a redundant alias.
+#     Either inline `mysql_user` everywhere it's needed, or remove
+#     the duplicate. Currently both names refer to the same value.
+#   * `vault_address: "10.10.10.12"` is the Vault container's IP on
+#     the internal Docker network, but playbook 06 builds its Vault
+#     URL from `{{ ansible_host }}:8200` (host IP). This variable
+#     may be unused — search the codebase before relying on it.
+# ============================================================
+
+# ------------------------------------------------------------
+# [VARS.PATHS] Filesystem paths
+# ------------------------------------------------------------
+
+# Local source directory where the Ansible playbook is run from
+# (on the controller host — Linux Mint). Used by playbook 04.1 to
+# locate config files, Dockerfiles, and SQL scripts to copy.
 main_repo_source_dir: "/home/hunter/IdeaProjects/cyber-sentinel"
 
-# Base directory on the remote host (VM/RPi) for deployment
+# Base directory on the remote host (VM/RPi) for deployment.
+# Resolves to /home/hunter on every target since deployment_user
+# is "hunter" across all environments.
 remote_deploy_base: "/home/{{ ansible_user }}"
 
-# The user used for deployment (owner and group for copied files and directories)
+# ------------------------------------------------------------
+# [VARS.IDENTITY] Deployment user
+# ------------------------------------------------------------
+
+# The user that owns deployed files and runs Docker on the target.
+# Aliased to ansible_user (defined per-host in hosts.ini) so the
+# same playbooks work even if a host uses a different login.
 deployment_user: "{{ ansible_user }}"
 
+# ------------------------------------------------------------
+# [VARS.DATABASES] MongoDB and MySQL connection identity
+# ------------------------------------------------------------
+
+# MongoDB application user (consumed by env.j2 → MONGODB_USERNAME).
 mongodb_username: "hunter"
+
+# MySQL hostname as resolved inside the internal_network. Matches
+# the container_name of the MySQL service in docker-compose.
 mysql_host: "mysqldb"
+
+# MySQL application user. Created by db_deployment.sql with limited
+# privileges (SELECT/INSERT/UPDATE/DELETE) on cyber_intelligence.
 mysql_user: "hunter"
+
+# Default database name created by the schema script.
 mysql_database: "cyber_intelligence"
+
+# ------------------------------------------------------------
+# [VARS.ADMIN_ACCOUNTS] Admin usernames for stack services
+# ------------------------------------------------------------
+# Passwords for these accounts live in the encrypted vault.yml.
+# Only the usernames are kept here as non-sensitive defaults.
 
 portainer_admin_user: "admin_sentinel"
 n8n_admin_user: "n8n_manager"
 n8n_admin_email: "hunter@cyber-sentinel.local"
 
-# vault configuration - add these to all_servers.yml
+# ------------------------------------------------------------
+# [VARS.VAULT_REFS] Aliases consumed by Vault provisioning
+# ------------------------------------------------------------
+# The Vault provisioning playbook (06) writes secrets under paths
+# that include the application user name. These aliases let it
+# reference values that originate elsewhere in this file.
+
+# Database name shipped to Vault under credentials/mysql metadata.
 vault_mysql_database: "{{ mysql_database }}"
+
+# MySQL app user name shipped to Vault. KNOWN ISSUE — duplicate
+# of `mysql_user` above; consider consolidating.
 vault_mysql_app_user: "{{ mysql_user }}"
+
+# Vault server's IP on the Docker internal_network. Used by any
+# component that talks to Vault from inside the container network.
+# KNOWN ISSUE — playbook 06 uses {{ ansible_host }}:8200 instead;
+# verify this variable is actually consumed before depending on it.
 vault_address: "10.10.10.12"
