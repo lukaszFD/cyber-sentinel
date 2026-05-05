@@ -7,7 +7,7 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 15
+              "minutesInterval": 3
             }
           ]
         }
@@ -149,8 +149,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        -752,
-        -608
+        -736,
+        -784
       ],
       "id": "2d61d46a-cd6d-4b12-a052-6cca8f988d34",
       "name": "Gemini AI Studio",
@@ -164,15 +164,15 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=ROLE:\nYou are a Senior Cyber Threat Intelligence Analyst in the Cyber Sentinel system. Your task is to evaluate an artifact based on aggregated data from VirusTotal, ThreatFox, and Urlhaus, and return a structured analysis.\n\nCONTEXT & SCORING POLICY:\nAssign exactly one threat score from the following scale:\nSCORE | DESCRIPTION | IS_MALICIOUS | CRITERIA\n1 | Safe / Clean | FALSE | 0 detections; known trusted services (Google, MS, GitHub).\n2 | Low Risk | FALSE | 1 detection (minor engine); no other evidence.\n3 | Informational | FALSE | Cloud/CDN IPs without active malware.\n4 | Unverified | FALSE | New domain, no history, no detections.\n5 | Suspicious | FALSE | Heuristics, bad reputation hosting, low confidence.\n6 | Likely Malicious | TRUE | 3-5 detections or grey-list presence.\n7 | Malicious | TRUE | Confirmed by at least 1 reputable engine or CTI report.\n8 | High Risk | TRUE | Critical detections, confirmed malware family (e.g., RAT).\n9 | Confirmed Malware | TRUE | Active malware hosting confirmed by Urlhaus.\n10 | Critical Threat | TRUE | Active C2 server confirmed by ThreatFox/Triage.\n\nDATA SOURCE PRE-ANALYSIS:\nBefore finalizing the score, you must analyze every variable returned by the source nodes:\n\nIMPORTANT: You will receive multiple threat intelligence reports in a single data object. You must synthesize ALL provided reports into ONE single evaluation. Do not generate separate outputs for each source.\n\nData : {{ JSON.stringify($('Code for Merge').item.json) }} \n\n1. VirusTotal Section (\"virustotal\"):\n   - If \"no_data\" is true, skip this source.\n   - Use \"vt_report\" for the textual summary.\n   - Analyze \"vt_stats\" (malicious/suspicious/undetected counts) and \"vt_malicious_count\" for raw detection levels.\n   - Check \"vt_owner\" and \"vt_is_big_player\" to identify if the infrastructure belongs to a trusted provider like Google or Microsoft.\n   - Reference \"vt_scan_date\" to determine the freshness of the data.\n\n2. ThreatFox Section (\"threatfox\"):\n   - If \"no_data\" is true, skip this source.\n   - Use \"threatfox_report\" for identified malware families and threat types.\n   - \"threatfox_active\" (boolean): If true, this indicates an actively confirmed threat.\n   - \"threatfox_max_confidence\": Use this to gauge the reliability of the report.\n\n3. Urlhaus Section (\"urlhaus\"):\n   - If \"no_data\" is true, skip this source.\n   - Use \"urlhaus_report\" for details on active malware distribution.\n   - \"is_active_threat\" (boolean): If true, the payload URL is currently online and dangerous.\n   - \"urlhaus_reference\": Use this for providing direct evidence links.\n\nDATA AVAILABILITY RULES:\n1. Each source (virustotal, threatfox, urlhaus) contains a \"no_data\" flag.\n2. If \"no_data\" is true, it means the artifact is not present in that database. Treat this as a clean result for that specific source.\n3. If all sources report \"no_data\": true, set threat_score to 1 (if it's a known big player) or 4 (if entirely unknown).\n\nANALYSIS RULES:\n1. Cross-Check: If ThreatFox or Urlhaus confirm active threats (threatfox_active: true or is_active_threat: true), the threat_score MUST be >= 8, regardless of low VirusTotal detections.\n2. Big Player Exception: If vt_is_big_player is true, exercise caution with low detection counts (<3) to avoid False Positives.\n3. Flagging: is_malicious MUST be true only if threat_score >= 6.\n4. Attribution: Identify the infrastructure owner using vt_owner and specify malware families (e.g., ValleyRAT) if present in threatfox or urlhaus reports.\n\nSTRICT JSON FORMATTING RULE:\nAll string values (verdict_en, analysis_pl) MUST be single-line strings. NEVER use physical line breaks (Enters) inside string values. If you need to separate thoughts, use a period (.) or a semicolon (;).\n\nREQUIRED OUTPUT (STRICT JSON ONLY):\n{\n  \"threat_score\": [number 1-10],\n  \"is_malicious\": [boolean],\n  \"threat_label\": \"[Phishing / Botnet / C2 / Clean / Suspicious / Malware]\",\n  \"verdict_en\": \"[Technical summary for threat_indicators table - max 200 chars]\",\n  \"analysis_pl\": \"[Komentarz w jezyku Polskim dla Łukasza: 1. Właściciel IP/Hostingu. 2. Typ zagrożenia i wykryte rodziny malware. 3. Rekomendacja (Blokować/Monitorować/Zignorować)]\",\n  \"active_providers\": [\"virustotal\", \"threatfox\", \"urlhaus\"]\n}",
+        "text": "=ROLE:\nYou are a Senior Cyber Threat Intelligence Analyst in the Cyber Sentinel system.\nYour task is to evaluate an IP or FQDN artifact based on aggregated data from\nVirusTotal (primary), ThreatFox (primary), and URLhaus (supporting context only),\nand return a structured analysis.\n\n═══════════════════════════════════════════════════════════════\nSCORING POLICY (Detection-First, Source-Weighted Model)\n═══════════════════════════════════════════════════════════════\n\nThe threat scale (1-5) and recommended actions are NOT hardcoded in this prompt.\nThey are loaded dynamically from the database table `dic_threat_levels` and\nprovided to you in the variable {{ $json.threat_scale }} at runtime.\n\nYou MUST use the descriptions and action_recommended values from that table as\nthe authoritative source of truth. This prompt only defines HOW to map evidence\nto a score — the meaning of each score comes from the database.\n\nTHREAT SCALE (loaded from DB):\n{{ $json.threat_scale }}\n\n═══════════════════════════════════════════════════════════════\nSOURCE WEIGHTING (CRITICAL — read carefully)\n═══════════════════════════════════════════════════════════════\n\nThis system evaluates IP addresses and FQDNs, NOT individual URLs. Therefore:\n\nPRIMARY SOURCES (drive the score):\n  • VirusTotal — reputation of the IP/FQDN itself\n  • ThreatFox  — known malicious infrastructure (C2, payload delivery hosts)\n\nSUPPORTING SOURCE (context only, max +1 modifier):\n  • URLhaus — historical URLs hosted on this IP/FQDN\n\nURLhaus RULE (IMPORTANT):\nURLhaus reports URLs that were once hosted on a given host. Large legitimate\nplatforms (bitbucket.org, github.com, pastebin.com, discord cdn, dropbox, etc.)\nwill ALWAYS have many URLhaus hits because attackers abuse them — but the\nplatforms themselves are not malicious.\n\nTherefore URLhaus alone NEVER raises the score. URLhaus may add at most +1 to\nthe score IF AND ONLY IF:\n  (a) VirusTotal OR ThreatFox already flagged the artifact as suspicious, AND\n  (b) URLhaus reports `is_active_threat: true` (currently online payload).\n\nIf URLhaus is the ONLY source with hits → ignore it for scoring purposes,\nbut mention it in `analysis_pl` as context.\n\n═══════════════════════════════════════════════════════════════\nSCORING DECISION LOGIC\n═══════════════════════════════════════════════════════════════\n\nStep 1 — Evaluate VirusTotal (PRIMARY):\n  • no_data: true OR vt_malicious_count = 0       → VT contributes: CLEAN\n  • vt_is_big_player = true AND vt_malicious_count < 3 → VT contributes: CLEAN\n    (trusted infra like Google/MS/Cloudflare with minor noise)\n  • vt_malicious_count = 1-3                       → VT contributes: LOW\n  • vt_malicious_count = 4-9                       → VT contributes: MEDIUM\n  • vt_malicious_count >= 10                       → VT contributes: HIGH\n\nStep 2 — Evaluate ThreatFox (PRIMARY):\n  • no_data: true                                  → TF contributes: CLEAN\n  • Listed but threatfox_active = false            → TF contributes: MEDIUM\n  • threatfox_active = true                        → TF contributes: HIGH\n    (active C2 / known malware family hit = critical signal)\n\nStep 3 — Combine PRIMARY sources into base score:\n  • Both CLEAN                                     → base = 1\n  • One LOW, other CLEAN                           → base = 2\n  • One MEDIUM, other CLEAN                        → base = 3\n  • Both have hits (any level)                     → base = 4\n  • Either source = HIGH                           → base = 4\n  • TF active=true AND VT >= 4 detections          → base = 5\n  • TF active=true AND identified malware family   → base = 5\n\nStep 4 — Apply URLhaus modifier (supporting):\n  • If base >= 3 AND urlhaus.is_active_threat = true → base + 1 (capped at 5)\n  • Otherwise: no change\n\nStep 5 — Apply Big Player override:\n  • If vt_is_big_player = true AND no malware family confirmed by ThreatFox\n    → cap final score at 2 (these are almost always false positives or\n      abuse of legitimate infrastructure, not infrastructure compromise)\n\n═══════════════════════════════════════════════════════════════\nINPUT DATA\n═══════════════════════════════════════════════════════════════\n\n{{ JSON.stringify($('Code for Merge').item.json) }} \n\n═══════════════════════════════════════════════════════════════\nOUTPUT FORMAT (STRICT JSON ONLY)\n═══════════════════════════════════════════════════════════════\n\n{\n  \"threat_score\": <integer 1-5>,\n  \"is_malicious\": <boolean — true if score >= 4>,\n  \"threat_label\": \"<one of: Clean | Suspicious | Phishing | Malware | Botnet | C2>\",\n  \"verdict_en\": \"<single-line technical summary, max 200 chars>\",\n  \"analysis_pl\": \"<single-line Polish commentary for Lukasz covering: 1) Wlasciciel IP/Hostingu, 2) Typ zagrozenia i rodziny malware (jesli wykryte), 3) Rekomendacja zgodna z action_recommended ze skali w bazie, 4) Uwagi o URLhaus jesli istotne>\",\n  \"active_providers\": [<list of source names that contributed evidence: \"virustotal\", \"threatfox\", \"urlhaus\">],\n  \"scoring_rationale\": \"<single-line explanation of WHY this score, referencing the decision steps — useful for the future self-healing agent>\"\n}\n\nFORMATTING RULES:\n1. All string values MUST be single-line. Never use \\n inside strings.\n2. SQL ESCAPING: replace every single quote (') with two single quotes ('').\n3. Do not use backslashes or backticks anywhere in string values.\n4. `active_providers` must list ONLY sources that returned no_data=false.\n5. `scoring_rationale` is mandatory — it will be used by future workflows to\n   audit and improve this scoring logic.",
         "hasOutputParser": true,
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        -592,
-        -608
+        -832,
+        -544
       ],
       "id": "a532302f-b601-47da-9197-9910b6c7b6df",
       "name": "AI Agent",
@@ -205,8 +205,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        -656,
-        -384
+        -960,
+        -368
       ],
       "id": "fcc4211c-8807-4aa5-adc5-3abf05716f1d",
       "name": "Google Gemini Chat Model",
@@ -254,17 +254,17 @@
     },
     {
       "parameters": {
-        "fromEmail": "l94524506@gmail.com",
+        "fromEmail": "={{ $json.data.user }}",
         "toEmail": "home-network-guardian@proton.me",
         "subject": "=Raport wygenerowany przez system Cyber Sentinel | Data: {{ new Date().toLocaleString('pl-PL') }}",
-        "html": "=<!DOCTYPE html>\n<html>\n<head>\n    <style>\n        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; }\n        .card { max-width: 600px; margin: auto; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; border-top: 4px solid #f44336; }\n        .header { background: #263238; padding: 15px; text-align: center; }\n        .content { padding: 25px; }\n        .score-box { background: #2d2d2d; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 20px; border: 1px solid #444; }\n        .ip-addr { font-family: 'Courier New', monospace; color: #64ffda; font-size: 18px; font-weight: bold; }\n        .analysis { background: #252525; padding: 15px; border-radius: 4px; border-left: 4px solid #90caf9; font-size: 14px; line-height: 1.6; margin-top: 15px; }\n        .provider-tag { display: inline-block; background: #37474f; color: #cfd8dc; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-right: 5px; border: 1px solid #546e7a; }\n        .btn { display: inline-block; padding: 10px 20px; background-color: #f44336; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 20px; font-size: 14px; }\n        .footer { text-align: center; font-size: 11px; color: #777; padding: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"card\">\n        <div class=\"header\">\n            <h2 style=\"margin:0; color: #ff5252;\">🚨 ALARM: Cyber Sentinel</h2>\n        </div>\n        <div class=\"content\">\n            <div class=\"score-box\">\n                <div style=\"font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 1px;\">Threat Severity Score</div>\n                <div style=\"font-size: 36px; font-weight: bold; color: #ff5252;\">{{ $node[\"Parse AI Agent output\"].json.score }}/10</div>\n            </div>\n\n            <p><strong>Obiekt (IP):</strong> <span class=\"ip-addr\">{{ $('Select rows from a table').item.json.observable_ip }}</span></p>\n            <p><strong>Powiązana domena:</strong> <span style=\"color: #90caf9;\">{{ $('Select rows from a table').item.json.fqdn }}</span></p>\n            \n            <div style=\"margin-top: 10px;\">\n                <strong style=\"font-size: 13px; color: #888;\">Aktywne źródła danych:</strong><br>\n                {{ $node[\"Parse AI Agent output\"].json.provider_details.map(p => `<span class=\"provider-tag\">${p.name}</span>`).join('') }}\n            </div>\n\n            <div class=\"analysis\">\n                <strong style=\"color: #90caf9;\">Analiza (PL):</strong><br>\n                <div style=\"margin-top: 5px;\">\n                    {{ $node[\"Parse AI Agent output\"].json.analysis_pl }}\n                </div>\n            </div>\n\n            <p style=\"color: #bbb; font-style: italic; font-size: 12px; margin-top: 15px; border-top: 1px solid #333; padding-top: 10px;\">\n                <strong>Technical Verdict:</strong> {{ $node[\"Parse AI Agent output\"].json.verdict_en }}\n            </p>\n\n            <div style=\"text-align: center;\">\n                <a href=\"https://rdap.arin.net/registry/ip/{{ $('Select rows from a table').item.json.observable_ip }}\" class=\"btn\">Sprawdź detale IP (RDAP)</a>\n            </div>\n        </div>\n        <div class=\"footer\">\n            System: <strong>Cyber Sentinel v1.0</strong><br>\n            Data: {{ new Date().toLocaleString('pl-PL') }}\n        </div>\n    </div>\n</body>\n</html>",
+        "html": "=<!DOCTYPE html>\n<html>\n<head>\n    <style>\n        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; }\n        .card { max-width: 600px; margin: auto; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; }\n        .header { padding: 15px; text-align: center; }\n        .content { padding: 25px; }\n        .score-box { background: #2d2d2d; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 20px; border: 1px solid #444; }\n        .ip-addr { font-family: 'Courier New', monospace; color: #64ffda; font-size: 18px; font-weight: bold; }\n        .analysis { background: #252525; padding: 15px; border-radius: 4px; font-size: 14px; line-height: 1.6; margin-top: 15px; }\n        .provider-tag { display: inline-block; background: #37474f; color: #cfd8dc; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-right: 5px; border: 1px solid #546e7a; }\n        .btn { display: inline-block; padding: 10px 20px; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 20px; font-size: 14px; }\n        .footer { text-align: center; font-size: 11px; color: #777; padding: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"card\" style=\"border-top: 4px solid {{ ({1:'#4caf50',2:'#4caf50',3:'#ffb300',4:'#f44336',5:'#f44336'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n        <div class=\"header\" style=\"background: {{ ({1:'#1b3320',2:'#1b3320',3:'#332a13',4:'#3a1f1f',5:'#3a1f1f'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n            <h2 style=\"margin:0; color: {{ ({1:'#81c784',2:'#81c784',3:'#ffd54f',4:'#ff5252',5:'#ff5252'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                {{ ({1:'✅ INFO',2:'✅ INFO',3:'⚠️ REVIEW',4:'🚨 ALERT',5:'🚨 ALERT'})[$node[\"Parse AI Agent output\"].json.score] }}: Cyber Sentinel\n            </h2>\n        </div>\n        <div class=\"content\">\n            <div class=\"score-box\">\n                <div style=\"font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 1px;\">Threat Severity Score</div>\n                <div style=\"font-size: 36px; font-weight: bold; color: {{ ({1:'#81c784',2:'#81c784',3:'#ffd54f',4:'#ff5252',5:'#ff5252'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                    {{ $node[\"Parse AI Agent output\"].json.score }}/5\n                </div>\n                <div style=\"font-size: 12px; color: #aaa; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px;\">\n                    {{ ({1:'Clean / Allow',2:'Low Risk / Monitor',3:'Suspicious / Review',4:'Malicious / Block',5:'Critical / Block + Alert'})[$node[\"Parse AI Agent output\"].json.score] }}\n                </div>\n            </div>\n            <p><strong>Obiekt (IP):</strong> <span class=\"ip-addr\">{{ $('Select rows from a table').item.json.observable_ip }}</span></p>\n            <p><strong>Powiązana domena:</strong> <span style=\"color: #90caf9;\">{{ $('Select rows from a table').item.json.fqdn }}</span></p>\n\n            <div style=\"margin-top: 10px;\">\n                <strong style=\"font-size: 13px; color: #888;\">Aktywne źródła danych:</strong><br>\n                {{ $node[\"Parse AI Agent output\"].json.provider_details.map(p => `<span class=\"provider-tag\">${p.name}</span>`).join('') }}\n            </div>\n            <div class=\"analysis\" style=\"border-left: 4px solid {{ ({1:'#4caf50',2:'#4caf50',3:'#ffb300',4:'#f44336',5:'#f44336'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                <strong style=\"color: {{ ({1:'#81c784',2:'#81c784',3:'#ffd54f',4:'#ff5252',5:'#ff5252'})[$node[\"Parse AI Agent output\"].json.score] }};\">Analiza (PL):</strong><br>\n                <div style=\"margin-top: 5px;\">\n                    {{ $node[\"Parse AI Agent output\"].json.analysis_pl }}\n                </div>\n            </div>\n            <p style=\"color: #bbb; font-style: italic; font-size: 12px; margin-top: 15px; border-top: 1px solid #333; padding-top: 10px;\">\n                <strong>Technical Verdict:</strong> {{ $node[\"Parse AI Agent output\"].json.verdict_en }}\n            </p>\n            <div style=\"text-align: center;\">\n                <a href=\"https://rdap.arin.net/registry/ip/{{ $('Select rows from a table').item.json.observable_ip }}\" class=\"btn\" style=\"background-color: {{ ({1:'#4caf50',2:'#4caf50',3:'#ffb300',4:'#f44336',5:'#f44336'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                    Sprawdź detale IP (RDAP)\n                </a>\n            </div>\n        </div>\n        <div class=\"footer\">\n            System: <strong>Cyber Sentinel v1.0</strong><br>\n            Data: {{ new Date().toLocaleString('pl-PL') }}\n        </div>\n    </div>\n</body>\n</html>",
         "options": {}
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        224,
-        -448
+        0,
+        -496
       ],
       "id": "adabcf0d-8191-4bf2-ba73-07e78d78006f",
       "name": "Send an Email",
@@ -344,8 +344,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        0,
-        -448
+        -224,
+        -496
       ],
       "id": "3ca870ed-b0c3-407c-8cf3-66d54593ae62",
       "name": "Get Email Pass",
@@ -649,86 +649,87 @@
       "typeVersion": 2,
       "position": [
         -928,
-        -608
+        -784
       ],
       "id": "b14246cd-3917-44a5-9ebc-27e90118387c",
       "name": "Code for Merge"
     },
     {
       "parameters": {
-        "content": "## Orchestration & Data Ingestion\n\n**Primary Goal:** Initialize the workflow by securely fetching credentials and pending tasks. \n\n**Security:** Integrated with **HashiCorp Vault** to retrieve MySQL and MongoDB credentials at runtime, ensuring no hardcoded secrets.\n\n**Data Source:** Queries the `cyber_intelligence.v_pending_analysis` view to identify new observable IPs/FQDNs from DNS traffic.\n\n**Scheduling:** Automated via **Schedule Trigger** for continuous infrastructure monitoring.",
-        "height": 1504,
-        "width": 704
+        "content": "## Orchestration & Data Ingestion\n\n",
+        "height": 288,
+        "width": 688,
+        "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -3152,
-        -1344
+        -3136,
+        -592
       ],
       "id": "34ac24c9-e2bf-4f03-ad2a-8c8c57218632",
       "name": "Sticky Note"
     },
     {
       "parameters": {
-        "content": "## Multi-Source Threat Intelligence Enrichment\n\n**Primary Goal:** Collect diverse technical indicators (IoCs) from leading providers. \n\n**Abuse_URLhaus:** Specifically identifies active malware distribution URLs and payload hosting.\n**Abuse_ThreatFox:** Provides high-confidence IoC validation and malware family tagging.\n**VirusTotal:** Aggregates detection ratios from 70+ engines for global reputation scoring.",
-        "height": 1504,
-        "width": 640,
-        "color": 2
+        "content": "## Multi-Source Threat Intelligence Enrichment\n\n",
+        "height": 992,
+        "width": 576,
+        "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -2448,
-        -1344
+        -2400,
+        -992
       ],
       "id": "c79b8cfa-45c8-4173-a58d-62a6adc8679d",
       "name": "Sticky Note1"
     },
     {
       "parameters": {
-        "content": "## Dual-Layer Persistence Strategy\n**Primary Goal:** Store raw data for forensics and update the operational relational database.\n\n**MongoDB (Data Lake):** Archives full raw JSON responses in the `threat_data_raw` collection.\n**MySQL (Relational):** Updates the `threat_indicators` table. \n**Optimization:** \\\"Clean\\\" results are logged immediately to prevent redundant API calls.",
-        "height": 1504,
+        "content": "## Dual-Layer Persistence Strategy\n",
+        "height": 1232,
         "width": 624,
-        "color": 3
+        "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
         -1808,
-        -1344
+        -1088
       ],
       "id": "4a9b306d-a43b-49b3-8c60-1f29ccb12798",
       "name": "Sticky Note2"
     },
     {
       "parameters": {
-        "content": "## AI Synthesis & Cognitive Analysis\n\n**Primary Goal:** Transform fragmented raw data into an actionable security verdict. \n\n**Normalization:** Custom JS consolidates disparate CTI responses into a clean prompt context.\n**LLM Engine:** Powered by **Google Gemini**, acting as a Senior Security Analyst. \n**Intelligence:** Generates bilingual reports (EN/PL) and assigns a normalized `threat_score` (1-10).",
-        "height": 1504,
-        "width": 864,
-        "color": 4
+        "content": "## AI Synthesis & Cognitive Analysis\n\n",
+        "height": 640,
+        "width": 800,
+        "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -1184,
-        -1344
+        -1152,
+        -864
       ],
       "id": "733bed6a-a760-4f3e-9cfa-507a133d3e6e",
       "name": "Sticky Note3"
     },
     {
       "parameters": {
-        "content": "## Incident Reporting & Remediation\n\n**Primary Goal:** Finalize the analysis cycle and notify the security team. \n\n**Relational Storage:** Records final AI verdicts in the `ai_analysis_results` table. \n**Alerting:** Triggers automated email notifications for high-risk detections. \n**Audit Trail:** Every AI decision is linked back to the original DNS query and raw provider data.",
-        "height": 1504,
-        "width": 768,
-        "color": 5
+        "content": "## Incident Reporting & Remediation\n\n",
+        "height": 528,
+        "width": 512,
+        "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
         -320,
-        -1344
+        -800
       ],
       "id": "9397274e-2b43-4311-bb10-71917f04eaa2",
       "name": "Sticky Note4"
@@ -801,36 +802,39 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "ddba4411-bc87-4bff-b539-a37973baa1da",
-              "leftValue": "={{ $('Parse AI Agent output').item.json.score }}",
-              "rightValue": 5,
-              "operator": {
-                "type": "number",
-                "operation": "gt"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
+        "content": "# 🛡️ Project: Cyber Sentinel\n\n### **Purpose**\nAutonomous **Cyber Threat Intelligence (CTI)** & **Passive DNS Monitoring**. This workflow orchestrates the analysis of DNS telemetry using AI to detect malicious patterns and trigger autonomous response playbooks.\n\n---\n\n### **🚀 Setup Instructions**\n1.  **Secret Management:** Ensure **HashiCorp Vault** is connected to handle API keys and credentials securely.\n2.  **AI Engine:** Configure the **Ollama/Gemini** node to enable bilingual threat assessment (**EN/PL**).\n3.  **Data Layer:** Verify the connection to the **PostgreSQL** database (Neural Lake) for indicator enrichment.\n\n---\n\n### **🔗 Resources**\n* **Documentation:** [https://lukaszfd.github.io/cyber-sentinel/](https://lukaszfd.github.io/cyber-sentinel/)\n* **Author:** Łukasz Dejko",
+        "height": 608,
+        "width": 688
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3840,
+        -784
+      ],
+      "id": "3ada188a-28ca-46c6-8387-a07bf03fdd63",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT GROUP_CONCAT(formatted_line SEPARATOR '\\n') AS threat_scale\nFROM v_threat_scale_for_agent;",
         "options": {}
       },
-      "type": "n8n-nodes-base.filter",
-      "typeVersion": 2.3,
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
       "position": [
-        -224,
-        -448
+        -544,
+        -784
       ],
-      "id": "b4748bfd-2c53-4ae2-8df1-1dcba238a284",
-      "name": "Filter"
+      "id": "dddbc5cf-3aa9-4e61-88ea-abecf53454ec",
+      "name": "Select threat scale for AI agent",
+      "credentials": {
+        "mySql": {
+          "id": "yhjGryqAfuUYr29Q",
+          "name": "MySQL account"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -906,7 +910,7 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Select threat scale for AI agent",
             "type": "main",
             "index": 0
           }
@@ -961,7 +965,7 @@
       "main": [
         [
           {
-            "node": "Filter",
+            "node": "Get Email Pass",
             "type": "main",
             "index": 0
           }
@@ -1190,11 +1194,11 @@
         ]
       ]
     },
-    "Filter": {
+    "Select threat scale for AI agent": {
       "main": [
         [
           {
-            "node": "Get Email Pass",
+            "node": "AI Agent",
             "type": "main",
             "index": 0
           }
@@ -1202,7 +1206,7 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
@@ -1210,7 +1214,7 @@
     "timeSavedMode": "fixed",
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "40c76bbc-b8c1-430f-8808-277bc31059b1",
+  "versionId": "8c0792c3-8584-4396-b6b6-394e646cab08",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "71c7fe4d131e80cb72eec0e26188a51a745f9f857c32d9cdf4587b1cb3816cfe"
