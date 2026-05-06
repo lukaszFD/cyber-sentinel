@@ -1,0 +1,1393 @@
+{
+  "name": "Automated Domain & IP Reputation Guard with HashiCorp Vault",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -3104,
+        -496
+      ],
+      "id": "84dca179-a0f0-49fd-8e5b-5feb60b26e82",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "table": {
+          "__rl": true,
+          "value": "cyber_intelligence.v_pending_analysis",
+          "mode": "name"
+        },
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        -2592,
+        -496
+      ],
+      "id": "8bf1829c-9df2-41b2-a86e-75cc263170bb",
+      "name": "Select rows from a table",
+      "credentials": {
+        "mySql": {
+          "id": "yhjGryqAfuUYr29Q",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "=https://www.virustotal.com/api/v3/ip_addresses/{{ $('Select rows from a table').item.json.observable_ip }}",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2160,
+        -176
+      ],
+      "id": "ff297aa5-0e9f-4f5e-b2e1-7a7eeaf96bf8",
+      "name": "VirusTotal IP Scan",
+      "extendsCredential": "virusTotalApi",
+      "credentials": {
+        "virusTotalApi": {
+          "id": "g2lSFHR1Q18hczpO",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f1809d7a-923a-4ef7-b24f-fcbf6b5cb41d",
+              "leftValue": "={{ $json.data.attributes.last_analysis_stats.malicious }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "ca056a70-f3eb-4aa5-bae9-05bd477cf4ce",
+              "leftValue": "={{ $json.data.attributes.last_analysis_stats.suspicious }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1968,
+        -176
+      ],
+      "id": "301ce32c-69d1-4561-809b-792422ada724",
+      "name": "If 'malicious' or 'suspicious'"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/virustotal",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -2352,
+        -176
+      ],
+      "id": "a56ac689-7f44-4614-bf7e-940d85ce6c40",
+      "name": "Virus total API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/gemini/home-network-guardian",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        -784
+      ],
+      "id": "2d61d46a-cd6d-4b12-a052-6cca8f988d34",
+      "name": "Gemini AI Studio",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "ROLE:\nYou are a Senior Cyber Threat Intelligence Analyst in the Cyber Sentinel system.\nYour task is to evaluate an IP or FQDN artifact based on aggregated data from\nVirusTotal (PRIMARY), ThreatFox (PRIMARY), and URLhaus (SUPPORTING context only),\nand return a structured analysis.\n\n═══════════════════════════════════════════════════════════════\nHOW THIS PROMPT IS STRUCTURED\n═══════════════════════════════════════════════════════════════\n\nThe aggregated report you receive has THREE sections:\n  1. PRIMARY SOURCES — VirusTotal + ThreatFox. These DRIVE the verdict.\n  2. SUPPORTING CONTEXT — URLhaus. Context only, may modify score by at most +1.\n  3. PRE-COMPUTED PRIMARY VERDICT — already calculated for you in code,\n     including a `Suggested score (1-5)`. You should ANCHOR your decision on\n     this suggested score and only deviate if you have strong reasoning.\n\nThe threat scale (1-5) descriptions and recommended actions are loaded from\nthe database table `dic_threat_levels` and provided in {{ $json.threat_scale }}.\nUse those descriptions as the authoritative meaning of each score.\n\nTHREAT SCALE (loaded from DB):\n{{ $json.threat_scale }}\n\n═══════════════════════════════════════════════════════════════\nSOURCE WEIGHTING — STRICT RULES\n═══════════════════════════════════════════════════════════════\n\nPRIMARY (VirusTotal, ThreatFox):\n  • These are the ONLY sources that can independently raise the score.\n  • If both PRIMARY sources are CLEAN or NO_DATA → final score must be 1\n    (unless URLhaus shows critical tags + active threat — see exception below).\n\nSUPPORTING (URLhaus):\n  • URLhaus reports historical URLs hosted on a host. Large legitimate platforms\n    (github.com, bitbucket.org, pastebin.com, discord cdn, dropbox, etc.) ALWAYS\n    have many URLhaus hits because attackers abuse them — but the platforms\n    themselves are NOT malicious.\n  • URLhaus may add at most +1 to the suggested score, and ONLY when the code\n    has already set `urlhaus_modifier = 1` for you (status: active_corroborating).\n  • If `urlhaus_status = suppressed` or `historical_only` → URLhaus must NOT\n    influence your score. Mention it in `analysis_pl` only as context.\n  • EXCEPTION: if `urlhaus_status = critical_tags_only` (PRIMARY clean but\n    URLhaus shows active C2/RAT/stealer payloads) → keep score at suggested\n    value (do NOT raise above 2) but include a strong WARNING in `analysis_pl`\n    that the host should be re-investigated.\n\n═══════════════════════════════════════════════════════════════\nDECISION PROCEDURE\n═══════════════════════════════════════════════════════════════\n\nStep 1. Read the PRE-COMPUTED PRIMARY VERDICT block. Note the `Suggested score`.\nStep 2. Use the suggested score as your default unless you find a clear reason\n        to deviate. If you deviate, explain why in `analysis_pl`.\nStep 3. NEVER let URLhaus alone push the score above what PRIMARY sources support,\n        regardless of how many URLhaus entries exist.\nStep 4. Map the final score to `dic_threat_levels` for the `action_recommended`.\n\n═══════════════════════════════════════════════════════════════\nOUTPUT FORMAT (strict JSON, no markdown fences)\n═══════════════════════════════════════════════════════════════\n\n{\n  \"score\": <1-5>,\n  \"verdict\": \"<short label, e.g. 'clean', 'low risk', 'malicious infrastructure'>\",\n  \"action_recommended\": \"<from dic_threat_levels>\",\n  \"primary_evidence\": \"<1-3 sentences citing VT and/or TF findings>\",\n  \"urlhaus_context\": \"<1-2 sentences — what URLhaus added, or 'not used' if suppressed>\",\n  \"analysis_pl\": \"<2-4 sentences in Polish summarizing the verdict for an analyst>\",\n  \"deviated_from_suggested\": <true/false>,\n  \"deviation_reason\": \"<if deviated_from_suggested=true, explain; otherwise empty string>\"\n}\n\n═══════════════════════════════════════════════════════════════\nINPUT\n═══════════════════════════════════════════════════════════════\n\n{{ $json.aggregated_report }}\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -832,
+        -544
+      ],
+      "id": "a532302f-b601-47da-9197-9910b6c7b6df",
+      "name": "AI Agent",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "secretPath": "=cyber-sentinel/credentials/mysql/app_manager",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -2944,
+        -496
+      ],
+      "id": "db7320d8-0d9f-4035-83ac-60eae5e0659a",
+      "name": "MySQL Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        -368
+      ],
+      "id": "fcc4211c-8807-4aa5-adc5-3abf05716f1d",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JJXaAGWm6Kg1DmUJ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let rawText = $json.output;\nlet cleanJson = rawText.replace(/```json\\n|```/g, \"\").trim();\ncleanJson = cleanJson.replace(/[\\r\\n]+/g, \" \");\n\ntry {\n  const data = JSON.parse(cleanJson);\n  const providerDetails = [];\n\n  // ULEPSZONA Funkcja pomocnicza\n  const getMongoId = (nodeName, providerKey) => {\n    try {\n      // Pobieramy wszystkie dane z danego węzła, nie tylko ostatni element\n      const nodeData = $(nodeName).all(); \n      \n      for (const entry of nodeData) {\n        if (entry.json && entry.json[providerKey] && entry.json[providerKey].mongo_id) {\n          return entry.json[providerKey].mongo_id;\n        }\n      }\n    } catch (e) {\n      return null;\n    }\n    return null;\n  };\n\n  // Logika sprawdzania dostawców pozostaje bez zmian, ale funkcja powyżej jest skuteczniejsza\n  if (data.active_providers.includes(\"virustotal\")) {\n    const vt_id = getMongoId('Data reduction and aggregation - VirusTotal', 'virustotal');\n    if (vt_id) providerDetails.push({ name: \"VirusTotal\", mongo_id: vt_id });\n  }\n\n  if (data.active_providers.includes(\"threatfox\")) {\n    const tf_id = getMongoId('Data reduction and aggregation - ThreatFox', 'threatfox');\n    if (tf_id) providerDetails.push({ name: \"Abuse_ThreatFox\", mongo_id: tf_id });\n  }\n\n  if (data.active_providers.includes(\"urlhaus\")) {\n    const uh_id = getMongoId('Data reduction and aggregation - Urlhaus', 'urlhaus');\n    if (uh_id) providerDetails.push({ name: \"Abuse_URLhaus\", mongo_id: uh_id });\n  }\n\n  return {\n    score: data.threat_score,\n    verdict_en: data.verdict_en,\n    analysis_pl: data.analysis_pl,\n    provider_details: providerDetails\n  };\n\n} catch (error) {\n  return { error: \"Parsing failed\", details: error.message, raw_received: rawText };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -720
+      ],
+      "id": "583369e8-7519-42a2-9174-0b1b6a811372",
+      "name": "Parse AI Agent output"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- KROK 1: Wstawienie unikalnego werdyktu do nowej tabeli słownikowej\nINSERT INTO cyber_intelligence.ai_analysis_results (\n    threat_score, \n    verdict_summary_en, \n    analysis_pl\n) VALUES (\n    {{ $json.score }},\n    '{{ $json.verdict_en }}',\n    '{{ $json.analysis_pl }}'\n);\n\n-- Zapamiętujemy ID werdyktu\nSET @last_result_id = LAST_INSERT_ID();\n\n-- KROK 2: Wstawienie rekordu zdarzenia do threat_indicators\nINSERT INTO cyber_intelligence.threat_indicators (\n    dns_query_id,\n    type_id,\n    analysis_result_id,\n    last_scan\n) VALUES (\n    {{ $('Select rows from a table').item.json.dns_query_id }}, \n    (SELECT id FROM cyber_intelligence.dic_indicator_types WHERE name = 'IP'),\n    @last_result_id,\n    NOW()\n);\n\n-- Zapamiętujemy ID zdarzenia (do powiązania ze skanerami)\nSET @last_event_id = LAST_INSERT_ID();\n\n-- KROK 3: Dynamiczne wstawienie szczegółów skanerów (VirusTotal, ThreatFox itp.)\n{{ $json.provider_details.map(p => `\nINSERT INTO cyber_intelligence.threat_indicator_details (indicator_id, source_id, mongo_ref_id)\nSELECT @last_event_id, id, '${p.mongo_id}' \nFROM cyber_intelligence.dic_source_providers WHERE name = '${p.name}';\n`).join('\\n') }}\n\n-- Zwracamy ID zdarzenia dla kolejnych kroków (np. do maila)\nSELECT @last_event_id AS indicator_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        -720
+      ],
+      "id": "ce9c8563-971f-4531-a990-ecf3cd0024ab",
+      "name": "Insert AI verdict",
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "yhjGryqAfuUYr29Q",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.data.user }}",
+        "toEmail": "home-network-guardian@proton.me",
+        "subject": "=Raport wygenerowany przez system Cyber Sentinel | Data: {{ new Date().toLocaleString('pl-PL') }}",
+        "html": "=<!DOCTYPE html>\n<html>\n<head>\n    <style>\n        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; }\n        .card { max-width: 600px; margin: auto; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; }\n        .header { padding: 15px; text-align: center; }\n        .content { padding: 25px; }\n        .score-box { background: #2d2d2d; border-radius: 5px; padding: 10px; text-align: center; margin-bottom: 20px; border: 1px solid #444; }\n        .ip-addr { font-family: 'Courier New', monospace; color: #64ffda; font-size: 18px; font-weight: bold; }\n        .analysis { background: #252525; padding: 15px; border-radius: 4px; font-size: 14px; line-height: 1.6; margin-top: 15px; }\n        .provider-tag { display: inline-block; background: #37474f; color: #cfd8dc; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-right: 5px; border: 1px solid #546e7a; }\n        .btn { display: inline-block; padding: 10px 20px; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 20px; font-size: 14px; }\n        .footer { text-align: center; font-size: 11px; color: #777; padding: 15px; }\n    </style>\n</head>\n<body>\n    <div class=\"card\" style=\"border-top: 4px solid {{ ({1:'#4caf50',2:'#4caf50',3:'#ffb300',4:'#f44336',5:'#f44336'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n        <div class=\"header\" style=\"background: {{ ({1:'#1b3320',2:'#1b3320',3:'#332a13',4:'#3a1f1f',5:'#3a1f1f'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n            <h2 style=\"margin:0; color: {{ ({1:'#81c784',2:'#81c784',3:'#ffd54f',4:'#ff5252',5:'#ff5252'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                {{ ({1:'✅ INFO',2:'✅ INFO',3:'⚠️ REVIEW',4:'🚨 ALERT',5:'🚨 ALERT'})[$node[\"Parse AI Agent output\"].json.score] }}: Cyber Sentinel\n            </h2>\n        </div>\n        <div class=\"content\">\n            <div class=\"score-box\">\n                <div style=\"font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 1px;\">Threat Severity Score</div>\n                <div style=\"font-size: 36px; font-weight: bold; color: {{ ({1:'#81c784',2:'#81c784',3:'#ffd54f',4:'#ff5252',5:'#ff5252'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                    {{ $node[\"Parse AI Agent output\"].json.score }}/5\n                </div>\n                <div style=\"font-size: 12px; color: #aaa; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px;\">\n                    {{ ({1:'Clean / Allow',2:'Low Risk / Monitor',3:'Suspicious / Review',4:'Malicious / Block',5:'Critical / Block + Alert'})[$node[\"Parse AI Agent output\"].json.score] }}\n                </div>\n            </div>\n            <p><strong>Obiekt (IP):</strong> <span class=\"ip-addr\">{{ $('Select rows from a table').item.json.observable_ip }}</span></p>\n            <p><strong>Powiązana domena:</strong> <span style=\"color: #90caf9;\">{{ $('Select rows from a table').item.json.fqdn }}</span></p>\n\n            <div style=\"margin-top: 10px;\">\n                <strong style=\"font-size: 13px; color: #888;\">Aktywne źródła danych:</strong><br>\n                {{ $node[\"Parse AI Agent output\"].json.provider_details.map(p => `<span class=\"provider-tag\">${p.name}</span>`).join('') }}\n            </div>\n            <div class=\"analysis\" style=\"border-left: 4px solid {{ ({1:'#4caf50',2:'#4caf50',3:'#ffb300',4:'#f44336',5:'#f44336'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                <strong style=\"color: {{ ({1:'#81c784',2:'#81c784',3:'#ffd54f',4:'#ff5252',5:'#ff5252'})[$node[\"Parse AI Agent output\"].json.score] }};\">Analiza (PL):</strong><br>\n                <div style=\"margin-top: 5px;\">\n                    {{ $node[\"Parse AI Agent output\"].json.analysis_pl }}\n                </div>\n            </div>\n            <p style=\"color: #bbb; font-style: italic; font-size: 12px; margin-top: 15px; border-top: 1px solid #333; padding-top: 10px;\">\n                <strong>Technical Verdict:</strong> {{ $node[\"Parse AI Agent output\"].json.verdict_en }}\n            </p>\n            <div style=\"text-align: center;\">\n                <a href=\"https://rdap.arin.net/registry/ip/{{ $('Select rows from a table').item.json.observable_ip }}\" class=\"btn\" style=\"background-color: {{ ({1:'#4caf50',2:'#4caf50',3:'#ffb300',4:'#f44336',5:'#f44336'})[$node[\"Parse AI Agent output\"].json.score] }};\">\n                    Sprawdź detale IP (RDAP)\n                </a>\n            </div>\n        </div>\n        <div class=\"footer\">\n            System: <strong>Cyber Sentinel v1.0</strong><br>\n            Data: {{ new Date().toLocaleString('pl-PL') }}\n        </div>\n    </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -496
+      ],
+      "id": "adabcf0d-8191-4bf2-ba73-07e78d78006f",
+      "name": "Send an Email",
+      "webhookId": "9541ce19-f72d-4402-a34e-3ccb6a42b261",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://threatfox-api.abuse.ch/api/v1/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "search_ioc"
+            },
+            {
+              "name": "search_term",
+              "value": "={{ $('Select rows from a table').item.json.fqdn }}"
+            },
+            {
+              "name": "exact_match",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "643dbbfa-6be9-475d-862a-8ba4f895d136",
+      "name": "Abuse.CH_ThreatFox request",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -2160,
+        -528
+      ],
+      "typeVersion": 4.4,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZFD27i2HuT05opCN",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/abuse/api-key",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -2352,
+        -720
+      ],
+      "id": "990717f4-746b-423a-a67c-1876f3cb4222",
+      "name": "Abuse API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail/l94524506",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -496
+      ],
+      "id": "3ca870ed-b0c3-407c-8cf3-66d54593ae62",
+      "name": "Get Email Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  resource: $('Select rows from a table').first().json.observable_ip,\n  type: 'FQDN',\n  source_provider: 'Abuse_ThreatFox', \n  scan_date: new Date().toISOString(),\n  raw_data: $('Abuse.CH_ThreatFox request').item.json\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1744,
+        -608
+      ],
+      "id": "3052da02-3e4f-4296-acdb-5046b1c096a0",
+      "name": "Edit Json for Mongo - ThreatFox"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Wstawienie bazowego werdyktu \"Safe\" do nowej tabeli wyników\n-- Robimy to, aby zachować spójność relacji (analysis_result_id)\nINSERT INTO cyber_intelligence.ai_analysis_results (\n    threat_score, \n    verdict_summary_en, \n    analysis_pl\n) VALUES (\n    1,\n    null,\n    null\n);\n\n-- Zapamiętujemy ID tego wyniku\nSET @last_clean_res_id = LAST_INSERT_ID();\n\n-- 2. Wstawienie rekordu zdarzenia do threat_indicators\nINSERT INTO cyber_intelligence.threat_indicators (\n    dns_query_id,\n    type_id,\n    analysis_result_id,\n    last_scan\n) VALUES (\n    {{ $('Select rows from a table').item.json.dns_query_id }}, \n    (SELECT id FROM cyber_intelligence.dic_indicator_types WHERE name = 'IP'),\n    @last_clean_res_id,\n    NOW()\n);\n\n-- Zapamiętujemy ID zdarzenia (indicator_id)\nSET @last_event_id = LAST_INSERT_ID();\n\n-- 3. Rejestracja konkretnego skanera w tabeli szczegółów\nINSERT INTO cyber_intelligence.threat_indicator_details (\n    indicator_id, \n    source_id, \n    mongo_ref_id\n) VALUES (\n    @last_event_id,\n    (SELECT id FROM cyber_intelligence.dic_source_providers WHERE name = 'Abuse_ThreatFox'),\n    '{{ $json.mongo_id || \"NO_DATA\" }}' -- Używa mongo_id jeśli istnieje, inaczej \"NO_DATA\"\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        -1744,
+        -432
+      ],
+      "id": "6d692e11-3337-4359-b4c2-c8240c435155",
+      "name": "Insert a clear scan - ThreatFox",
+      "credentials": {
+        "mySql": {
+          "id": "yhjGryqAfuUYr29Q",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "threat_data_raw",
+        "fields": "=resource,type,source_provider,scan_date,raw_data",
+        "options": {
+          "dateFields": "",
+          "useDotNotation": false
+        }
+      },
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [
+        -1568,
+        -608
+      ],
+      "id": "fc72827d-518f-4148-827b-738fbe1149a7",
+      "name": "Insert doc ThreatFox",
+      "alwaysOutputData": false,
+      "credentials": {
+        "mongoDb": {
+          "id": "bIv67uJxYpzy7WVO",
+          "name": "MongoDB account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Wstawienie neutralnego werdyktu do nowej tabeli wyników\nINSERT INTO cyber_intelligence.ai_analysis_results (\n    threat_score, \n    verdict_summary_en, \n    analysis_pl\n) VALUES (\n    1,\n    null,\n    null\n);\n\n-- Zapamiętujemy ID werdyktu\nSET @last_vt_clean_res_id = LAST_INSERT_ID();\n\n-- 2. Wstawienie rekordu do głównej tabeli zdarzeń (rejestr skanowania)\nINSERT INTO cyber_intelligence.threat_indicators (\n    dns_query_id,\n    type_id,\n    analysis_result_id,\n    last_scan\n) VALUES (\n    {{ $('Select rows from a table').item.json.dns_query_id }}, \n    (SELECT id FROM cyber_intelligence.dic_indicator_types WHERE name = 'IP'),\n    @last_vt_clean_res_id,\n    NOW()\n);\n\n-- Zapamiętujemy ID zdarzenia (indicator_id)\nSET @last_vt_event_id = LAST_INSERT_ID();\n\n-- 3. Powiązanie skanera VirusTotal w tabeli szczegółów\nINSERT INTO cyber_intelligence.threat_indicator_details (\n    indicator_id, \n    source_id, \n    mongo_ref_id\n) VALUES (\n    @last_vt_event_id,\n    (SELECT id FROM cyber_intelligence.dic_source_providers WHERE name = 'VirusTotal'),\n    '{{ $json.mongo_id || \"NO_DATA\" }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        -1744,
+        -48
+      ],
+      "id": "450424c2-bdcd-45a5-b36c-be2a9d646ee4",
+      "name": "Insert a clear scan - VirusTotal",
+      "credentials": {
+        "mySql": {
+          "id": "yhjGryqAfuUYr29Q",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  resource: $('If \\'malicious\\' or \\'suspicious\\'').item.json.data.id, \n  type: \"IP\",\n  source_provider: \"VirusTotal\", \n  scan_date: new Date().toISOString(),\n  raw_data: $('VirusTotal IP Scan').item.json.data \n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1744,
+        -240
+      ],
+      "id": "d37f9a57-2001-4922-b76b-2ac3f08b851a",
+      "name": "Edit Json for Mongo - VirusTotal"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/mongodb/admin",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -2768,
+        -496
+      ],
+      "id": "906ced4e-8588-4a7e-8367-d7e4a3735e87",
+      "name": "Mongo DB Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "threat_data_raw",
+        "fields": "=resource,type,source_provider,scan_date,raw_data",
+        "options": {
+          "dateFields": "",
+          "useDotNotation": false
+        }
+      },
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [
+        -1568,
+        -240
+      ],
+      "id": "dba05af7-2214-46f8-a689-9f3535e89995",
+      "name": "Insert doc VirusTotal",
+      "alwaysOutputData": false,
+      "credentials": {
+        "mongoDb": {
+          "id": "bIv67uJxYpzy7WVO",
+          "name": "MongoDB account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst raw = item.raw_data || {};\nconst dataList = raw.data || [];\nconst mongoId = item.id || null;\n\nconst malwareFamilies = [...new Set(dataList.map(d => d.malware_printable).filter(m => m))];\nconst threatTypes = [...new Set(dataList.map(d => d.threat_type).filter(t => t))];\n\nconst confidenceScores = dataList.map(d => d.confidence_level).filter(c => c !== undefined);\nconst avgConfidence = confidenceScores.length > 0 \n    ? (confidenceScores.reduce((a, b) => a + b, 0) / confidenceScores.length).toFixed(0) \n    : 0;\n\nconst tagMap = {};\ndataList.flatMap(d => d.tags || []).forEach(tag => {\n    const cleanTag = tag.trim();\n    tagMap[cleanTag] = (tagMap[cleanTag] || 0) + 1;\n});\nconst topTags = Object.entries(tagMap)\n    .sort((a, b) => b[1] - a[1])\n    .slice(0, 5)\n    .map(e => e[0])\n    .join(', ');\n\nconst externalRef = dataList.length > 0 ? dataList[0].reference : \"No reference available\";\n\nlet report = `SOURCE: Abuse_ThreatFox\\n`;\nif (dataList.length === 0 || raw.query_status !== \"ok\") {\n    report += \"STATUS: No indicators found for this resource.\";\n} else {\n    report += `- Detections Found: ${dataList.length}\\n`;\n    report += `- Malware Families: ${malwareFamilies.join(', ') || 'Unknown'}\\n`;\n    report += `- Threat Types: ${threatTypes.join(', ') || 'Unknown'}\\n`;\n    report += `- Average Confidence: ${avgConfidence}%\\n`;\n    report += `- Top Tags: ${topTags || 'None'}\\n`;\n    report += `- Reference: ${externalRef}\\n`;\n}\n\nif (dataList.length === 0 || raw.query_status !== \"ok\") {\n    return {\n        \"threatfox\": {\n            \"no_data\": true,\n            \"threatfox_report\": \"SOURCE: Abuse_ThreatFox\\nSTATUS: No indicators found.\",\n            \"mongo_id\": mongoId\n        }\n    };\n}\n\nreturn {\n    \"threatfox\": {\n        \"no_data\": false,\n        \"threatfox_report\": report,\n        \"threatfox_active\": dataList.length > 0,\n        \"threatfox_max_confidence\": Math.max(...confidenceScores, 0),\n        \"mongo_id\": mongoId\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1376,
+        -608
+      ],
+      "id": "e08faa3a-62a3-4237-8656-a0f54c7889d3",
+      "name": "Data reduction and aggregation - ThreatFox"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get item from n8n input\nconst item = $input.item.json;\n\nconst mongoId = item.id || null;\n\n// Target the correct path in your specific JSON\nconst attr = item.raw_data && item.raw_data.attributes ? item.raw_data.attributes : {};\n\n// 1. Get Analysis Stats\nconst stats = attr.last_analysis_stats || {};\nconst malCount = stats.malicious || 0;\nconst susCount = stats.suspicious || 0;\nconst undCount = stats.undetected || 0;\n\n// 2. Get Engines that flagged it (Malicious/Suspicious)\nconst results = attr.last_analysis_results || {};\nconst flaggedBy = [];\n\nObject.keys(results).forEach(engine => {\n    if (results[engine].category === 'malicious' || results[engine].category === 'suspicious') {\n        flaggedBy.push(`${engine} (${results[engine].result})`);\n    }\n});\n\n// 3. Network & Ownership\nconst asOwner = attr.as_owner || \"Unknown Owner\";\nconst network = attr.network || \"Unknown Network\";\nconst rdap = attr.rdap || {};\nconst ipRange = (rdap.start_address && rdap.end_address) \n    ? `${rdap.start_address} - ${rdap.end_address}` \n    : \"Range not specified\";\n\n// 4. Build the report string\nlet report = `SOURCE: VirusTotal\\n`;\nreport += `- Owner: ${asOwner}\\n`;\nreport += `- Network: ${network}\\n`;\nreport += `- IP Range: ${ipRange}\\n`;\nreport += `- Stats: Malicious: ${malCount}, Suspicious: ${susCount}, Undetected: ${undCount}\\n`;\n\nif (flaggedBy.length > 0) {\n    report += `- Flagged by: ${flaggedBy.join(', ')}\\n`;\n}\n\n// 5. Check if it's a Big Player\nconst bigPlayers = [\"github\", \"google\", \"microsoft\", \"amazon\", \"cloudflare\"];\nconst isBigPlayer = bigPlayers.some(p => asOwner.toLowerCase().includes(p));\n\nif (!item.raw_data || !item.raw_data.attributes) {\n    return {\n        \"virustotal\": {\n            \"no_data\": true,\n            \"vt_report\": \"SOURCE: VirusTotal\\nSTATUS: No data found for this resource.\",\n            \"mongo_id\": mongoId\n        }\n    };\n}\n\nreturn {\n    \"virustotal\": {\n        \"no_data\": false,\n        \"vt_report\": report,\n        \"vt_stats\": stats,\n        \"vt_owner\": asOwner,\n        \"vt_is_big_player\": isBigPlayer,\n        \"vt_malicious_count\": malCount,\n        \"vt_scan_date\": item.scan_date,\n        \"mongo_id\": mongoId\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1376,
+        -352
+      ],
+      "id": "22f949e1-9fc7-41b6-bcec-3582c355a217",
+      "name": "Data reduction and aggregation - VirusTotal"
+    },
+    {
+      "parameters": {
+        "content": "## Orchestration & Data Ingestion\n\n",
+        "height": 288,
+        "width": 688,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3136,
+        -592
+      ],
+      "id": "34ac24c9-e2bf-4f03-ad2a-8c8c57218632",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Multi-Source Threat Intelligence Enrichment\n\n",
+        "height": 992,
+        "width": 576,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2400,
+        -992
+      ],
+      "id": "c79b8cfa-45c8-4173-a58d-62a6adc8679d",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Dual-Layer Persistence Strategy\n",
+        "height": 1232,
+        "width": 624,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1808,
+        -1088
+      ],
+      "id": "4a9b306d-a43b-49b3-8c60-1f29ccb12798",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## AI Synthesis & Cognitive Analysis\n\n",
+        "height": 640,
+        "width": 800,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1152,
+        -864
+      ],
+      "id": "733bed6a-a760-4f3e-9cfa-507a133d3e6e",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## Incident Reporting & Remediation\n\n",
+        "height": 528,
+        "width": 512,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -800
+      ],
+      "id": "9397274e-2b43-4311-bb10-71917f04eaa2",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "024c712f-29c5-49ed-8152-ac5fafac7816",
+              "leftValue": "={{ $json.query_status }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1968,
+        -528
+      ],
+      "id": "12f99d4d-1cee-47ab-bef6-3770dd24fea0",
+      "name": "If query_status = ok - ThretFox"
+    },
+    {
+      "parameters": {
+        "content": "# 🛡️ Project: Cyber Sentinel\n\n### **Purpose**\nAutonomous **Cyber Threat Intelligence (CTI)** & **Passive DNS Monitoring**. This workflow orchestrates the analysis of DNS telemetry using AI to detect malicious patterns and trigger autonomous response playbooks.\n\n---\n\n### **🚀 Setup Instructions**\n1.  **Secret Management:** Ensure **HashiCorp Vault** is connected to handle API keys and credentials securely.\n2.  **AI Engine:** Configure the **Ollama/Gemini** node to enable bilingual threat assessment (**EN/PL**).\n3.  **Data Layer:** Verify the connection to the **PostgreSQL** database (Neural Lake) for indicator enrichment.\n\n---\n\n### **🔗 Resources**\n* **Documentation:** [https://lukaszfd.github.io/cyber-sentinel/](https://lukaszfd.github.io/cyber-sentinel/)\n* **Author:** Łukasz Dejko",
+        "height": 608,
+        "width": 688
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3840,
+        -784
+      ],
+      "id": "3ada188a-28ca-46c6-8387-a07bf03fdd63",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT GROUP_CONCAT(formatted_line SEPARATOR '\\n') AS threat_scale\nFROM v_threat_scale_for_agent;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        -544,
+        -784
+      ],
+      "id": "dddbc5cf-3aa9-4e61-88ea-abecf53454ec",
+      "name": "Select threat scale for AI agent",
+      "credentials": {
+        "mySql": {
+          "id": "yhjGryqAfuUYr29Q",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 2
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1232,
+        -384
+      ],
+      "id": "merge-primary-001",
+      "name": "Merge primary"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Łączy outputy VT reduction i TF reduction w jeden obiekt + liczy primary_verdict\nlet combined = {};\nfor (const item of $input.all()) {\n    Object.assign(combined, item.json);\n}\n\nconst vt = combined.virustotal || { no_data: true };\nconst tf = combined.threatfox || { no_data: true };\n\n// VT level\nlet vtLevel = 'CLEAN';\nconst vtMal = vt.vt_malicious_count || 0;\nif (vt.no_data) {\n    vtLevel = 'NO_DATA';\n} else if (vt.vt_is_big_player && vtMal < 3) {\n    vtLevel = 'CLEAN';\n} else if (vtMal === 0) {\n    vtLevel = 'CLEAN';\n} else if (vtMal >= 1 && vtMal <= 3) {\n    vtLevel = 'LOW';\n} else if (vtMal >= 4 && vtMal <= 9) {\n    vtLevel = 'MEDIUM';\n} else if (vtMal >= 10) {\n    vtLevel = 'HIGH';\n}\n\n// TF level\nlet tfLevel = 'CLEAN';\nconst tfConf = tf.threatfox_max_confidence || 0;\nif (tf.no_data) {\n    tfLevel = 'NO_DATA';\n} else if (tf.threatfox_active && tfConf >= 75) {\n    tfLevel = 'HIGH';\n} else if (tf.threatfox_active && tfConf >= 50) {\n    tfLevel = 'MEDIUM';\n} else if (tf.threatfox_active) {\n    tfLevel = 'LOW';\n}\n\nconst levelToScore = { 'NO_DATA': 1, 'CLEAN': 1, 'LOW': 2, 'MEDIUM': 3, 'HIGH': 4 };\nconst primaryScore = Math.max(levelToScore[vtLevel] || 1, levelToScore[tfLevel] || 1);\nconst primaryFlagged = (vtLevel !== 'CLEAN' && vtLevel !== 'NO_DATA')\n                    || (tfLevel !== 'CLEAN' && tfLevel !== 'NO_DATA');\nconst insufficientData = (vtLevel === 'NO_DATA' && tfLevel === 'NO_DATA');\n\nreturn {\n    primary_verdict: {\n        vt_level: vtLevel,\n        tf_level: tfLevel,\n        vt_malicious_count: vtMal,\n        tf_max_confidence: tfConf,\n        vt_is_big_player: !!vt.vt_is_big_player,\n        primary_score: primaryScore,\n        primary_flagged: primaryFlagged,\n        insufficient_data: insufficientData\n    },\n    virustotal: vt,\n    threatfox: tf\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1056,
+        -384
+      ],
+      "id": "compute-primary-verdict-001",
+      "name": "Compute primary verdict"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "pv-flagged-001",
+              "leftValue": "={{ $json.primary_verdict.primary_flagged }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -880,
+        -384
+      ],
+      "id": "if-primary-flagged-001",
+      "name": "IF primary flagged"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/abuse/api-key",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        -528
+      ],
+      "id": "abuse-token-conditional-001",
+      "name": "Abuse API TOKEN (cond)",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "24ZtV0tcsZ0ZLwoT",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://urlhaus-api.abuse.ch/v1/host/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "host",
+              "value": "={{ $('Select rows from a table').item.json.fqdn }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -528,
+        -528
+      ],
+      "id": "urlhaus-call-conditional-001",
+      "name": "Abuse.CH_URLHaus (cond)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZFD27i2HuT05opCN",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "uh-qs-ok-cond-001",
+              "leftValue": "={{ $json.query_status }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -352,
+        -528
+      ],
+      "id": "if-uh-query-ok-cond-001",
+      "name": "IF urlhaus query ok"
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  resource: $('Select rows from a table').first().json.observable_ip,\n  type: 'FQDN',\n  source_provider: 'Abuse_URLhaus', \n  scan_date: new Date().toISOString(),\n  raw_data: $('Abuse.CH_URLHaus (cond)').item.json\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        -624
+      ],
+      "id": "edit-json-uh-cond-001",
+      "name": "Edit Json Mongo URLHaus (cond)"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "threat_data_raw",
+        "fields": "=resource,type,source_provider,scan_date,raw_data",
+        "options": {
+          "dateFields": "",
+          "useDotNotation": false
+        }
+      },
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        -624
+      ],
+      "id": "insert-mongo-uh-cond-001",
+      "name": "Insert doc URLHaus (cond)",
+      "credentials": {
+        "mongoDb": {
+          "id": "bIv67uJxYpzy7WVO",
+          "name": "MongoDB account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Wywoływany TYLKO gdy primary_flagged = true i URLhaus zwrócił dane.\n// Dostaje na wejściu raw URLhaus response (po Insert doc URLHaus → przekazany dalej).\n// MUSI dosięgnąć primary_verdict z poprzedniego \"Compute primary verdict\" przez referencję.\n\nconst item = $input.item.json;\nconst raw = item.raw_data || item; // zależnie skąd przychodzi; obsłużymy oba przypadki\nconst urls = (raw && raw.urls) || [];\nconst mongoId = item.id || null;\n\n// Pobierz primary_verdict i pozostałe sekcje z wcześniejszego węzła\nconst pv = $('Compute primary verdict').item.json.primary_verdict;\nconst vtSection = $('Compute primary verdict').item.json.virustotal;\nconst tfSection = $('Compute primary verdict').item.json.threatfox;\n\n// Brak danych z URLhaus\nif (urls.length === 0 && !raw.urlhaus_reference) {\n    return {\n        primary_verdict: pv,\n        virustotal: vtSection,\n        threatfox: tfSection,\n        urlhaus: {\n            no_data: true,\n            urlhaus_status: 'no_data',\n            urlhaus_report: 'SOURCE: Abuse_URLhaus\\nSTATUS: No data available.',\n            mongo_id: mongoId\n        }\n    };\n}\n\n// Limit objętości — max 5 najnowszych online URL-i, reszta to tylko statystyka\nconst onlineUrls = urls.filter(u => u.url_status === 'online');\nconst onlineCount = onlineUrls.length;\n\nconst tagMap = {};\nurls.flatMap(u => u.tags || []).forEach(tag => {\n    const cleanTag = (tag || '').trim().toLowerCase();\n    if (cleanTag) tagMap[cleanTag] = (tagMap[cleanTag] || 0) + 1;\n});\nconst topTags = Object.entries(tagMap)\n    .sort((a, b) => b[1] - a[1])\n    .slice(0, 5)\n    .map(e => `${e[0]} (${e[1]}x)`)\n    .join(', ');\n\nconst criticalKeywords = ['c2', 'cobaltstrike', 'rat', 'ransomware', 'brute', 'infostealer', 'stealer', 'brat', 'emotet', 'qakbot', 'lokibot'];\nconst foundCritical = Object.keys(tagMap).filter(t => criticalKeywords.includes(t));\nconst urlhausRef = raw.urlhaus_reference || 'No reference link available';\n\nlet report = `SOURCE: Abuse_URLhaus (SUPPORTING CONTEXT)\\n`;\nreport += `- Total URLs in DB: ${raw.url_count || urls.length}\\n`;\nreport += `- Currently online: ${onlineCount}\\n`;\nreport += `- Top tags: ${topTags || 'None'}\\n`;\nif (foundCritical.length > 0) {\n    report += `- CRITICAL TAGS: ${foundCritical.join(', ').toUpperCase()}\\n`;\n}\nreport += `- Reference: ${urlhausRef}\\n`;\n\n// Wyznacz status — primary już flaguje (skoro tu jesteśmy), więc:\n// - jeśli urlhaus ma online URL-e → active_corroborating (modifier +1)\n// - jeśli tylko historyczne → historical_only (modifier 0)\nlet urlhausStatus = onlineCount > 0 ? 'active_corroborating' : 'historical_only';\nif (onlineCount === 0) {\n    report = `SOURCE: Abuse_URLhaus\\n- Historical URLs only (none currently online)\\n- Total in DB: ${raw.url_count || urls.length}\\n- Reference: ${urlhausRef}\\n`;\n}\n\nreturn {\n    primary_verdict: pv,\n    virustotal: vtSection,\n    threatfox: tfSection,\n    urlhaus: {\n        no_data: false,\n        urlhaus_status: urlhausStatus,\n        urlhaus_report: report,\n        is_active_threat: onlineCount > 0,\n        online_count: onlineCount,\n        total_count: raw.url_count || urls.length,\n        critical_tags: foundCritical,\n        has_critical_tags: foundCritical.length > 0,\n        urlhaus_reference: urlhausRef,\n        mongo_id: mongoId\n    }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -624
+      ],
+      "id": "urlhaus-reduction-cond-001",
+      "name": "URLhaus reduction (cond)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const pv = $('Compute primary verdict').item.json.primary_verdict;\nconst vt = $('Compute primary verdict').item.json.virustotal;\nconst tf = $('Compute primary verdict').item.json.threatfox;\nreturn {\n    primary_verdict: pv,\n    virustotal: vt,\n    threatfox: tf,\n    urlhaus: {\n        no_data: true,\n        urlhaus_status: 'query_not_ok',\n        urlhaus_report: 'SOURCE: Abuse_URLhaus\\nSTATUS: Query returned non-ok status.',\n        is_active_threat: false,\n        online_count: 0,\n        total_count: 0,\n        critical_tags: [],\n        has_critical_tags: false,\n        mongo_id: null\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        -432
+      ],
+      "id": "urlhaus-noresult-stub-001",
+      "name": "URLhaus no-result stub"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Wywoływany gdy primary_flagged = false. Tworzy stub żeby final merge miał z czym pracować.\n// NIE wywołujemy URLhaus API i NIE zapisujemy nic do MongoDB.\nconst pv = $json.primary_verdict;\nconst vt = $json.virustotal;\nconst tf = $json.threatfox;\n\nreturn {\n    primary_verdict: pv,\n    virustotal: vt,\n    threatfox: tf,\n    urlhaus: {\n        skipped: true,\n        no_data: true,\n        urlhaus_status: 'skipped_primary_clean',\n        urlhaus_report: 'SOURCE: Abuse_URLhaus\\nSTATUS: Skipped — primary sources did not flag this artifact (token-saving optimization).',\n        is_active_threat: false,\n        online_count: 0,\n        total_count: 0,\n        critical_tags: [],\n        has_critical_tags: false,\n        mongo_id: null\n    }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        -240
+      ],
+      "id": "urlhaus-skip-stub-001",
+      "name": "URLhaus skip stub"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        400,
+        -384
+      ],
+      "id": "final-merge-001",
+      "name": "Final merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Łączy primary_verdict + virustotal + threatfox + urlhaus w finalny aggregated_report dla AI\nlet combined = {};\nfor (const item of $input.all()) {\n    Object.assign(combined, item.json);\n}\n\nconst pv = combined.primary_verdict || {};\nconst vt = combined.virustotal || { no_data: true };\nconst tf = combined.threatfox || { no_data: true };\nconst uh = combined.urlhaus || { no_data: true, urlhaus_status: 'no_data' };\n\n// Wyznacz urlhaus_modifier na podstawie statusu\nlet urlhausModifier = 0;\nconst status = uh.urlhaus_status || 'no_data';\nif (status === 'active_corroborating') urlhausModifier = 1;\n// historical_only, skipped_primary_clean, no_data → 0\n\nlet suggestedScore = Math.min(5, (pv.primary_score || 1) + urlhausModifier);\nif (pv.insufficient_data) suggestedScore = 1;\n\nconst aggregated_report =\n    `═══════════════════════════════════════════\\n` +\n    `PRIMARY SOURCES (drive the verdict)\\n` +\n    `═══════════════════════════════════════════\\n\\n` +\n    (vt.vt_report || 'SOURCE: VirusTotal\\nSTATUS: No data.') + `\\n\\n` +\n    (tf.threatfox_report || 'SOURCE: Abuse_ThreatFox\\nSTATUS: No data.') + `\\n\\n` +\n    `═══════════════════════════════════════════\\n` +\n    `SUPPORTING CONTEXT (URLhaus)\\n` +\n    `═══════════════════════════════════════════\\n\\n` +\n    (uh.urlhaus_report || 'SOURCE: Abuse_URLhaus\\nSTATUS: No data.') + `\\n\\n` +\n    `═══════════════════════════════════════════\\n` +\n    `PRE-COMPUTED PRIMARY VERDICT\\n` +\n    `═══════════════════════════════════════════\\n` +\n    `- VirusTotal level: ${pv.vt_level} (malicious_count=${pv.vt_malicious_count}, big_player=${pv.vt_is_big_player})\\n` +\n    `- ThreatFox level: ${pv.tf_level} (max_confidence=${pv.tf_max_confidence})\\n` +\n    `- URLhaus status: ${status} (modifier: +${urlhausModifier})\\n` +\n    `- Suggested score (1-5): ${suggestedScore}\\n` +\n    (pv.insufficient_data ? `- WARNING: insufficient primary data\\n` : '');\n\nreturn {\n    aggregated_report: aggregated_report,\n    primary_verdict: pv,\n    final: {\n        suggested_score: suggestedScore,\n        urlhaus_status: status,\n        urlhaus_modifier: urlhausModifier\n    },\n    mongo_ids: {\n        virustotal: vt.mongo_id || null,\n        threatfox: tf.mongo_id || null,\n        urlhaus: uh.mongo_id || null\n    },\n    virustotal: vt,\n    threatfox: tf,\n    urlhaus: uh\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        -384
+      ],
+      "id": "final-aggregation-001",
+      "name": "Final aggregation"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "MySQL Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select rows from a table": {
+      "main": [
+        [
+          {
+            "node": "Virus total API TOKEN",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Abuse API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal IP Scan": {
+      "main": [
+        [
+          {
+            "node": "If 'malicious' or 'suspicious'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If 'malicious' or 'suspicious'": {
+      "main": [
+        [
+          {
+            "node": "Edit Json for Mongo - VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert a clear scan - VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Virus total API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal IP Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini AI Studio": {
+      "main": [
+        [
+          {
+            "node": "Select threat scale for AI agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MySQL Pass": {
+      "main": [
+        [
+          {
+            "node": "Mongo DB Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "main": []
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Agent output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Agent output": {
+      "main": [
+        [
+          {
+            "node": "Insert AI verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert AI verdict": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "Abuse.CH_ThreatFox request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse.CH_ThreatFox request": {
+      "main": [
+        [
+          {
+            "node": "If query_status = ok - ThretFox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an Email": {
+      "main": [
+        []
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Json for Mongo - ThreatFox": {
+      "main": [
+        [
+          {
+            "node": "Insert doc ThreatFox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Json for Mongo - VirusTotal": {
+      "main": [
+        [
+          {
+            "node": "Insert doc VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert doc ThreatFox": {
+      "main": [
+        [
+          {
+            "node": "Data reduction and aggregation - ThreatFox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mongo DB Pass": {
+      "main": [
+        [
+          {
+            "node": "Select rows from a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert doc VirusTotal": {
+      "main": [
+        [
+          {
+            "node": "Data reduction and aggregation - VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction and aggregation - ThreatFox": {
+      "main": [
+        [
+          {
+            "node": "Merge primary",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Data reduction and aggregation - VirusTotal": {
+      "main": [
+        [
+          {
+            "node": "Merge primary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If query_status = ok - ThretFox": {
+      "main": [
+        [
+          {
+            "node": "Edit Json for Mongo - ThreatFox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert a clear scan - ThreatFox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select threat scale for AI agent": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge primary": {
+      "main": [
+        [
+          {
+            "node": "Compute primary verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute primary verdict": {
+      "main": [
+        [
+          {
+            "node": "IF primary flagged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF primary flagged": {
+      "main": [
+        [
+          {
+            "node": "Abuse API TOKEN (cond)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "URLhaus skip stub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse API TOKEN (cond)": {
+      "main": [
+        [
+          {
+            "node": "Abuse.CH_URLHaus (cond)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse.CH_URLHaus (cond)": {
+      "main": [
+        [
+          {
+            "node": "IF urlhaus query ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF urlhaus query ok": {
+      "main": [
+        [
+          {
+            "node": "Edit Json Mongo URLHaus (cond)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "URLhaus no-result stub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Json Mongo URLHaus (cond)": {
+      "main": [
+        [
+          {
+            "node": "Insert doc URLHaus (cond)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert doc URLHaus (cond)": {
+      "main": [
+        [
+          {
+            "node": "URLhaus reduction (cond)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URLhaus reduction (cond)": {
+      "main": [
+        [
+          {
+            "node": "Final merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "URLhaus no-result stub": {
+      "main": [
+        [
+          {
+            "node": "Final merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "URLhaus skip stub": {
+      "main": [
+        [
+          {
+            "node": "Final merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Final merge": {
+      "main": [
+        [
+          {
+            "node": "Final aggregation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final aggregation": {
+      "main": [
+        [
+          {
+            "node": "Gemini AI Studio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "8c0792c3-8584-4396-b6b6-394e646cab08",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "71c7fe4d131e80cb72eec0e26188a51a745f9f857c32d9cdf4587b1cb3816cfe"
+  },
+  "id": "v6SbteXL5dW8fGKQ",
+  "tags": [
+    {
+      "updatedAt": "2026-03-13T13:39:00.381Z",
+      "createdAt": "2026-03-13T13:39:00.381Z",
+      "id": "Sp23rEbQB2Jd4jXe",
+      "name": "ThreatFox"
+    },
+    {
+      "updatedAt": "2026-03-13T13:38:34.538Z",
+      "createdAt": "2026-03-13T13:38:34.538Z",
+      "id": "TIbt5FCaXtha7wlD",
+      "name": "VirusTotal"
+    },
+    {
+      "updatedAt": "2026-03-13T13:38:42.812Z",
+      "createdAt": "2026-03-13T13:38:42.812Z",
+      "id": "bCcoQW7lpKvNTcSS",
+      "name": "Abuse.ch"
+    },
+    {
+      "updatedAt": "2026-03-13T13:38:26.975Z",
+      "createdAt": "2026-03-13T13:38:26.975Z",
+      "id": "myyAYIm8lG8YODFq",
+      "name": "HashiCorpVault"
+    }
+  ]
+}
