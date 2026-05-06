@@ -283,7 +283,7 @@
           - "       group_vars (encrypted with ansible-vault) for re-runs"
           - "    3. These keys will NEVER be displayed again"
           - ""
-          - "  WARNING: Unseal keys are NOT stored in Vault by design".
+          - "  WARNING: Unseal keys are NOT stored in Vault by design."
           - "  Lose them and you lose access to all Vault data "
           - "  permanently."
           - "============================================================"

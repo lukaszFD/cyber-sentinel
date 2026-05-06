@@ -1,0 +1,272 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 00.PRE.RESTORE — Proxmox VM Restore
+# ============================================================
+# Purpose:    Restores the dev VM (vm-prox-dev / VMID 100,
+#             dev-network-guardian) from the latest Proxmox backup
+#             before deployment runs. Provides a clean baseline
+#             state for testing — every dev deploy starts from a
+#             known-good snapshot.
+#
+# Trigger:    Runs ONLY when --limit targets vm-prox-dev or dev_vm.
+#             The gate task at the top checks ansible_limit and
+#             skips the play if vm-prox-dev is not in scope.
+#
+#             Examples:
+#               ansible-playbook 00_main.yml --limit vm-prox-dev → RUNS
+#               ansible-playbook 00_main.yml --limit dev_vm      → RUNS
+#               ansible-playbook 00_main.yml --limit rpi5-prod   → SKIPS
+#               ansible-playbook 00_main.yml                     → RUNS
+#
+# Depends on: - group_vars/all/vault.yml (auto-loaded) defining:
+#                 proxmox_host, proxmox_user_token, proxmox_api_secret
+#             - .vault_pass file referenced from ansible.cfg
+#             - Proxmox API token with the following privileges
+#               (path /vms/<vmid> for the dev VM):
+#                 VM.Audit, VM.PowerMgmt, VM.Backup, VM.Allocate,
+#                 VM.Config.Disk, VM.Config.HWType, VM.Config.Memory,
+#                 VM.Config.CPU, VM.Config.Network, VM.Config.Options
+#               And on the storage path (/storage/<storage>):
+#                 Datastore.Audit, Datastore.AllocateSpace
+#               For home-lab simplicity, granting `PVEAdmin` on `/`
+#               with Privilege Separation OFF is the easiest path.
+#             - At least one backup of the target VMID in the
+#               configured backup storage.
+#             - community.general collection installed.
+#
+# Outputs:    - vm-prox-dev VM stopped, restored from latest backup,
+#               and started again
+#             - SSH on dev_vm becomes responsive within ~30-90s
+#               (handled by the wait_for in [00.PRE.RESTORE.4.2])
+#
+# Errors:     - "Decryption failed" — vault password is wrong; check
+#               ansible.cfg vault_password_file path and contents.
+#             - "403 Forbidden: Permission check failed" — token
+#               lacks the privilege required for the failing
+#               operation. See "Depends on" above for the full
+#               privilege list.
+#             - "501 Method not implemented" — wrong API endpoint.
+#               The correct restore endpoint is /nodes/<node>/qemu
+#               with `archive` parameter, NOT /vzdump/extract.
+#             - "500 hostname lookup failed" — proxmox_node value
+#               does not match the actual node name. Check node
+#               name in Proxmox UI (left panel under Datacenter).
+#             - Task timeout — restore is slow; increase retries
+#               in [00.PRE.RESTORE.3.2] for very large VMs.
+#
+# KNOWN ISSUES (deferred):
+#   * Hardcoded vmid 100 — should come from inventory.
+#   * Hardcoded proxmox_node "local" — should also be sourced
+#     from inventory or group_vars for portability across hosts.
+#   * api_user.split('!') is fragile — should be two separate vars.
+#   * No rollback on partial failure.
+#   * validate_certs: false — acceptable for self-signed home-lab.
+#   * community.general.proxmox_kvm is deprecated — migrate to
+#     community.proxmox.proxmox_kvm before community.general v15.
+# ============================================================
+
+- name: 00.PRE.RESTORE - Proxmox Snapshot Restore (DEV VM only)
+  hosts: all_servers
+  gather_facts: yes
+
+  vars:
+    # Target VMID in Proxmox — corresponds to "dev-network-guardian".
+    dev_hng_vm_id: 100
+
+    # Proxmox node name as it appears in the Proxmox UI (left panel
+    # under Datacenter). For this lab it is "local". This MUST
+    # match the actual hostname Proxmox uses internally — passing
+    # an alias or an unrecognized name causes a 500 with
+    # "hostname lookup failed".
+    proxmox_node: "local"
+
+    # Backup storage name (Datacenter → Storage in Proxmox UI).
+    backup_storage: "backups-seagate"
+
+    # Computed at runtime by [00.PRE.RESTORE.0.1].
+    should_restore: false
+
+  tasks:
+
+    # ============================================================
+    # SECTION 0 — Gate: skip play unless targeting vm-prox-dev
+    # ============================================================
+
+    - name: "[00.PRE.RESTORE.0.1] Determine if restore should run"
+      ansible.builtin.set_fact:
+        should_restore: >-
+          {{ (ansible_limit is not defined)
+             or (ansible_limit | default('') == '')
+             or ('vm-prox-dev' in (ansible_limit | default('') | split(',')))
+             or ('dev_vm' in (ansible_limit | default('') | split(','))) }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.0.2] Skip rest of play if not targeting vm-prox-dev"
+      ansible.builtin.meta: end_play
+      when: not should_restore
+
+    - name: "[00.PRE.RESTORE.0.3] Announce restore intent"
+      ansible.builtin.debug:
+        msg:
+          - "==========================================================="
+          - "  PROXMOX RESTORE — vm-prox-dev (VMID {{ dev_hng_vm_id }})"
+          - "==========================================================="
+          - "  Proxmox node:   {{ proxmox_node }}"
+          - "  Source storage: {{ backup_storage }}"
+          - "  Strategy:       latest backup, by ctime"
+          - "  This will OVERWRITE the current VM state."
+          - "==========================================================="
+      run_once: true
+      delegate_to: localhost
+
+    # ============================================================
+    # SECTION 1 — Discover latest backup
+    # ============================================================
+
+    - name: "[00.PRE.RESTORE.1.1] Get list of backups from Proxmox storage"
+      ansible.builtin.uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}/storage/{{ backup_storage }}/content"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ proxmox_user_token }}={{ proxmox_api_secret }}"
+        validate_certs: false
+      register: backup_list
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.1.2] Filter backups for VMID {{ dev_hng_vm_id }}"
+      ansible.builtin.set_fact:
+        vm_backups: >-
+          {{ backup_list.json.data
+             | selectattr('content', 'equalto', 'backup')
+             | selectattr('volid', 'search', 'vzdump-qemu-' + dev_hng_vm_id|string)
+             | list }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.1.3] Fail fast if no backups found"
+      ansible.builtin.fail:
+        msg: "No backups found for VMID {{ dev_hng_vm_id }} in storage {{ backup_storage }}. Check Proxmox UI."
+      when: vm_backups | length == 0
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.1.4] Pick latest backup by creation time"
+      ansible.builtin.set_fact:
+        latest_backup: "{{ vm_backups | sort(attribute='ctime', reverse=true) | first }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.1.5] Display selected backup details"
+      ansible.builtin.debug:
+        msg:
+          - "Found {{ vm_backups | length }} backup(s) for VMID {{ dev_hng_vm_id }}"
+          - "Selected: {{ latest_backup.volid }}"
+          - "Created:  {{ '%Y-%m-%d %H:%M:%S' | strftime(latest_backup.ctime) }}"
+          - "Size:     {{ (latest_backup.size / 1024 / 1024 / 1024) | round(2) }} GB"
+      run_once: true
+      delegate_to: localhost
+
+    # ============================================================
+    # SECTION 2 — Stop the VM before restore
+    # ============================================================
+
+    - name: "[00.PRE.RESTORE.2.1] Stop VM {{ dev_hng_vm_id }} before restore"
+      community.general.proxmox_kvm:
+        api_host: "{{ proxmox_host }}"
+        api_user: "{{ proxmox_user_token.split('!')[0] }}"
+        api_token_id: "{{ proxmox_user_token.split('!')[1] }}"
+        api_token_secret: "{{ proxmox_api_secret }}"
+        vmid: "{{ dev_hng_vm_id }}"
+        state: stopped
+        validate_certs: false
+      run_once: true
+      delegate_to: localhost
+
+    # ============================================================
+    # SECTION 3 — Trigger restore and wait for completion
+    # ------------------------------------------------------------
+    # Restore is done via POST /nodes/<node>/qemu with `archive`.
+    # Effectively creates a new VM (or overwrites with force=1)
+    # using the backup as source. The /vzdump endpoint is for
+    # CREATING backups, NOT restoring.
+    # ============================================================
+
+    - name: "[00.PRE.RESTORE.3.1] Trigger restore from {{ latest_backup.volid }}"
+      ansible.builtin.uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}/qemu"
+        method: POST
+        headers:
+          Authorization: "PVEAPIToken={{ proxmox_user_token }}={{ proxmox_api_secret }}"
+        body_format: form-urlencoded
+        body:
+          vmid: "{{ dev_hng_vm_id }}"
+          archive: "{{ latest_backup.volid }}"
+          force: 1
+        validate_certs: false
+        status_code: 200
+      register: restore_result
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.3.2] Wait for restore task to complete"
+      ansible.builtin.uri:
+        url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}/tasks/{{ restore_result.json.data }}/status"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ proxmox_user_token }}={{ proxmox_api_secret }}"
+        validate_certs: false
+      register: task_status
+      until: task_status.json.data.status == 'stopped'
+      retries: 60
+      delay: 10
+      run_once: true
+      delegate_to: localhost
+
+    # Verify exitstatus — Proxmox returns "stopped" for both
+    # successful and failed tasks. exitstatus tells us which.
+    - name: "[00.PRE.RESTORE.3.3] Verify restore exitstatus is OK"
+      ansible.builtin.fail:
+        msg: "Restore task ended with non-OK status: {{ task_status.json.data.exitstatus }}"
+      when: task_status.json.data.exitstatus != 'OK'
+      run_once: true
+      delegate_to: localhost
+
+    # ============================================================
+    # SECTION 4 — Boot the restored VM
+    # ============================================================
+
+    - name: "[00.PRE.RESTORE.4.1] Start VM after restore"
+      community.general.proxmox_kvm:
+        api_host: "{{ proxmox_host }}"
+        api_user: "{{ proxmox_user_token.split('!')[0] }}"
+        api_token_id: "{{ proxmox_user_token.split('!')[1] }}"
+        api_token_secret: "{{ proxmox_api_secret }}"
+        vmid: "{{ dev_hng_vm_id }}"
+        state: started
+        validate_certs: false
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.4.2] Wait for SSH to become available on dev_vm"
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[groups['vm-prox-dev'][0]]['ansible_host'] }}"
+        port: 22
+        delay: 15
+        timeout: 180
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.PRE.RESTORE.4.3] Restore complete — confirm and continue"
+      ansible.builtin.debug:
+        msg:
+          - "==========================================================="
+          - "  RESTORE COMPLETE"
+          - "==========================================================="
+          - "  VM {{ dev_hng_vm_id }} restored from {{ latest_backup.volid }}"
+          - "  SSH on {{ hostvars[groups['vm-prox-dev'][0]]['ansible_host'] }}:22 is now responsive."
+          - "  Subsequent playbooks (01, 02, ...) will proceed normally."
+          - "==========================================================="
+      run_once: true
+      delegate_to: localhost

@@ -22,6 +22,21 @@
 # ============================================================
 
 # ------------------------------------------------------------
+# [00.0] Stage 0 — Pre-deployment (DEV environment only)
+# ------------------------------------------------------------
+# restore_proxmox.yml has an internal gate that skips the play
+# unless --limit includes vm-prox-dev (or no --limit is given).
+# Safe to keep here unconditionally — it self-skips for prod.
+#
+# Placed BEFORE foundation tasks so the dev VM is freshly
+# restored before anything touches it. After restore, the VM
+# may take ~30-90s to be SSH-ready; subsequent playbooks
+# (01, 02, ...) will retry connections via Ansible's built-in
+# connection logic.
+# ------------------------------------------------------------
+- import_playbook: restore_proxmox.yml          # [00.0.1] DEV only — restore VM from latest backup
+
+# ------------------------------------------------------------
 # [00.1] Stage 1 — Foundation (secrets + security + system)
 # ------------------------------------------------------------
 # Must run first. Creates the .env file from Vault, configures the
