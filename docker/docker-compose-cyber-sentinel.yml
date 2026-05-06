@@ -1,4 +1,74 @@
+# ============================================================
+# Cyber Sentinel — Docker Compose Stack Definition
+# ============================================================
+# Purpose:    Defines all services that make up the Cyber Sentinel
+#             stack: DNS layer (Unbound, Pi-hole, passive DNS),
+#             automation (n8n), data stores (MySQL, MongoDB),
+#             observability (Grafana, Prometheus, node_exporter),
+#             secret management (HashiCorp Vault), and admin UIs
+#             (Portainer, Firefox).
+#
+# Started by: Playbook 04.2 with `docker compose up --build -d`.
+#             Project name pinned to "cyber-sentinel" so container
+#             names are predictable (referenced as bare names by
+#             playbooks 04.3, 04.4, 04.6, and 06).
+#
+# Network:    All services attach to a single bridge network
+#             `internal_network` (10.10.10.0/24) with static IPs.
+#             This convention lets playbooks and Nginx use IPs
+#             instead of DNS names where convenient.
+#
+#             IP allocation:
+#               .2  unbound          .9  mysqldb
+#               .3  passive_dns      .10 portainer
+#               .4  pihole (DNS)     .11 grafana
+#               .5  firefox          .12 vault
+#               .6  dns_log_processor .13 prometheus
+#               .7  n8n              .14 node_exporter
+#               .8  mongo            .15 vault_unsealer (disabled)
+#               .100 nginx-proxy (created by playbook 05)
+#
+# Env vars:   ${VAR} placeholders are resolved from the .env file
+#             at {{ remote_deploy_base }}/.env (created by 01,
+#             augmented by 04.1).
+#
+# KNOWN ISSUES (deferred — do not silently fix during this pass):
+#
+#   * pihole.volumes use './pihole' and './dnsmasq.d' (no "config/"
+#     prefix), but playbook 04.1 creates 'config/dns/dnsmasq.d/'
+#     under remote_deploy_base. These paths are inconsistent — one
+#     of the two layouts is wrong. Verify by checking where
+#     /etc/pihole/gravity.db actually lives on a deployed host.
+#
+#   * grafana.environment includes `MYSQL_PASSWORD=${MYSQL_PASSWORD}`,
+#     but playbook 04.1 [04.1.3.1] only writes GRAFANA_PASSWORD,
+#     MONGODB_PASSWORD, and MYSQL_ROOT_PASSWORD to .env. MYSQL_PASSWORD
+#     (the application user's password) is never injected. Either it
+#     comes from templates/env.j2 (not visible here) or Grafana
+#     receives an empty value. Verify before next release.
+#
+#   * mongo.environment uses ${MONGODB_USERNAME}, but the .env
+#     file is not known to define this variable. all_servers.yml
+#     defines `mongodb_username` (Ansible-side), but that does not
+#     automatically reach docker-compose. Verify env.j2 includes
+#     MONGODB_USERNAME or the container falls back to defaults.
+#
+#   * n8n publishes port 5678 directly to the host (`5678:5678`),
+#     bypassing the Nginx HTTPS proxy from playbook 05. UFW does
+#     NOT block this port. If this is intentional (debug access),
+#     leave it; otherwise n8n is reachable over plain HTTP from LAN.
+# ============================================================
+
 services:
+
+  # ------------------------------------------------------------
+  # [SVC.DNS.RECURSIVE] Unbound — recursive DNS resolver
+  # ------------------------------------------------------------
+  # Acts as the upstream resolver for Pi-hole. Doing recursive
+  # resolution locally avoids leaking DNS queries to public
+  # resolvers (Google, Cloudflare). Pi-hole forwards uncached
+  # queries here on port 53 internal.
+  # ------------------------------------------------------------
   unbound:
     image: klutchell/unbound:latest
     container_name: unbound
@@ -10,6 +80,22 @@ services:
       - './config/unbound/unbound.conf:/etc/unbound/unbound.conf'
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.DNS.PASSIVE] passive_dns — sniffer for IoC harvesting
+  # ------------------------------------------------------------
+  # Custom dnsmasq build that logs every query/response to a file
+  # which dns_log_processor then parses and feeds into MySQL. This
+  # is the data source for the threat intelligence pipeline — every
+  # IoC analyzed by the AI agent originates here.
+  #
+  # The custom command flags:
+  #   -k                 → keep-foreground (Docker-friendly)
+  #   --no-resolv        → ignore /etc/resolv.conf
+  #   --server=10.10.10.2 → forward to Unbound
+  #   --log-queries      → log every DNS query
+  #   --log-facility     → write to mounted volume so other
+  #                        containers can read it
+  # ------------------------------------------------------------
   passive_dns:
     build:
       context: .
@@ -25,6 +111,16 @@ services:
     restart: unless-stopped
     command: ["dnsmasq", "-k", "--no-resolv", "--server=10.10.10.2#53", "--log-queries", "--log-facility=/var/log/dns.log"]
 
+  # ------------------------------------------------------------
+  # [SVC.DNS.AD_BLOCK] Pi-hole — DNS-level ad/threat blocking
+  # ------------------------------------------------------------
+  # Public DNS server (53/tcp + 53/udp on the host). Adlists are
+  # populated by playbook 04.4 [04.4.2.3]. Forwards uncached
+  # queries to Unbound for recursive resolution.
+  # ------------------------------------------------------------
+  # KNOWN ISSUE: volume paths './pihole' and './dnsmasq.d' lack
+  # the "config/" prefix used elsewhere in the layout — see file
+  # header for details.
   pihole:
     image: pihole/pihole:latest
     container_name: pihole
@@ -44,6 +140,14 @@ services:
       - unbound
       - passive_dns
 
+  # ------------------------------------------------------------
+  # [SVC.UI.BROWSER] Firefox — admin browser
+  # ------------------------------------------------------------
+  # Containerized Firefox accessible over web (LinuxServer.io
+  # build). Lets the operator hit internal-only URLs (Portainer,
+  # Grafana, Vault UI) without exposing them to the host network.
+  # tmpfs:/config makes the browser stateless — no profile lingers.
+  # ------------------------------------------------------------
   firefox:
     image: lscr.io/linuxserver/firefox:latest
     container_name: firefox
@@ -64,6 +168,15 @@ services:
     shm_size: 2gb
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.DNS.PROCESSOR] dns_log_processor — log → MySQL pipeline
+  # ------------------------------------------------------------
+  # Tails the dnsmasq log file and inserts parsed records into
+  # cyber_intelligence.dns_queries. This is the bridge between
+  # passive_dns (which writes flat logs) and the schema that the
+  # AI agent and Grafana consume. Read-only mount on the log
+  # file because this container should never write to it.
+  # ------------------------------------------------------------
   dns_log_processor:
     build:
       context: .
@@ -79,6 +192,21 @@ services:
       - './config/dns/var-log:/var/log/dns:ro'
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.AUTOMATION] n8n — workflow automation engine
+  # ------------------------------------------------------------
+  # Hosts the AI threat-scoring workflow (described on n8n.io and
+  # imported by playbook 04.4 [04.4.4.4]). Connects to MySQL,
+  # MongoDB, Vault, and external CTI APIs.
+  #
+  # The {{ domain_suffix }} placeholders are NOT Docker variables —
+  # they are Ansible Jinja2 expressions that get substituted when
+  # docker-compose is rendered through Ansible's template module.
+  # If you `docker compose up` this file directly without Ansible,
+  # n8n will receive literal "{{ domain_suffix }}" strings.
+  # ------------------------------------------------------------
+  # KNOWN ISSUE: port 5678 is published to host without HTTPS —
+  # see file header.
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n-server
@@ -103,6 +231,17 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.DB.MONGO] MongoDB — raw CTI response storage
+  # ------------------------------------------------------------
+  # Stores the unparsed JSON responses from VirusTotal, ThreatFox,
+  # and URLhaus. Threat indicators in MySQL reference Mongo
+  # documents by mongo_ref_id, allowing the AI agent to retrieve
+  # full responses on demand without bloating the relational schema.
+  # Pinned to 4.4 because of ARM compatibility on Raspberry Pi 5.
+  # ------------------------------------------------------------
+  # KNOWN ISSUE: MONGODB_USERNAME may not be defined in .env —
+  # see file header.
   mongo:
     image: mongo:4.4
     container_name: mongo
@@ -120,6 +259,18 @@ services:
     dns: 10.10.10.4
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.DB.MYSQL] MySQL — core relational schema
+  # ------------------------------------------------------------
+  # Hosts the cyber_intelligence database (DNS queries, threat
+  # indicators, AI analysis results, dictionary tables, Grafana
+  # views). Schema is initialized by playbook 04.3, partitioning
+  # by 04.6.
+  #
+  # MYSQL_ROOT_HOST=% allows root login from any host on the
+  # Docker network — required because the schema script connects
+  # via `docker exec` from the Ansible-controlled host process.
+  # ------------------------------------------------------------
   mysqldb:
     image: mysql:8.0
     container_name: mysql_db
@@ -136,6 +287,14 @@ services:
         ipv4_address: 10.10.10.9
     dns: 10.10.10.4
 
+  # ------------------------------------------------------------
+  # [SVC.UI.PORTAINER] Portainer — Docker management UI
+  # ------------------------------------------------------------
+  # Web UI for inspecting containers, logs, networks, and volumes.
+  # Mounting docker.sock gives Portainer full control over the
+  # Docker daemon. Owner account is initialized by playbook 04.4
+  # [04.4.3.1] via the REST API.
+  # ------------------------------------------------------------
   portainer:
     image: portainer/portainer-ce:latest
     container_name: portainer
@@ -149,6 +308,16 @@ services:
       - ./portainer_data:/data
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.OBSERVE.GRAFANA] Grafana — dashboards and alerts
+  # ------------------------------------------------------------
+  # Renders the threat intelligence dashboards backed by
+  # cyber_intelligence views (v_grafana_*). Provisioning files
+  # (datasources, dashboards) are copied by playbook 04.1
+  # [04.1.4.4] and [04.1.4.5].
+  # ------------------------------------------------------------
+  # KNOWN ISSUE: MYSQL_PASSWORD env var may be unset —
+  # see file header.
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -165,6 +334,19 @@ services:
       - 'grafana_data:/var/lib/grafana'
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.SECRETS] HashiCorp Vault — secret store
+  # ------------------------------------------------------------
+  # File-backend Vault used by n8n workflows to fetch CTI API
+  # tokens at runtime. Initialized, unsealed, and provisioned by
+  # playbook 06. IPC_LOCK capability prevents Vault's secrets
+  # from being swapped to disk.
+  #
+  # Why VAULT_LOCAL_CONFIG inline JSON (not a config file): keeps
+  # bootstrap simple — no separate vault.hcl to mount. The actual
+  # data lives at /vault/file (mounted from ./config/vault/data,
+  # owned by UID 100 — see playbook 04.1 [04.1.5.2]).
+  # ------------------------------------------------------------
   vault:
     image: hashicorp/vault:1.21.3
     container_name: hashicorp_vault
@@ -186,6 +368,13 @@ services:
     dns: 10.10.10.4
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.OBSERVE.PROMETHEUS] Prometheus — metrics scraper
+  # ------------------------------------------------------------
+  # Scrapes node_exporter (system metrics) and any other
+  # configured targets (see config/prometheus/prometheus.yml).
+  # Used by Grafana as a datasource alongside MySQL.
+  # ------------------------------------------------------------
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -201,6 +390,14 @@ services:
     dns: 10.10.10.4
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.OBSERVE.NODE_EXPORTER] Node Exporter — host metrics
+  # ------------------------------------------------------------
+  # Exposes host-level metrics (CPU, RAM, disk, network) to
+  # Prometheus. Read-only mounts on /proc, /sys, /rootfs let the
+  # exporter introspect the host from inside its own container
+  # without privileged mode.
+  # ------------------------------------------------------------
   node_exporter:
     image: quay.io/prometheus/node-exporter:latest
     container_name: node_exporter
@@ -219,6 +416,19 @@ services:
     dns: 10.10.10.4
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  # [SVC.SECRETS.UNSEALER] vault_unsealer — auto-unseal helper
+  # ------------------------------------------------------------
+  # DISABLED — kept commented out for reference. When enabled,
+  # this container reads three unseal keys baked into the image
+  # at build time and unseals Vault on every restart. Currently
+  # unsealing is handled by playbook 06.
+  #
+  # KNOWN ISSUE: playbook 04.1 [04.1.2.5] and [04.1.2.6] still
+  # copy Dockerfile.unsealer and unsealer.py to the remote host
+  # even though this service is disabled. Either remove those
+  # tasks or re-enable the service below.
+  # ------------------------------------------------------------
 #  vault_unsealer:
 #    build:
 #      context: .
@@ -235,6 +445,13 @@ services:
 #    depends_on:
 #      - vault
 
+# ============================================================
+# Networks
+# ============================================================
+# Single bridge network for all services. The fixed /24 subnet
+# lets us assign predictable IPs (.2 – .15 reserved for stack
+# services, .100 reserved for Nginx proxy from playbook 05).
+# ============================================================
 networks:
   internal_network:
     driver: bridge
@@ -242,6 +459,17 @@ networks:
       config:
         - subnet: 10.10.10.0/24
 
+# ============================================================
+# Volumes
+# ============================================================
+# Named volumes for stateful services. These persist across
+# container recreation; deleting them wipes all data.
+#   n8n_data        — workflows, credentials, execution history
+#   mysql_data      — cyber_intelligence database files
+#   mongo_data      — threat_data_lake database files
+#   grafana_data    — dashboards (non-provisioned), users, prefs
+#   prometheus_data — TSDB metrics history
+# ============================================================
 volumes:
   n8n_data:
   mysql_data:

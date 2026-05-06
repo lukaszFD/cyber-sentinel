@@ -1,46 +1,100 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 03 — System Setup (x86 & ARM)
+# ============================================================
+# Purpose:    Installs all OS-level dependencies required by the stack:
+#             Docker Engine, Docker Compose plugin, Python libraries
+#             for Ansible's docker_container/uri modules, monitoring
+#             tools, fail2ban, and SQLite. On Raspberry Pi 5 (aarch64)
+#             additionally configures the Argon NEO 5 fan controller.
+#
+# Depends on: - Playbook 02 (firewall) completed — outbound HTTPS to
+#               download.docker.com and download.argon40.com required.
+#             - Internet access on target host.
+#             - Architecture must be one of: x86_64, aarch64, armv7l.
+#
+# Outputs:    - Docker Engine running, deployment_user in docker group
+#             - python3-docker and python3-hvac available for Ansible
+#             - htop, smartmontools, fail2ban, jq, sqlite3 installed
+#             - On RPi 5: argononed service active with custom thermal
+#               curve (50% fan @ 55°C, 100% fan @ 65°C) tuned for AI
+#               workloads.
+#
+# Errors:     - "GPG key download failed" — outbound HTTPS blocked.
+#             - "Docker repo not available for <release>" — Debian
+#               release older/newer than what download.docker.com
+#               supports; check ansible_distribution_release.
+#             - On RPi: argon1.sh fails — argon40.com unreachable or
+#               script changed structure. Section 3 is wrapped in
+#               `when: ansible_architecture == "aarch64"` so x86 hosts
+#               skip this entirely.
+# ============================================================
+
 - name: 03 - Setup System (x86 & ARM)
   hosts: all_servers
   become: yes
   vars:
+    # Maps Ansible's reported CPU architecture to the corresponding
+    # Debian package architecture string used in /etc/apt/sources.list.
+    # Required because Docker's APT repo is multi-arch but expects
+    # the Debian-style name (amd64), not the Linux uname (x86_64).
     arch_mapping:
       x86_64: "amd64"
       aarch64: "arm64"
       armv7l: "armhf"
 
   tasks:
-    - name: Install prerequisite and monitoring packages
+    # ============================================================
+    # SECTION 1 — Base packages
+    # ------------------------------------------------------------
+    # Single batch install for efficiency. Mixes prerequisites for
+    # later sections (apt-transport-https, ca-certificates, gnupg)
+    # with operational tooling (htop, smartmontools) and Ansible
+    # module dependencies (python3-docker, python3-hvac).
+    # ============================================================
+
+    - name: "[03.1.1] Install prerequisite and monitoring packages"
       ansible.builtin.apt:
         name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - gnupg
-          - lsb-release
-          - python3-pip
-          - python3-docker
-          - python3-hvac
-          - htop            # Interactive process viewer
-          - smartmontools   # Storage monitoring (smartctl)
-          - fail2ban        # Brute-force protection
-          - jq              # JSON processor for n8n/API
-          - sqlite3
+          - apt-transport-https     # HTTPS support for APT (Docker repo)
+          - ca-certificates         # Trust anchors for HTTPS
+          - curl                    # Used by misc shell tasks downstream
+          - gnupg                   # GPG key validation for Docker repo
+          - lsb-release             # Reports Debian release codename
+          - python3-pip             # Required by some Ansible collections
+          - python3-docker          # Backend for community.docker.* modules
+          - python3-hvac            # HashiCorp Vault client (playbook 06)
+          - htop                    # Interactive process viewer
+          - smartmontools           # Storage health monitoring (smartctl)
+          - fail2ban                # Brute-force protection (config in 04.4)
+          - jq                      # JSON processor for n8n/API tasks
+          - sqlite3                 # Pi-hole gravity.db manipulation (04.4)
         state: present
         update_cache: yes
 
-    - name: Create directory for Docker GPG key
+    # ============================================================
+    # SECTION 2 — Docker Engine installation
+    # ------------------------------------------------------------
+    # Uses the modern signed-by approach (GPG key in /etc/apt/keyrings)
+    # rather than apt-key, which is deprecated since Debian 11.
+    # Repo line is dynamically built from arch_mapping + the host's
+    # Debian release codename so this works identically on x86 servers
+    # and Raspberry Pi 5.
+    # ============================================================
+
+    - name: "[03.2.1] Create directory for Docker GPG key"
       ansible.builtin.file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
 
-    - name: Add Docker official GPG key (modern way)
+    - name: "[03.2.2] Add Docker official GPG key (signed-by method)"
       ansible.builtin.get_url:
         url: https://download.docker.com/linux/debian/gpg
         dest: /etc/apt/keyrings/docker.asc
         mode: '0644'
 
-    - name: Add Docker repository for current architecture
+    - name: "[03.2.3] Add Docker APT repository for current architecture"
       ansible.builtin.apt_repository:
         repo: >
           deb [arch={{ arch_mapping[ansible_architecture] }} signed-by=/etc/apt/keyrings/docker.asc]
@@ -49,56 +103,78 @@
           stable
         state: present
 
-    - name: Install Docker Engine and Compose plugin
+    - name: "[03.2.4] Install Docker Engine and Compose plugin"
       ansible.builtin.apt:
         name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-compose-plugin
+          - docker-ce               # Core Docker daemon
+          - docker-ce-cli           # Docker CLI client
+          - containerd.io           # Container runtime under Docker
+          - docker-compose-plugin   # `docker compose` subcommand (v2)
         state: present
         update_cache: yes
 
-    - name: Ensure docker group exists
+    # The deployment user must be in the docker group to run docker
+    # commands without sudo — required by playbook 04.2 and others
+    # that use `community.docker.docker_*` modules.
+    - name: "[03.2.5] Ensure docker group exists"
       ansible.builtin.group:
         name: docker
         state: present
 
-    - name: Add dynamic user from inventory to docker group
+    - name: "[03.2.6] Add inventory ansible_user to docker group"
       ansible.builtin.user:
         name: "{{ ansible_user }}"
         groups: docker
         append: yes
       register: user_group_update
 
-    - name: Reset connection to apply group changes
+    # Group membership changes only take effect on a new login session.
+    # This forces Ansible to drop and re-establish the SSH connection
+    # so the user inherits the new group without a manual reboot.
+    - name: "[03.2.7] Reset connection to apply docker group membership"
       ansible.builtin.meta: reset_connection
 
-    - name: Verify Docker installation
+    - name: "[03.2.8] Verify Docker installation"
       ansible.builtin.command: docker --version
       register: docker_version
       changed_when: false
 
-    - name: Show Docker version
+    - name: "[03.2.9] Show Docker version"
       ansible.builtin.debug:
         msg: "Docker version on {{ inventory_hostname }} is {{ docker_version.stdout }}"
 
-    - name: Task - Argon NEO 5 Fan Control Setup (RPi 5)
+    # ============================================================
+    # SECTION 3 — Argon NEO 5 fan control (Raspberry Pi 5 only)
+    # ------------------------------------------------------------
+    # The default fan curve on the Argon NEO 5 case is too conservative
+    # for sustained AI workloads — the SoC throttles before the fan
+    # ramps up. This section installs the vendor script and overrides
+    # /etc/argononed.conf to start cooling at 55°C and reach 100% by
+    # 65°C, which keeps Ollama/n8n responsive under load.
+    #
+    # The whole block is gated on aarch64 to skip cleanly on x86 hosts.
+    # ============================================================
+
+    - name: "[03.3.X] Argon NEO 5 fan control setup (RPi 5)"
       block:
-        - name: Download Argon NEO 5 for RPi 5 script
+        - name: "[03.3.1] Download Argon NEO 5 installation script"
           ansible.builtin.get_url:
             url: https://download.argon40.com/argon1.sh
             dest: /tmp/argon_rpi5.sh
             mode: '0755'
             force: yes
 
-        - name: Run Argon NEO 5 installation script
+        # creates: /usr/bin/argonone-config makes this idempotent —
+        # subsequent runs detect the binary and skip re-installation.
+        - name: "[03.3.2] Run Argon NEO 5 installation script"
           ansible.builtin.shell: /tmp/argon_rpi5.sh
           args:
             executable: /bin/bash
             creates: /usr/bin/argonone-config
 
-        - name: Configure Fan Thresholds for AI Workloads
+        # Custom thermal curve tuned for sustained AI inference workloads.
+        # Format: <temperature_celsius>=<fan_speed_percent>
+        - name: "[03.3.3] Configure custom fan thresholds for AI workloads"
           ansible.builtin.copy:
             dest: /etc/argononed.conf
             content: |
@@ -110,13 +186,21 @@
             mode: '0644'
           notify: Restart Argon Service
 
-        - name: Ensure Argon cooling service is running
+        - name: "[03.3.4] Ensure Argon cooling service is running"
           ansible.builtin.systemd:
             name: argononed
             state: started
             enabled: yes
       when: ansible_architecture == "aarch64"
 
+  # ============================================================
+  # HANDLERS
+  # ------------------------------------------------------------
+  # Handlers run only when notified, after all tasks complete.
+  # Used here so a config change in [03.3.3] triggers a service
+  # restart exactly once, even if the same playbook re-applies
+  # the same config on a re-run (no-change = no restart).
+  # ============================================================
   handlers:
     - name: Restart Argon Service
       ansible.builtin.systemd:

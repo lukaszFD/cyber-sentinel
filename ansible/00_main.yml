@@ -1,12 +1,83 @@
 ---
-- import_playbook: 01_setup_secrets.yml
-- import_playbook: 02_setup_security.yml
-- import_playbook: 03_setup_system.yml
-- import_playbook: 04_1_prepare_stack.yml
-- import_playbook: 04_2_deploy_containers.yml
-- import_playbook: 04_3_db_create.yml
-- import_playbook: 04_4_post_config.yml
-#- import_playbook: 04_5_deploy_AI.yml
-- import_playbook: 04_6_setup_partitioning.yml
-- import_playbook: 05_deploy_proxy.yml
-- import_playbook: 06_initialize_provision_vault.yml
+# ============================================================
+# Cyber Sentinel — Playbook 00 — Master Orchestrator
+# ============================================================
+# Purpose:    Top-level entry point that imports all sub-playbooks in
+#             dependency order. Run this to deploy the entire stack.
+#
+# Depends on: hosts.ini inventory file, group_vars/all/vault.yml decrypted
+#             via .vault_pass file (or --ask-vault-pass flag).
+#
+# Outputs:    Fully provisioned stack: secrets, firewall, system packages,
+#             Docker containers, databases, post-config (Pi-hole/n8n),
+#             partitioning, reverse proxy, HashiCorp Vault.
+#
+# Errors:     If any sub-playbook fails, deployment stops at that point.
+#             Re-running 00_main.yml is safe — all sub-playbooks are
+#             designed to be idempotent.
+#
+# Usage:
+#   ansible-playbook -i hosts.ini ansible/00_main.yml \
+#     --vault-password-file ansible/.vault_pass
+# ============================================================
+
+# ------------------------------------------------------------
+# [00.0] Stage 0 — Pre-deployment (DEV environment only)
+# ------------------------------------------------------------
+# restore_proxmox.yml has an internal gate that skips the play
+# unless --limit includes vm-prox-dev (or no --limit is given).
+# Safe to keep here unconditionally — it self-skips for prod.
+#
+# Placed BEFORE foundation tasks so the dev VM is freshly
+# restored before anything touches it. After restore, the VM
+# may take ~30-90s to be SSH-ready; subsequent playbooks
+# (01, 02, ...) will retry connections via Ansible's built-in
+# connection logic.
+# ------------------------------------------------------------
+- import_playbook: restore_proxmox.yml          # [00.0.1] DEV only — restore VM from latest backup
+
+# ------------------------------------------------------------
+# [00.1] Stage 1 — Foundation (secrets + security + system)
+# ------------------------------------------------------------
+# Must run first. Creates the .env file from Vault, configures the
+# firewall, and installs Docker + system dependencies. All later
+# playbooks assume Docker is available and the firewall is open
+# for the required ports.
+# ------------------------------------------------------------
+- import_playbook: 01_setup_secrets.yml    # [00.1.1] Decrypt and write .env to remote host
+- import_playbook: 02_setup_security.yml   # [00.1.2] Configure UFW firewall rules
+- import_playbook: 03_setup_system.yml     # [00.1.3] Install Docker, monitoring tools, RPi cooling
+
+# ------------------------------------------------------------
+# [00.2] Stage 2 — Core stack deployment
+# ------------------------------------------------------------
+# Builds and starts all Docker containers (Pi-hole, n8n, MySQL,
+# MongoDB, Vault, Grafana, Prometheus, Portainer). Initializes the
+# MySQL schema and runs post-deployment configuration.
+# ------------------------------------------------------------
+- import_playbook: 04_1_prepare_stack.yml      # [00.2.1] Copy compose files, configs, scripts to remote
+- import_playbook: 04_2_deploy_containers.yml  # [00.2.2] docker compose up --build -d
+- import_playbook: 04_3_db_create.yml          # [00.2.3] Render and execute MySQL init schema
+- import_playbook: 04_4_post_config.yml        # [00.2.4] Configure Fail2Ban, Pi-hole, init Portainer/n8n
+
+# ------------------------------------------------------------
+# [00.3] Stage 3 — Optional / advanced features
+# ------------------------------------------------------------
+# 04_5_deploy_AI.yml is currently DISABLED — local Ollama AI suite
+# is optional. The default workflow uses Google Gemini API instead.
+# Enable this line if you want to run local AI models on the host.
+# ------------------------------------------------------------
+#- import_playbook: 04_5_deploy_AI.yml          # [00.3.1] Optional — local Ollama AI models
+
+- import_playbook: 04_6_setup_partitioning.yml  # [00.3.2] MySQL partitioning + retention automation
+
+# ------------------------------------------------------------
+# [00.4] Stage 4 — Edge layer (proxy + secret store)
+# ------------------------------------------------------------
+# Nginx reverse proxy must run AFTER all backend services exist
+# (otherwise upstream resolution fails). Vault provisioning runs
+# last so all credentials, certs, and API keys are stored after
+# every component has been deployed.
+# ------------------------------------------------------------
+- import_playbook: 05_deploy_proxy.yml              # [00.4.1] Nginx reverse proxy with SSL
+- import_playbook: 06_initialize_provision_vault.yml # [00.4.2] Init/unseal Vault, provision all secrets

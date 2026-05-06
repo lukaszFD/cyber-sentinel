@@ -1,19 +1,78 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 05 — Nginx Reverse Proxy with SSL
+# ============================================================
+# Purpose:    Deploys an Nginx reverse proxy in front of all web-facing
+#             services (Pi-hole, n8n, Portainer, Firefox, Grafana,
+#             HashiCorp Vault). Provisions per-service TLS certs from
+#             Ansible Vault and renders Nginx server blocks from a
+#             Jinja2 template.
+#
+# Depends on: - Playbook 04.2 (cyber-sentinel_internal_network exists)
+#             - All upstream services running with their expected
+#               container names (see services list below)
+#             - vault_<service>_cert and vault_<service>_key defined
+#               in group_vars for every entry in the services list
+#             - templates/nginx_service.conf.j2 exists locally
+#
+# Outputs:    - Per-service TLS certs at:
+#                 {{ remote_deploy_base }}/config/nginx/certs/<svc>.crt
+#                 {{ remote_deploy_base }}/config/nginx/certs/<svc>.key
+#             - Per-service Nginx server blocks at:
+#                 {{ remote_deploy_base }}/config/nginx/conf.d/<svc>.conf
+#             - nginx-proxy container running with static IP
+#               10.10.10.100 on the cyber-sentinel_internal_network,
+#               publishing host ports 80 and 443.
+#
+# Errors:     - "container <upstream> not found in network" — Nginx
+#               fails to resolve upstream hostnames. Verify all
+#               services in the services list are running and on the
+#               cyber-sentinel_internal_network.
+#             - SSL handshake errors — cert/key mismatch in vault, or
+#               wrong PEM format. Verify by openssl x509 -text on the
+#               .crt and openssl rsa -check on the .key.
+#             - Port conflict on 80/443 — another service has them;
+#               check `ss -tlnp` on the host.
+#
+# Note:       Variable `domain_suffix` is computed but appears unused
+#             in this playbook directly. It is likely consumed by
+#             templates/nginx_service.conf.j2. Do not remove without
+#             checking the template.
+# ============================================================
+
 - name: 05 - Deploy Nginx Reverse Proxy with SSL
-  hosts: all
+  hosts: all_servers
   become: yes
+
   vars:
+    # Domain suffix differs between dev (Proxmox VM) and production
+    # (RPi 5) hosts. Used inside the Nginx template (server_name).
+    # The vm-prox-dev group must exist in your inventory.
     domain_suffix: "{{ 'local' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
+
+    # Service catalog. Each entry produces:
+    #   - <name>.crt  +  <name>.key   in /config/nginx/certs/
+    #   - <name>.conf                 in /config/nginx/conf.d/
+    # The internal_host is the Docker DNS name Nginx uses to reach
+    # the upstream container; port is the container-internal port.
     services:
-      - { name: "pihole", port: 80, internal_host: "pihole" }
-      - { name: "n8n", port: 5678, internal_host: "n8n-server" }
-      - { name: "portainer", port: 9000, internal_host: "portainer" }
-      - { name: "firefox", port: 3000, internal_host: "firefox" }
-      - { name: "grafana", port: 3000, internal_host: "grafana" }
+      - { name: "pihole",          port: 80,   internal_host: "pihole" }
+      - { name: "n8n",             port: 5678, internal_host: "n8n-server" }
+      - { name: "portainer",       port: 9000, internal_host: "portainer" }
+      - { name: "firefox",         port: 3000, internal_host: "firefox" }
+      - { name: "grafana",         port: 3000, internal_host: "grafana" }
       - { name: "hashicorp_vault", port: 8200, internal_host: "hashicorp_vault" }
 
   tasks:
-    - name: Task 5.0 - Ensure directories exist
+    # ============================================================
+    # SECTION 1 — Filesystem preparation
+    # ------------------------------------------------------------
+    # Ensures conf.d and certs directories exist before populating
+    # them. Playbook 04.1 normally creates these, but this section
+    # acts as a safety net for users running 05 standalone.
+    # ============================================================
+
+    - name: "[05.1.1] Ensure Nginx config and cert directories exist"
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -23,7 +82,17 @@
         - "{{ remote_deploy_base }}/config/nginx/conf.d"
         - "{{ remote_deploy_base }}/config/nginx/certs"
 
-    - name: Task 5.1 - Save Certificate files (.crt)
+    # ============================================================
+    # SECTION 2 — TLS material provisioning
+    # ------------------------------------------------------------
+    # Writes one cert + one key per service from Ansible Vault to
+    # the certs directory. Uses lookup('vars', ...) for dynamic
+    # variable name resolution: vault_pihole_cert, vault_n8n_cert,
+    # etc. — without this pattern we'd need 6 hardcoded copy tasks.
+    # Mode 0600 because keys must not be world-readable.
+    # ============================================================
+
+    - name: "[05.2.1] Save TLS certificates (.crt) for each service"
       ansible.builtin.copy:
         content: "{{ lookup('vars', 'vault_' + item.name + '_cert') }}"
         dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.crt"
@@ -32,7 +101,7 @@
       loop: "{{ services }}"
       no_log: true
 
-    - name: Task 5.2 - Save Private Key files (.key)
+    - name: "[05.2.2] Save TLS private keys (.key) for each service"
       ansible.builtin.copy:
         content: "{{ lookup('vars', 'vault_' + item.name + '_key') }}"
         dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.key"
@@ -41,13 +110,35 @@
       loop: "{{ services }}"
       no_log: true
 
-    - name: Task 5.3 - Deploy Nginx Templates
+    # ============================================================
+    # SECTION 3 — Render Nginx server blocks
+    # ------------------------------------------------------------
+    # Renders one server block per service from the shared template.
+    # The template receives `item` (with name, port, internal_host)
+    # and the play-level `domain_suffix` to assemble server_name.
+    # ============================================================
+
+    - name: "[05.3.1] Render Nginx server block for each service"
       ansible.builtin.template:
         src: templates/nginx_service.conf.j2
         dest: "{{ remote_deploy_base }}/config/nginx/conf.d/{{ item.name }}.conf"
       loop: "{{ services }}"
 
-    - name: Task 5.4 - Run Nginx Proxy Container
+    # ============================================================
+    # SECTION 4 — Run Nginx proxy container
+    # ------------------------------------------------------------
+    # Starts (or recreates) the nginx-proxy container with a static
+    # IP on the internal Docker network and publishes ports 80/443
+    # to the host. recreate: yes ensures config changes from
+    # Section 3 take effect on every run — Nginx does not hot-reload
+    # conf.d files when bind-mounted.
+    # ============================================================
+
+    # Static IP 10.10.10.100 is conventional in this stack; other
+    # configs (e.g. Portainer init in 04.4 uses 10.10.10.10) reference
+    # the same network. recreate: yes is intentional — without it,
+    # changes to conf.d after first run would not be picked up.
+    - name: "[05.4.1] Run Nginx reverse proxy container"
       community.docker.docker_container:
         name: nginx-proxy
         image: nginx:latest

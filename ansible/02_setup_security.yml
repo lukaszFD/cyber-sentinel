@@ -1,27 +1,78 @@
 ---
+# ============================================================
+# Cyber Sentinel — Playbook 02 — Firewall Configuration (UFW)
+# ============================================================
+# Purpose:    Installs UFW, resets all rules to a known-good state,
+#             then opens only the ports required by the Cyber Sentinel
+#             stack. Default policy is deny-all-incoming.
+#
+# Depends on: APT package manager available on target (Debian/Ubuntu).
+#             Hosts must be reachable over SSH on port 22 BEFORE this
+#             playbook runs (port 22 is re-allowed by [02.2.2]).
+#
+# Outputs:    UFW active with the following ports open:
+#               - 22/tcp   SSH (management)
+#               - 80/tcp   Nginx HTTP redirect
+#               - 443/tcp  Nginx HTTPS reverse proxy
+#               - 53/udp   Pi-hole DNS (UDP)
+#               - 53/tcp   Pi-hole DNS (TCP fallback)
+#
+# Errors:     - "ufw: command not found" — APT install [02.1.1] failed,
+#               check internet access on target.
+#             - SSH lockout risk: if [02.2.2] does not run before
+#               [02.2.3] enables UFW, you lose remote access. The
+#               loop below is ordered to prevent this — do not reorder.
+#
+# Note:       hosts is "all" (not "all_servers") so the firewall is
+#             applied to every inventory host. Verify this matches
+#             your inventory groups.
+# ============================================================
+
 - name: 02 - Configure Firewall (UFW)
-  hosts: all
+  hosts: all_servers
   become: yes
   vars:
+    # Port allowlist. Order in this list does NOT determine UFW rule
+    # priority — UFW uses first-match top-down internally based on
+    # rule type, not insertion order. Comments are visible via `ufw status`.
     allow_ports:
-      - { port: 22, proto: "tcp", comment: "SSH Management" }
-      - { port: 80, proto: "tcp", comment: "Nginx HTTP Redirect" }
+      - { port: 22,  proto: "tcp", comment: "SSH Management" }
+      - { port: 80,  proto: "tcp", comment: "Nginx HTTP Redirect" }
       - { port: 443, proto: "tcp", comment: "Nginx HTTPS Proxy" }
-      - { port: 53, proto: "udp", comment: "Pi-hole DNS UDP" }
-      - { port: 53, proto: "tcp", comment: "Pi-hole DNS TCP" }
+      - { port: 53,  proto: "udp", comment: "Pi-hole DNS UDP" }
+      - { port: 53,  proto: "tcp", comment: "Pi-hole DNS TCP" }
 
   tasks:
-    - name: Install UFW
+    # ============================================================
+    # SECTION 1 — Install UFW
+    # ------------------------------------------------------------
+    # Pulls UFW from the distro repository. update_cache: yes ensures
+    # we don't fail on stale package indexes from a long-idle host.
+    # ============================================================
+
+    - name: "[02.1.1] Install UFW package"
       apt:
         name: ufw
         state: present
         update_cache: yes
 
-    - name: Reset UFW to default (Deny all incoming)
+    # ============================================================
+    # SECTION 2 — Configure firewall rules
+    # ------------------------------------------------------------
+    # IMPORTANT ORDER:
+    #   1. Reset to clean baseline    [02.2.1]
+    #   2. Add allow rules            [02.2.2]
+    #   3. Enable firewall            [02.2.3]
+    # If [02.2.3] runs before [02.2.2], every host in the inventory
+    # becomes unreachable over SSH. Ansible would survive the current
+    # play (connection already established) but the next play fails.
+    # ============================================================
+
+    - name: "[02.2.1] Reset UFW to default state (deny all incoming)"
       ufw:
         state: reset
 
-    - name: Allow defined ports
+    - name: "[02.2.2] Allow ports defined in allow_ports list"
       ufw:
         rule: allow
         port: "{{ item.port | string }}"
@@ -29,7 +80,10 @@
         comment: "{{ item.comment }}"
       loop: "{{ allow_ports }}"
 
-    - name: Enable UFW
+    # Enables UFW with default-deny incoming. Outgoing traffic remains
+    # unrestricted (UFW default), which is what we want — containers
+    # need to reach external CTI APIs (VirusTotal, Abuse.ch, Gemini).
+    - name: "[02.2.3] Enable UFW with default-deny incoming policy"
       ufw:
         state: enabled
-        policy: deny # Default incoming policy
+        policy: deny
