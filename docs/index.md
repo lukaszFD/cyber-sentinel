@@ -5,12 +5,14 @@
     <p style="font-size: 1.05rem; margin: 0 0 0.6rem; line-height: 1.6; color: var(--md-default-fg-color);">
       Automated, AI-driven security ecosystem for network monitoring, threat intelligence gathering, and incident response.
     </p>
-    <p style="margin: 0;">
-      <img alt="version"  src="https://img.shields.io/badge/version-v1.0.2-rc1--4caf50?style=flat-square">
-      <img alt="ansible"  src="https://img.shields.io/badge/IaC-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white"      style="margin-left:6px;">
-      <img alt="docker"   src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white"     style="margin-left:6px;">
-      <img alt="gemini"   src="https://img.shields.io/badge/AI-Google%20Gemini-8E75B2?style=flat-square"                             style="margin-left:6px;">
-      <img alt="vault"    src="https://img.shields.io/badge/Secrets-HashiCorp%20Vault-FFCA00?style=flat-square&logoColor=black"      style="margin-left:6px;">
+    <p style="margin: 0; line-height: 1.9;">
+      <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v1.0.2-rc1" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v1.0.2-rc1&color=ff9800&style=flat-square"></a>
+      <a href="https://github.com/lukaszFD/cyber-sentinel/blob/main/LICENSE" target="_blank"><img alt="license" src="https://img.shields.io/github/license/lukaszFD/cyber-sentinel?style=flat-square&color=blue" style="margin-left:6px;"></a>
+      <a href="https://github.com/lukaszFD/cyber-sentinel/commits/main" target="_blank"><img alt="last commit" src="https://img.shields.io/github/last-commit/lukaszFD/cyber-sentinel?style=flat-square&color=brightgreen" style="margin-left:6px;"></a>
+      <a href="https://github.com/lukaszFD/cyber-sentinel/stargazers" target="_blank"><img alt="stars" src="https://img.shields.io/github/stars/lukaszFD/cyber-sentinel?style=flat-square&logo=github" style="margin-left:6px;"></a>
+      <img alt="ansible" src="https://img.shields.io/badge/IaC-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white" style="margin-left:6px;">
+      <img alt="docker"  src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" style="margin-left:6px;">
+      <img alt="vault"   src="https://img.shields.io/badge/Secrets-HashiCorp%20Vault-FFCA00?style=flat-square&logoColor=black" style="margin-left:6px;">
     </p>
   </div>
 </div>
@@ -20,19 +22,20 @@
 **Cyber Sentinel** is an AI-native security orchestration platform designed to bridge the gap between raw network telemetry and autonomous threat response. It transforms passive monitoring into an active, intelligent defense layer.
 
 ### 🛡️ Core Problems Solved
+
 * **Analysis Fatigue:** Automates the evaluation of thousands of DNS queries, using AI to identify malicious patterns that traditional signature-based systems miss.
 * **Data Fragmentation:** Consolidates disparate CTI (Cyber Threat Intelligence) sources into a unified, AI-ready intelligence pool.
 * **Manual Response Lag:** Eliminates the "human-in-the-loop" delay by triggering autonomous security playbooks the moment a threat is verified by AI.
 * **Secrets:** Solves the risk of exposed API keys and credentials across distributed containers by centralizing all sensitive data in [**HashiCorp Vault**](https://www.hashicorp.com/en/products/vault).
 
 ### 🚀 The Evolution of Sentinel
+
 By orchestrating a high-performance Docker stack, the system provides a structured pipeline where DNS traffic is captured, processed, and enriched. The key pillars of this version are:
 
-* **AI engine:** The system is not limited to simply storing logs, but treats data as a ‘Neural Lake’. It uses analysis based on LLM models (via Gemini/n8n) to create behavioural profiles and generate bilingual security assessments (English/Polish) for each detected indicator.
+* **AI engine:** The system is not limited to simply storing logs, but treats data as a "Neural Lake". It uses analysis based on LLM models (via Gemini/n8n) with a **detection-first 1–5 scoring policy** loaded dynamically from the database, generating bilingual security assessments (English/Polish) and an audit-ready scoring rationale for each detected indicator.
 * **Autonomous coordination:** Centralises the entire threat lifecycle — from detection to mitigation — within **n8n** workflows, acting as a modular SOAR (Security Orchestration, Automation, and Response) system.
 * **Predictive CTI:** Transforms raw, passive DNS logs into predictive intelligence, identifying potential infrastructure before it is used in an active attack.
 * **Hardened infrastructure:** Secured by **HashiCorp Vault** for enterprise-grade secret lifecycle management and **Nginx SSL Proxy** to ensure encrypted communication across all service nodes.
-
 
 ---
 
@@ -47,7 +50,7 @@ By orchestrating a high-performance Docker stack, the system provides a structur
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🚀 <a href="deployment/">Deployment</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Full Ansible IaC — one command, 10 playbooks</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Full Ansible IaC — one command, modular playbooks 00 → 06</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
@@ -57,16 +60,16 @@ By orchestrating a high-performance Docker stack, the system provides a structur
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🤖 <a href="n8n/">n8n Workflow</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI threat enrichment pipeline explained step by step</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI threat enrichment pipeline with severity-graded alerts</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🗄️ <a href="db/">Database Schema</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">MySQL tables, dictionaries, and analytical views</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">MySQL tables, analytical views, partitioning &amp; retention</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>🔐 <a href="ansible-06-vault/">Vault & Secrets</a></strong><br>
+    <strong>🔐 <a href="ansible-06-vault/">Vault &amp; Secrets</a></strong><br>
     <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Zero-secrets policy, KV v2 provisioning via Ansible</span>
   </div>
 
