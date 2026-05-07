@@ -29,7 +29,7 @@ The following describes the complete path from a network event to a security ver
 
 1. **DNS capture** — `firefox` or any network client sends a DNS query → resolved by `pihole` → forwarded to `passive_dns` → upstream to `unbound`.
 2. **Log ingestion** — `dns_log_processor` tails `/var/log/dns.log` produced by `passive_dns` and writes structured records into `mysqldb` (`dns_queries` table).
-3. **Enrichment trigger** — `n8n` runs every 15 minutes, reads new unanalyzed observables from the `v_pending_analysis` view in `mysqldb`.
+3. **Enrichment trigger** — `n8n` runs every 3 minutes, reads new unanalyzed observables from the `v_pending_analysis` view in `mysqldb`.
 4. **CTI enrichment** — `n8n` calls VirusTotal, ThreatFox, and URLHaus APIs (credentials from `vault`) and stores raw JSON responses in `mongo` (`threat_data_raw` collection).
 5. **AI analysis** — `n8n` normalizes CTI data, loads the current threat scale from `v_threat_scale_for_agent`, and sends everything to Google Gemini. The verdict (1–5 score with `is_malicious_flag`, `action_recommended`, bilingual summary, and `scoring_rationale`) is written back to `mysqldb` (`ai_analysis_results`, `threat_indicators`).
 6. **Visualization & alerting** — `grafana` reads the `v_grafana_*` views to render threat intelligence and DNS traffic dashboards. In parallel, `n8n` sends a severity-graded alert email (green INFO / amber REVIEW / red ALERT) for indicators flagged as malicious or warranting review — full pipeline on the [n8n Workflow](n8n.md) page.
