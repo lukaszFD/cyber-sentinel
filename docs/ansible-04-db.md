@@ -2,11 +2,11 @@
 
 This page covers the two [Ansible](https://docs.ansible.com/ansible/latest/) playbooks responsible for the [`cyber_intelligence`](db.md) MySQL database lifecycle:
 
-- **[Playbook 04.3](#playbook-04-3-database-initialization)** — initial schema deployment (tables, dictionaries, views, app user)
-- **[Playbook 04.6](#playbook-04-6-partitioning-retention)** — monthly partitioning, retention policy, and the [Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overview.html) automation
+- **Playbook 04.3** — initial schema deployment (tables, dictionaries, views, app user)
+- **Playbook 04.6** — monthly partitioning, retention policy, and the [Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overview.html) automation
 
 !!! info "Schema v3.0 split"
-    Database setup is now a **two-step pipeline**. Schema v3.0 introduced [composite primary keys](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations-partitioning-keys-unique-keys.html) on three high-volume tables to enable [RANGE partitioning](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) — that DDL is created by **04.3**, and the partitions / scheduler / maintenance procedures are layered on top by **04.6**. Always run them in order.
+Database setup is now a **two-step pipeline**. Schema v3.0 introduced [composite primary keys](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations-partitioning-keys-unique-keys.html) on three high-volume tables to enable [RANGE partitioning](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) — that DDL is created by **04.3**, and the partitions / scheduler / maintenance procedures are layered on top by **04.6**. Always run them in order.
 
 **Related pages:**
 [Database Schema](db.md) ·
@@ -32,8 +32,8 @@ flowchart LR
 | Step | Playbook | Source SQL | Outputs |
 |------|----------|-----------|---------|
 | 1 | [`04_2_stack.yml`](ansible-04-stack.md) | — | `mysql_db` container running |
-| 2 | [`04_3_db_create.yml`](#playbook-04-3-database-initialization) | [`config/mysql/db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) | Database, 8 tables, 7 views, app user |
-| 3 | [`04_6_setup_partitioning.yml`](#playbook-04-6-partitioning-retention) | [`config/mysql/db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) | Partitions, stored procedures, scheduled events, [`v_partition_info`](db.md#75-monitoring-view), [`partition_maintenance_log`](db.md#73-maintenance-log) |
+| 2 | `04_3_db_create.yml` | [`config/mysql/db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) | Database, 8 tables, 7 views, app user |
+| 3 | `04_6_setup_partitioning.yml` | [`config/mysql/db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) | Partitions, stored procedures, scheduled events, [`v_partition_info`](db.md), [`partition_maintenance_log`](db.md) |
 
 ---
 
@@ -61,7 +61,7 @@ Initializes the [`cyber_intelligence`](db.md) MySQL database by rendering the SQ
 
 ## 04.3 Task 4.1 — Render SQL script with actual credentials
 
-Uses [`ansible.builtin.template`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/template_module.html) to render [`db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) as a [Jinja2](https://jinja.palletsprojects.com/) template. This replaces the `{{ mysql_user }}` and `{{ vault_mysql_password }}` placeholders with values pulled from [Vault](ansible-06-vault.md#stage-6-application-database-credentials). The output file is written with `mode: '0600'` so other system users can't read it.
+Uses [`ansible.builtin.template`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/template_module.html) to render [`db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) as a [Jinja2](https://jinja.palletsprojects.com/) template. This replaces the `{{ mysql_user }}` and `{{ vault_mysql_password }}` placeholders with values pulled from [Vault](ansible-06-vault.md). The output file is written with `mode: '0600'` so other system users can't read it.
 
 ```yaml title="ansible/04_3_db_create.yml" linenums="1"
 - name: Task 4.1 - Render SQL script with actual credentials
@@ -77,7 +77,7 @@ Uses [`ansible.builtin.template`](https://docs.ansible.com/ansible/latest/collec
 | `source_mysql_script` | [`group_vars`](ansible-01-secrets.md) | Path to [`config/mysql/db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) on the control machine |
 | `remote_deploy_base` | [`group_vars`](ansible-01-secrets.md) | Root deployment directory on the target |
 | `mysql_user` | [`group_vars`](ansible-01-secrets.md) | Application user name (used by all services) |
-| `vault_mysql_password` | [Vault](ansible-06-vault.md#stage-6-application-database-credentials) (`cyber-sentinel/credentials/mysql/app_manager`) | Application user password |
+| `vault_mysql_password` | [Vault](ansible-06-vault.md) (`cyber-sentinel/credentials/mysql/app_manager`) | Application user password |
 
 ---
 
@@ -106,7 +106,7 @@ Pipes the rendered SQL into `mysql` running inside the `mysql_db` container via 
 | `retries: 10, delay: 10` | Wait up to ≈100 seconds for MySQL to become ready |
 
 !!! warning "Credentials in shell"
-    The MySQL [root password](ansible-06-vault.md#stage-6-application-database-credentials) is passed as a shell argument (`-p'…'`). [Ansible](https://docs.ansible.com/ansible/latest/) masks this value in logs because it comes from a Vault variable. The rendered SQL file is also removed in Task 4.3. Never commit `init_db_rendered.sql` to version control.
+The MySQL [root password](ansible-06-vault.md) is passed as a shell argument (`-p'…'`). [Ansible](https://docs.ansible.com/ansible/latest/) masks this value in logs because it comes from a Vault variable. The rendered SQL file is also removed in Task 4.3. Never commit `init_db_rendered.sql` to version control.
 
 ---
 
@@ -169,7 +169,7 @@ Removes the temporary rendered SQL file from the target server using [`ansible.b
 **Hosts:** `all_servers`
 **Privilege escalation:** [`become: yes`](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_privilege_escalation.html) (sudo)
 
-Enables the [MySQL Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overview.html), deploys [`db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) to create monthly [partitions](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) on `dns_queries`, `network_events`, and `threat_indicators`, and verifies that the partitions, stored procedures, and scheduled events are all in place before exiting. See the [Database Schema page](db.md#7-partitioning-retention) for the full data-model context.
+Enables the [MySQL Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overview.html), deploys [`db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) to create monthly [partitions](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) on `dns_queries`, `network_events`, and `threat_indicators`, and verifies that the partitions, stored procedures, and scheduled events are all in place before exiting. See the [Database Schema page](db.md) for the full data-model context.
 
 ## 04.6 Overview
 
@@ -187,17 +187,17 @@ Enables the [MySQL Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/even
 | Dependency | Why |
 |------------|-----|
 | [Playbook 04.2](ansible-04-stack.md) completed | `mysql_db` container must be running |
-| [Playbook 04.3](#playbook-04-3-database-initialization) completed | [Composite PKs](db.md#7-partitioning-retention) must already exist (schema v3.0+) |
-| [Vault](ansible-06-vault.md#stage-6-application-database-credentials) populated | `vault_mysql_root_password` required |
+| Playbook 04.3 completed | [Composite PKs](db.md) must already exist (schema v3.0+) |
+| [Vault](ansible-06-vault.md) populated | `vault_mysql_root_password` required |
 
 ### Outputs
 
 After a successful run:
 
 - **Initial partitions:** 4 monthly + 1 future = 5 partitions on each of `dns_queries`, `network_events`, `threat_indicators`
-- **Stored procedures:** [`sp_drop_old_partitions`](db.md#72-stored-procedures) and [`sp_add_future_partitions`](db.md#72-stored-procedures)
+- **Stored procedures:** [`sp_drop_old_partitions`](db.md) and [`sp_add_future_partitions`](db.md)
 - **Scheduled events:** `evt_drop_old_partitions` (02:00 day 1) and `evt_add_future_partitions` (03:00 day 1)
-- **[`partition_maintenance_log`](db.md#73-maintenance-log) table** for the audit trail
+- **[`partition_maintenance_log`](db.md) table** for the audit trail
 - **Setup log** at `{{ retention_log }}`
 
 ### Pipeline sections
@@ -206,13 +206,13 @@ The playbook is organised into seven explicit sections; tasks are numbered hiera
 
 | Section | Name | Purpose |
 |---------|------|---------|
-| 1 | [Pre-flight checks](#04-6-section-1-pre-flight-checks) | Container running and MySQL accepting connections |
-| 2 | [Enable Event Scheduler](#04-6-section-2-enable-event-scheduler) | Toggle `event_scheduler = ON` if needed |
-| 3 | [Stage partitioning SQL](#04-6-section-3-stage-partitioning-sql) | Copy SQL script to remote with `0600` perms |
-| 4 | [Setup partitioning](#04-6-section-4-setup-partitioning) | Execute SQL against `cyber_intelligence` and tee output |
-| 5 | [Verification](#04-6-section-5-verification) | Count partitions, procedures, events |
-| 6 | [Cleanup](#04-6-section-6-cleanup) | Remove staged SQL, print operator guidance |
-| 7 | [Error handling](#04-6-section-7-error-handling) | Append failure marker to log if SQL exec failed |
+| 1 | Pre-flight checks | Container running and MySQL accepting connections |
+| 2 | Enable Event Scheduler | Toggle `event_scheduler = ON` if needed |
+| 3 | Stage partitioning SQL | Copy SQL script to remote with `0600` perms |
+| 4 | Setup partitioning | Execute SQL against `cyber_intelligence` and tee output |
+| 5 | Verification | Count partitions, procedures, events |
+| 6 | Cleanup | Remove staged SQL, print operator guidance |
+| 7 | Error handling | Append failure marker to log if SQL exec failed |
 
 ---
 
@@ -240,7 +240,7 @@ Verifies the [`mysql_db`](components.md) container exists and is responsive befo
   no_log: true
 ```
 
-The [`mysqladmin ping`](https://dev.mysql.com/doc/refman/8.0/en/mysqladmin.html) check returns success only when MySQL is fully accepting connections — not just `docker run`-ing. Because by stage 04.6 the database has already been up since [04.3](#playbook-04-3-database-initialization), a single check is enough (no retry loop needed unlike Task 4.2).
+The [`mysqladmin ping`](https://dev.mysql.com/doc/refman/8.0/en/mysqladmin.html) check returns success only when MySQL is fully accepting connections — not just `docker run`-ing. Because by stage 04.6 the database has already been up since 04.3, a single check is enough (no retry loop needed unlike Task 4.2).
 
 ---
 
@@ -272,13 +272,13 @@ The MySQL [Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overv
 ```
 
 !!! warning "Setting is volatile"
-    `SET GLOBAL event_scheduler = ON` takes effect immediately but **does not survive a container restart** — for persistence, [`my.cnf`](https://dev.mysql.com/doc/refman/8.0/en/option-files.html) must include `event_scheduler=ON`. That is out of scope for this playbook and belongs to the [stack configuration (04.1–2)](ansible-04-stack.md). Re-running 04.6 after a restart will toggle the scheduler back on idempotently.
+`SET GLOBAL event_scheduler = ON` takes effect immediately but **does not survive a container restart** — for persistence, [`my.cnf`](https://dev.mysql.com/doc/refman/8.0/en/option-files.html) must include `event_scheduler=ON`. That is out of scope for this playbook and belongs to the [stack configuration (04.1–2)](ansible-04-stack.md). Re-running 04.6 after a restart will toggle the scheduler back on idempotently.
 
 ---
 
 ## 04.6 Section 3 — Stage partitioning SQL
 
-Copies [`db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) to the remote host with restrictive permissions using [`ansible.builtin.copy`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/copy_module.html). Note that this script is **parameterless** — no Jinja2 placeholders — so we use `copy:` rather than [`template:`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/template_module.html) (which is reserved for [04.3](#playbook-04-3-database-initialization)).
+Copies [`db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) to the remote host with restrictive permissions using [`ansible.builtin.copy`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/copy_module.html). Note that this script is **parameterless** — no Jinja2 placeholders — so we use `copy:` rather than [`template:`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/template_module.html) (which is reserved for 04.3).
 
 ```yaml title="ansible/04_6_setup_partitioning.yml" linenums="134"
 - name: "[04.6.3.1] Copy partitioning script to remote host"
@@ -320,7 +320,7 @@ Executes the SQL script against `cyber_intelligence` with full output captured t
 ```
 
 !!! danger "Error 1503: composite PK required"
-    If you see [`ER_PARTITION_FUNCTION_PRIMARY_KEY (1503)`](https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_unique_key_need_all_fields_in_pf), the database was deployed with an old schema that lacks composite primary keys. **Re-run [04.3](#playbook-04-3-database-initialization) with the v3.0+ [`db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql).** See the [Database Schema page](db.md#7-partitioning-retention) for the full PK rationale.
+If you see [`ER_PARTITION_FUNCTION_PRIMARY_KEY (1503)`](https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_unique_key_need_all_fields_in_pf), the database was deployed with an old schema that lacks composite primary keys. **Re-run 04.3 with the v3.0+ [`db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql).** See the [Database Schema page](db.md) for the full PK rationale.
 
 ---
 
@@ -335,7 +335,7 @@ After a successful SQL run, the playbook queries [`INFORMATION_SCHEMA`](https://
 | `[04.6.5.3]` partitions on `threat_indicators` | same | 5 |
 | `[04.6.5.4]` stored procedures | [`INFORMATION_SCHEMA.ROUTINES`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-routines-table.html) | 2 |
 | `[04.6.5.5]` scheduled events | [`INFORMATION_SCHEMA.EVENTS`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-events-table.html) | 2 |
-| `[04.6.5.7]` first 10 partition sizes | sample from [`v_partition_info`](db.md#75-monitoring-view) | rows present |
+| `[04.6.5.7]` first 10 partition sizes | sample from [`v_partition_info`](db.md) | rows present |
 
 Example summary printed by `[04.6.5.6]`:
 
@@ -357,7 +357,7 @@ Log Location: {{ remote_deploy_base }}/partition_setup.log
 
 ## 04.6 Section 6 — Cleanup
 
-Removes the staged SQL script (no plaintext-secrets concern here — the script has no credentials — but consistent with [04.3](#04-3-task-4-3-cleanup-rendered-sql-script)) and prints next-step guidance:
+Removes the staged SQL script (no plaintext-secrets concern here — the script has no credentials — but consistent with 04.3) and prints next-step guidance:
 
 ```yaml title="ansible/04_6_setup_partitioning.yml" linenums="307"
 - name: "[04.6.6.1] Remove staged partitioning script from remote"
@@ -377,7 +377,7 @@ Removes the staged SQL script (no plaintext-secrets concern here — the script 
       - "======================"
 ```
 
-Operator follow-up queries documented in the [Database Schema](db.md#7-partitioning-retention) page:
+Operator follow-up queries documented in the [Database Schema](db.md) page:
 
 ```sql
 -- Audit trail
@@ -429,10 +429,10 @@ The whole section is gated on `partition_result.rc != 0`, so it is a no-op on su
 
 | Error | Likely cause | Fix |
 |-------|--------------|-----|
-| `Error 1503: PRIMARY KEY must include all columns in the partitioning function` | Database deployed with pre-v3.0 schema (no [composite PKs](db.md#7-partitioning-retention)) | Re-run [04.3](#playbook-04-3-database-initialization) with current [`db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) |
-| `Event scheduler is not enabled` | [Section 2](#04-6-section-2-enable-event-scheduler) didn't run, or `my.cnf` overrides at restart | Verify `[04.6.2.2]` executed; for persistence add `event_scheduler=ON` to [`my.cnf`](https://dev.mysql.com/doc/refman/8.0/en/option-files.html) at the [04.1–2 stack stage](ansible-04-stack.md) |
-| `container not running` | [04.2](ansible-04-stack.md) was never run, or container crashed | [Section 1](#04-6-section-1-pre-flight-checks) fails fast — restart the [stack](ansible-04-stack.md) |
-| Partitions already exist on re-run | Expected behaviour | Idempotent — `INFORMATION_SCHEMA` checks in the [SQL procedures](db.md#72-stored-procedures) skip existing months |
+| `Error 1503: PRIMARY KEY must include all columns in the partitioning function` | Database deployed with pre-v3.0 schema (no [composite PKs](db.md)) | Re-run 04.3 with current [`db_deployment.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_deployment.sql) |
+| `Event scheduler is not enabled` | Section 2 didn't run, or `my.cnf` overrides at restart | Verify `[04.6.2.2]` executed; for persistence add `event_scheduler=ON` to [`my.cnf`](https://dev.mysql.com/doc/refman/8.0/en/option-files.html) at the [04.1–2 stack stage](ansible-04-stack.md) |
+| `container not running` | [04.2](ansible-04-stack.md) was never run, or container crashed | Section 1 fails fast — restart the [stack](ansible-04-stack.md) |
+| Partitions already exist on re-run | Expected behaviour | Idempotent — `INFORMATION_SCHEMA` checks in the [SQL procedures](db.md) skip existing months |
 
 ---
 
@@ -443,44 +443,8 @@ The whole section is gated on `partition_result.rc != 0`, so it is a no-op on su
 | `main_repo_source_dir` | [`group_vars`](ansible-01-secrets.md) | Local repo root on control machine |
 | `remote_deploy_base` | [`group_vars`](ansible-01-secrets.md) | Target deployment directory |
 | `deployment_user` | [`group_vars`](ansible-01-secrets.md) | Owner of staged files on target |
-| `vault_mysql_root_password` | [Vault](ansible-06-vault.md#stage-6-application-database-credentials) (`cyber-sentinel/credentials/mysql/root`) | MySQL `root` password |
+| `vault_mysql_root_password` | [Vault](ansible-06-vault.md) (`cyber-sentinel/credentials/mysql/root`) | MySQL `root` password |
 | `retention_script` | playbook-local | Path to [`db_partitioning_retention.sql`](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/mysql/db_partitioning_retention.sql) |
 | `retention_log` | playbook-local | Setup log location (`partition_setup.log`) |
 
 ---
-
-## See also
-
-**Internal navigation**
-[Database Schema](db.md) ·
-[Partitioning section](db.md#7-partitioning-retention) ·
-[Deployment overview](deployment.md) ·
-[Config Reference](ansible-00-config.md) ·
-[Secrets & Env (01)](ansible-01-secrets.md) ·
-[Firewall — UFW (02)](ansible-02-security.md) ·
-[System & Docker (03)](ansible-03-system.md) ·
-[Stack & Containers (04.1–2)](ansible-04-stack.md) ·
-[Post-Config (04.4)](ansible-04-post-config.md) ·
-[AI Suite — Ollama (04.5)](ansible-04-ai.md) ·
-[Nginx & SSL (05)](ansible-05-proxy.md) ·
-[Vault & Secrets (06)](ansible-06-vault.md) ·
-[Components](components.md) ·
-[n8n Workflow](n8n.md) ·
-[Architecture](architecture.md)
-
-**External references**
-[MySQL 8.0 Reference Manual](https://dev.mysql.com/doc/refman/8.0/en/) ·
-[Partitioning overview](https://dev.mysql.com/doc/refman/8.0/en/partitioning.html) ·
-[RANGE partitioning](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) ·
-[Partitioning limitations](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations.html) ·
-[Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overview.html) ·
-[`CREATE EVENT`](https://dev.mysql.com/doc/refman/8.0/en/create-event.html) ·
-[`mysqladmin`](https://dev.mysql.com/doc/refman/8.0/en/mysqladmin.html) ·
-[Server error reference](https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html) ·
-[Ansible `template`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/template_module.html) ·
-[Ansible `copy`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/copy_module.html) ·
-[Ansible `shell`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/shell_module.html) ·
-[Ansible `command`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/command_module.html) ·
-[Ansible `until` retries](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_loops.html#retrying-a-task-until-a-condition-is-met) ·
-[Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/index.html) ·
-[Project repository](https://github.com/lukaszFD/cyber-sentinel)

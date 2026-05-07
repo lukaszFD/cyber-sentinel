@@ -6,7 +6,7 @@
       Automated, AI-driven security ecosystem for network monitoring, threat intelligence gathering, and incident response.
     </p>
     <p style="margin: 0;">
-      <img alt="version"  src="https://img.shields.io/badge/version-v1.0.1--alpha-4caf50?style=flat-square">
+      <img alt="version"  src="https://img.shields.io/badge/version-v1.0.2-rc1--4caf50?style=flat-square">
       <img alt="ansible"  src="https://img.shields.io/badge/IaC-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white"      style="margin-left:6px;">
       <img alt="docker"   src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white"     style="margin-left:6px;">
       <img alt="gemini"   src="https://img.shields.io/badge/AI-Google%20Gemini-8E75B2?style=flat-square"                             style="margin-left:6px;">
