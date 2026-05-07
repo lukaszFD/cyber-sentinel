@@ -3,7 +3,8 @@
 This document provides a detailed overview of the [MySQL 8.0](https://dev.mysql.com/doc/refman/8.0/en/) relational database used in the [Cyber Sentinel](https://github.com/lukaszFD/cyber-sentinel) project. The database, named `cyber_intelligence`, manages network observables, threat intelligence reports, and AI-generated verdicts.
 
 !!! info "Schema version 3.0"
-This schema is **version 3.0**. The breaking changes versus v2.0 are:
+
+    Breaking changes versus v2.0:
 
     - **Threat scale reduced from 1–10 to 1–5** with an explicit `is_malicious_flag` column (replacing the implicit `score > 5` rule).
     - **`action_recommended`** column on `dic_threat_levels` makes the response policy first-class data instead of business logic in [n8n](n8n.md).
@@ -332,13 +333,13 @@ Each `pYYYYMM` partition holds rows where the partition column is `< first day o
 
 ```sql
 ALTER TABLE dns_queries
-    PARTITION BY RANGE (TO_DAYS(timestamp)) (
+PARTITION BY RANGE (TO_DAYS(timestamp)) (
     PARTITION p202604 VALUES LESS THAN (TO_DAYS('2026-05-01')),
     PARTITION p202605 VALUES LESS THAN (TO_DAYS('2026-06-01')),
     PARTITION p202606 VALUES LESS THAN (TO_DAYS('2026-07-01')),
     PARTITION p202607 VALUES LESS THAN (TO_DAYS('2026-08-01')),
     PARTITION p_future VALUES LESS THAN MAXVALUE
-    );
+);
 ```
 
 !!! warning "Composite PK is mandatory"
@@ -358,12 +359,12 @@ The v1 implementation guessed a single partition name and only handled one parti
 
 ```sql
 CREATE TABLE partition_maintenance_log (
-                                           id              INT AUTO_INCREMENT PRIMARY KEY,
-                                           table_name      VARCHAR(100) NOT NULL,
-                                           partition_name  VARCHAR(50)  NOT NULL,
-                                           action          VARCHAR(20)  NOT NULL,   -- ADD / DROP / ADD_FAILED / DROP_FAILED
-                                           error_message   TEXT,
-                                           executed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    table_name      VARCHAR(100) NOT NULL,
+    partition_name  VARCHAR(50)  NOT NULL,
+    action          VARCHAR(20)  NOT NULL,   -- ADD / DROP / ADD_FAILED / DROP_FAILED
+    error_message   TEXT,
+    executed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
