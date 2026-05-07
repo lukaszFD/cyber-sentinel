@@ -3,13 +3,13 @@
 This document provides a detailed overview of the [MySQL 8.0](https://dev.mysql.com/doc/refman/8.0/en/) relational database used in the [Cyber Sentinel](https://github.com/lukaszFD/cyber-sentinel) project. The database, named `cyber_intelligence`, manages network observables, threat intelligence reports, and AI-generated verdicts.
 
 !!! info "Schema version 3.0"
-    This schema is **version 3.0**. The breaking changes versus v2.0 are:
+This schema is **version 3.0**. The breaking changes versus v2.0 are:
 
     - **Threat scale reduced from 1–10 to 1–5** with an explicit `is_malicious_flag` column (replacing the implicit `score > 5` rule).
     - **`action_recommended`** column on `dic_threat_levels` makes the response policy first-class data instead of business logic in [n8n](n8n.md).
     - **Composite primary keys** on `dns_queries`, `network_events`, and `threat_indicators` — required by [MySQL partitioning rules](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations-partitioning-keys-unique-keys.html).
     - **Foreign keys removed** between partitioned tables — partitioned tables [cannot be FK targets nor sources](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations.html#partitioning-limitations-foreign-keys). Integrity is enforced at the application layer in the [n8n workflow](n8n.md).
-    - **Monthly partitioning + 6-month retention** added — see the dedicated [partitioning section](#7-partitioning-retention).
+    - **Monthly partitioning + 6-month retention** added — see the dedicated partitioning section.
 
 **Related pages:**
 [Architecture](architecture.md) ·
@@ -46,7 +46,7 @@ erDiagram
 
 ## 2. Core Tables
 
-The tables below form the backbone of the data model. Three of them (`dns_queries`, `network_events`, `threat_indicators`) are [partitioned by date](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) — see [section 7](#7-partitioning-retention) for the full rationale and DDL.
+The tables below form the backbone of the data model. Three of them (`dns_queries`, `network_events`, `threat_indicators`) are [partitioned by date](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) — see section 7 for the full rationale and DDL.
 
 ### 2.1 threat_indicators
 
@@ -58,7 +58,7 @@ The primary registry for all analyzed observables. Bridges a captured DNS query 
 | `dns_query_id`       | INT      | NOT NULL, INDEXED           | Logical link to `dns_queries.id` (no FK — partitioned) |
 | `type_id`            | INT      | NOT NULL, INDEXED           | Logical link to `dic_indicator_types.id` |
 | `analysis_result_id` | INT      | NOT NULL, INDEXED           | Logical link to `ai_analysis_results.id` |
-| `last_scan`          | DATETIME | NOT NULL DEFAULT NOW, **part of composite PK** | Most recent enrichment time — **also the [partitioning key](#7-partitioning-retention)** |
+| `last_scan`          | DATETIME | NOT NULL DEFAULT NOW, **part of composite PK** | Most recent enrichment time — **also the partitioning key** |
 | `scan_count`         | INT      | DEFAULT 1                   | Number of times this `(dns_query, verdict)` pair was re-scanned |
 | `created_at`         | TIMESTAMP | DEFAULT NOW                | Row creation time |
 
@@ -66,7 +66,7 @@ The primary registry for all analyzed observables. Bridges a captured DNS query 
 **Unique key:** `uk_dns_analysis_scan (dns_query_id, analysis_result_id, last_scan)` — the inclusion of `last_scan` allows the same observable to be scanned multiple times across days.
 
 !!! note "Why no FK?"
-    [Partitioned tables in MySQL cannot be referenced by foreign keys](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations.html#partitioning-limitations-foreign-keys). The relationships to `dns_queries`, `dic_indicator_types`, and `ai_analysis_results` are validated by the [n8n workflow](n8n.md) before insert.
+[Partitioned tables in MySQL cannot be referenced by foreign keys](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations.html#partitioning-limitations-foreign-keys). The relationships to `dns_queries`, `dic_indicator_types`, and `ai_analysis_results` are validated by the [n8n workflow](n8n.md) before insert.
 
 ---
 
@@ -152,7 +152,7 @@ Universal table for network events from IDS/IPS ([Suricata](https://suricata.io/
 **Composite primary key:** `(id, timestamp)`
 
 !!! info "Logical FKs to partitioned parents"
-    Both `dns_query_id` and `threat_indicator_id` reference partitioned tables, so they are not declared as FKs. The [n8n workflow](n8n.md) is responsible for maintaining referential integrity.
+Both `dns_query_id` and `threat_indicator_id` reference partitioned tables, so they are not declared as FKs. The [n8n workflow](n8n.md) is responsible for maintaining referential integrity.
 
 ---
 
@@ -183,7 +183,7 @@ CTI ([Cyber Threat Intelligence](https://en.wikipedia.org/wiki/Cyber_threat_inte
 | 3    | Abuse_URLhaus     | TRUE        | [URLHaus](https://urlhaus.abuse.ch/) |
 | 4    | urlscan.io        | TRUE        | [urlscan.io API](https://urlscan.io/docs/api/) |
 
-API tokens for these providers are stored in [HashiCorp Vault](ansible-06-vault.md#stage-4-api-tokens) under `cyber-sentinel/api-keys/`.
+API tokens for these providers are stored in [HashiCorp Vault](ansible-06-vault.md) under `cyber-sentinel/api-keys/`.
 
 ---
 
@@ -200,9 +200,9 @@ Defines the **1–5 scoring policy** introduced in schema v3.0. Each row carries
 | 5     | Critical — active threat, immediate alert    | ⚠️ TRUE            | `Block + Alert`      |
 
 !!! tip "Why an explicit flag?"
-    The previous design relied on a hard-coded threshold (`threat_score > 5`) duplicated across n8n nodes and SQL views. With `is_malicious_flag` the malicious / non-malicious decision is data, not code — adjusting the policy means a single `UPDATE` on `dic_threat_levels`, no [n8n workflow](n8n.md) redeploy. The same flag drives every Grafana view in [section 5](#5-grafana-views).
+The previous design relied on a hard-coded threshold (`threat_score > 5`) duplicated across n8n nodes and SQL views. With `is_malicious_flag` the malicious / non-malicious decision is data, not code — adjusting the policy means a single `UPDATE` on `dic_threat_levels`, no [n8n workflow](n8n.md) redeploy. The same flag drives every Grafana view in section 5.
 
-The AI agent reads this table dynamically at every invocation through [`v_threat_scale_for_agent`](#52-v_threat_scale_for_agent) (see [section 5.2](#52-v_threat_scale_for_agent)).
+The AI agent reads this table dynamically at every invocation through `v_threat_scale_for_agent` (see section 5.2).
 
 ---
 
@@ -237,7 +237,7 @@ Returns the most recent scan result per DNS query, joining verdict data from `ai
 
 Global statistics on total scans vs. malicious detections.
 
-- **Based on:** [`v_latest_threat_reports`](#42-v_latest_threat_reports) joined with `dic_threat_levels`
+- **Based on:** `v_latest_threat_reports` joined with `dic_threat_levels`
 - **Key fields:** `total_scans`, `total_malicious_scans`, `malicious_percentage`, `last_scan`, `first_scan`
 
 ---
@@ -246,7 +246,7 @@ Global statistics on total scans vs. malicious detections.
 
 Time-series aggregation of daily scan volume and threat activity.
 
-- **Based on:** [`v_latest_threat_reports`](#42-v_latest_threat_reports)
+- **Based on:** `v_latest_threat_reports`
 - **Key fields:** `scan_date`, `time_sec` (UNIX), `total_scans_per_day`, `total_positives_per_day`, `total_clean_per_day`, `max_threat_score_that_day`, `avg_threat_score`
 
 ---
@@ -295,7 +295,7 @@ CONCAT(score, ' | ', description, ' (Action: ', action_recommended, ')') AS form
 
 ## 6. User Management
 
-The deployment script provisions a non-privileged application user with the minimum grants required to operate the schema. Credentials come from [Ansible Vault](ansible-06-vault.md#stage-6-application-database-credentials):
+The deployment script provisions a non-privileged application user with the minimum grants required to operate the schema. Credentials come from [Ansible Vault](ansible-06-vault.md):
 
 ```sql
 CREATE USER IF NOT EXISTS '{{ mysql_user }}'@'%' IDENTIFIED BY '{{ vault_mysql_password }}';
@@ -307,8 +307,8 @@ FLUSH PRIVILEGES;
 | Variable | Source | Vault path |
 |----------|--------|------------|
 | `mysql_user` | `group_vars` | — (used for templating only) |
-| `vault_mysql_password` | [Vault](ansible-06-vault.md#stage-6-application-database-credentials) | `cyber-sentinel/credentials/mysql/app_manager` |
-| `vault_mysql_root_password` | [Vault](ansible-06-vault.md#stage-6-application-database-credentials) | `cyber-sentinel/credentials/mysql/root` (used by [Ansible playbook 04.3](ansible-04-db.md) to run the script as `root`) |
+| `vault_mysql_password` | [Vault](ansible-06-vault.md) | `cyber-sentinel/credentials/mysql/app_manager` |
+| `vault_mysql_root_password` | [Vault](ansible-06-vault.md) | `cyber-sentinel/credentials/mysql/root` (used by [Ansible playbook 04.3](ansible-04-db.md) to run the script as `root`) |
 
 The application user gets `CREATE VIEW` so that operators can iterate on Grafana views without escalating to root. No `DROP`, `ALTER`, or `GRANT` is granted to it.
 
@@ -332,17 +332,17 @@ Each `pYYYYMM` partition holds rows where the partition column is `< first day o
 
 ```sql
 ALTER TABLE dns_queries
-PARTITION BY RANGE (TO_DAYS(timestamp)) (
+    PARTITION BY RANGE (TO_DAYS(timestamp)) (
     PARTITION p202604 VALUES LESS THAN (TO_DAYS('2026-05-01')),
     PARTITION p202605 VALUES LESS THAN (TO_DAYS('2026-06-01')),
     PARTITION p202606 VALUES LESS THAN (TO_DAYS('2026-07-01')),
     PARTITION p202607 VALUES LESS THAN (TO_DAYS('2026-08-01')),
     PARTITION p_future VALUES LESS THAN MAXVALUE
-);
+    );
 ```
 
 !!! warning "Composite PK is mandatory"
-    Every unique key on a partitioned table must include the partitioning column ([MySQL ER 1503](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations-partitioning-keys-unique-keys.html)). That's why all three partitioned tables have **composite primary keys** — `(id, timestamp)` for `dns_queries` and `network_events`, `(id, last_scan)` for `threat_indicators`.
+Every unique key on a partitioned table must include the partitioning column ([MySQL ER 1503](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations-partitioning-keys-unique-keys.html)). That's why all three partitioned tables have **composite primary keys** — `(id, timestamp)` for `dns_queries` and `network_events`, `(id, last_scan)` for `threat_indicators`.
 
 ### 7.2 Stored procedures
 
@@ -352,18 +352,18 @@ PARTITION BY RANGE (TO_DAYS(timestamp)) (
 | `sp_add_future_partitions()` | Adds the next 3 monthly partitions if missing | Loops months 1..3 ahead, uses `REORGANIZE PARTITION p_future INTO (…, p_future MAXVALUE)`, skips months that already exist |
 
 !!! info "v3.0 fix vs v1"
-    The v1 implementation guessed a single partition name and only handled one partition per run. The v3 version iterates `INFORMATION_SCHEMA.PARTITIONS` so a long-paused or backfilled deployment cleans up correctly in a single invocation. Failed `DROP` / `REORGANIZE` operations are logged but do not abort the cursor.
+The v1 implementation guessed a single partition name and only handled one partition per run. The v3 version iterates `INFORMATION_SCHEMA.PARTITIONS` so a long-paused or backfilled deployment cleans up correctly in a single invocation. Failed `DROP` / `REORGANIZE` operations are logged but do not abort the cursor.
 
 ### 7.3 Maintenance log
 
 ```sql
 CREATE TABLE partition_maintenance_log (
-    id              INT AUTO_INCREMENT PRIMARY KEY,
-    table_name      VARCHAR(100) NOT NULL,
-    partition_name  VARCHAR(50)  NOT NULL,
-    action          VARCHAR(20)  NOT NULL,   -- ADD / DROP / ADD_FAILED / DROP_FAILED
-    error_message   TEXT,
-    executed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                           id              INT AUTO_INCREMENT PRIMARY KEY,
+                                           table_name      VARCHAR(100) NOT NULL,
+                                           partition_name  VARCHAR(50)  NOT NULL,
+                                           action          VARCHAR(20)  NOT NULL,   -- ADD / DROP / ADD_FAILED / DROP_FAILED
+                                           error_message   TEXT,
+                                           executed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -407,28 +407,6 @@ SELECT * FROM partition_maintenance_log ORDER BY executed_at DESC LIMIT 20;
 ```
 
 !!! tip "Manual maintenance"
-    Both procedures can be triggered manually for testing: `CALL sp_add_future_partitions();` / `CALL sp_drop_old_partitions();`. Failures show up in `partition_maintenance_log` with `action = 'ADD_FAILED'` or `'DROP_FAILED'`.
+Both procedures can be triggered manually for testing: `CALL sp_add_future_partitions();` / `CALL sp_drop_old_partitions();`. Failures show up in `partition_maintenance_log` with `action = 'ADD_FAILED'` or `'DROP_FAILED'`.
 
 ---
-
-## See also
-
-**Internal navigation**
-[Architecture](architecture.md) ·
-[Deployment overview](deployment.md) ·
-[Database Init (04.3)](ansible-04-db.md) ·
-[Stack & Containers (04.1–2)](ansible-04-stack.md) ·
-[Vault & Secrets (06)](ansible-06-vault.md) ·
-[Components](components.md) ·
-[n8n Workflow](n8n.md)
-
-**External references**
-[MySQL 8.0 Reference Manual](https://dev.mysql.com/doc/refman/8.0/en/) ·
-[Partitioning overview](https://dev.mysql.com/doc/refman/8.0/en/partitioning.html) ·
-[RANGE partitioning](https://dev.mysql.com/doc/refman/8.0/en/partitioning-range.html) ·
-[Partitioning limitations](https://dev.mysql.com/doc/refman/8.0/en/partitioning-limitations.html) ·
-[Event Scheduler](https://dev.mysql.com/doc/refman/8.0/en/events-overview.html) ·
-[Views](https://dev.mysql.com/doc/refman/8.0/en/views.html) ·
-[Foreign keys](https://dev.mysql.com/doc/refman/8.0/en/create-table-foreign-keys.html) ·
-[`INFORMATION_SCHEMA.PARTITIONS`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-partitions-table.html) ·
-[Project repository](https://github.com/lukaszFD/cyber-sentinel)
