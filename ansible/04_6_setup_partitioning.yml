@@ -17,9 +17,8 @@
 #
 # Outputs:    - Initial partitions on dns_queries, network_events,
 #               threat_indicators (4 monthly + 1 future = 5 each).
-#             - Three stored procedures:
-#               sp_drop_old_partitions, sp_add_future_partitions,
-#               sp_add_partition_for_table.
+#             - Two stored procedures:
+#               sp_drop_old_partitions, sp_add_future_partitions.
 #             - Two scheduled events running monthly:
 #               evt_drop_old_partitions   (02:00 on day 1)
 #               evt_add_future_partitions (03:00 on day 1)
