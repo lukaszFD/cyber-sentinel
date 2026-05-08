@@ -7,7 +7,7 @@
     </p>
     <p style="margin: 0; line-height: 1.9;">
       <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v1.0.2-rc1" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v1.0.2-rc1&color=ff9800&style=flat-square"></a>
-      <a href="https://github.com/lukaszFD/cyber-sentinel/blob/main/LICENSE" target="_blank"><img alt="license" src="https://img.shields.io/github/license/lukaszFD/cyber-sentinel?style=flat-square&color=blue" style="margin-left:6px;"></a>
+      <a href="https://github.com/lukaszFD/cyber-sentinel/LICENSE" target="_blank"><img alt="license" src="https://img.shields.io/github/license/lukaszFD/cyber-sentinel?style=flat-square&color=blue" style="margin-left:6px;"></a>
       <a href="https://github.com/lukaszFD/cyber-sentinel/commits/main" target="_blank"><img alt="last commit" src="https://img.shields.io/github/last-commit/lukaszFD/cyber-sentinel?style=flat-square&color=brightgreen" style="margin-left:6px;"></a>
       <a href="https://github.com/lukaszFD/cyber-sentinel/stargazers" target="_blank"><img alt="stars" src="https://img.shields.io/github/stars/lukaszFD/cyber-sentinel?style=flat-square&logo=github" style="margin-left:6px;"></a>
       <img alt="ansible" src="https://img.shields.io/badge/IaC-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white" style="margin-left:6px;">
