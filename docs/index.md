@@ -108,21 +108,6 @@ By orchestrating a high-performance Docker stack, the system provides a structur
 
 ---
 
-## 🛠️ Tech Stack
-
-`n8n` · `Google Gemini` · `VirusTotal API` · `ThreatFox` · `URLHaus` · `urlscan.io` · `MySQL 8.0` · `MongoDB 4.4` · `HashiCorp Vault` · `Grafana` · `Prometheus` · `Pi-hole` · `Unbound` · `Nginx` · `Docker` · `Ansible` · `Python` · `Ollama` · `Raspberry Pi 5`
-
----
-
-## 💻 Supported Platforms
-
-| Architecture | Docker tag | Hardware |
-|---|---|---|
-| `x86_64` | `amd64` | Standard PC / VM / cloud server |
-| `aarch64` | `arm64` | Raspberry Pi 4 / 5, ARM server |
-
----
-
 ## 👤 Author
 
 <div style="display: flex; align-items: center; gap: 16px; padding: 1rem 1.25rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 10px; margin-top: 0.5rem; background: var(--md-code-bg-color);">

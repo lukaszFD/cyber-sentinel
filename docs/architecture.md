@@ -4,7 +4,16 @@
 
 The **Cyber Sentinel** ecosystem is built on a containerized microservices architecture, ensuring modularity, scalability, and high security. The entire lifecycle of the project — from infrastructure provisioning to service configuration — is managed through **Ansible**, providing a consistent and reproducible deployment process.
 
-## 2. Core Technology Stack
+---
+
+## 2. Supported Platforms
+
+| Architecture | Docker tag | Hardware |
+|---|---|---|
+| `x86_64` | `amd64` | Standard PC / VM / cloud server |
+| `aarch64` | `arm64` | Raspberry Pi 4 / 5, ARM server |
+
+## 3. Core Technology Stack
 
 * **Containerization (Docker):** Every component of the system, including the AI engine, databases, and network guards, runs as a dedicated Docker container. This ensures environment isolation and simplifies dependency management.
 * **Infrastructure as Code (Ansible):** All deployment tasks, firewall rules (UFW), and system hardening are fully automated via Ansible playbooks, ensuring the environment is secure and consistent.
@@ -17,7 +26,7 @@ The **Cyber Sentinel** ecosystem is built on a containerized microservices archi
   * **MySQL:** Stores relational data — work queue, network event logs, AI verdicts, and the analytical views consumed by Grafana. The schema (v3.0) uses a dynamic 1–5 threat scale loaded from `dic_threat_levels` at runtime, plus monthly partitioning with 6-month auto-retention on the high-volume tables — full reference on the [Database Schema](db.md) page.
   * **MongoDB:** Serves as a high-capacity Data Lake for raw JSON responses from CTI providers (VirusTotal, ThreatFox, URLHaus) for deep forensics and reprocessing.
 
-## 3. Data Flow: End-to-End
+## 4. Data Flow: End-to-End
 
 <a href="../assets/cyber_sentinel_flow.png" class="glightbox">
   <img src="../assets/cyber_sentinel_flow.png" alt="Cyber Sentinel Architecture Flow" width="600" style="display: block; margin: 20px auto; border-radius: 8px; cursor: zoom-in;">
@@ -34,7 +43,7 @@ The following describes the complete path from a network event to a security ver
 5. **AI analysis** — `n8n` normalizes CTI data, loads the current threat scale from `v_threat_scale_for_agent`, and sends everything to Google Gemini. The verdict (1–5 score with `is_malicious_flag`, `action_recommended`, bilingual summary, and `scoring_rationale`) is written back to `mysqldb` (`ai_analysis_results`, `threat_indicators`).
 6. **Visualization & alerting** — `grafana` reads the `v_grafana_*` views to render threat intelligence and DNS traffic dashboards. In parallel, `n8n` sends a severity-graded alert email (green INFO / amber REVIEW / red ALERT) for indicators flagged as malicious or warranting review — full pipeline on the [n8n Workflow](n8n.md) page.
 
-## 4. Project Structure Explained
+## 5. Project Structure Explained
 
 ```text
 cyber-sentinel/
