@@ -20,6 +20,13 @@
     Security &amp; Compliance
   </p>
   <p style="margin: 0 0 1.2rem; line-height: 1.9;">
+    <img alt="Dependabot" src="https://img.shields.io/badge/Dependabot-enabled-025E8C?style=flat-square&logo=dependabot&logoColor=white" style="margin-left:6px;">
+    <a href="https://securityscorecards.dev/viewer/?uri=github.com/lukaszFD/cyber-sentinel" target="_blank">
+      <img alt="OpenSSF Scorecard" src="https://api.securityscorecards.dev/projects/github.com/lukaszFD/cyber-sentinel/badge" style="margin-left:6px;">
+    </a>
+    <a href="https://github.com/lukaszFD/cyber-sentinel/actions/workflows/trivy.yml" target="_blank">
+      <img alt="Trivy" src="https://img.shields.io/github/actions/workflow/status/lukaszFD/cyber-sentinel/trivy.yml?branch=main&style=flat-square&logo=aquasec&logoColor=white&label=Trivy" style="margin-left:6px;">
+    </a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/security/code-scanning" target="_blank"><img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/lukaszFD/cyber-sentinel/codeql.yml?branch=main&style=flat-square&logo=github&label=CodeQL"></a>
   </p>
 
