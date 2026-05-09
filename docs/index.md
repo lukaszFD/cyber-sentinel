@@ -101,7 +101,7 @@ By orchestrating a high-performance Docker stack, the system provides a structur
   <div>
     <strong style="font-size: 1rem;">Łukasz Dejko</strong><br>
     <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">
-      Automation Engineer · Backend Developer · Standard Chartered Bank · Poland
+      Automation Engineer · Backend Developer
     </span><br>
     <span style="font-size: 0.875rem; margin-top: 6px; display: inline-block;">
       <a href="https://www.linkedin.com/in/lukaszfd84/"          target="_blank">LinkedIn</a> ·
