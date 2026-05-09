@@ -13,6 +13,14 @@
       <img alt="ansible" src="https://img.shields.io/badge/IaC-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white" style="margin-left:6px;">
       <img alt="docker"  src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" style="margin-left:6px;">
       <img alt="vault"   src="https://img.shields.io/badge/Secrets-HashiCorp%20Vault-FFCA00?style=flat-square&logoColor=black" style="margin-left:6px;">
+      <a href="https://github.com/lukaszFD/cyber-sentinel/security/code-scanning" target="_blank"><img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/lukaszFD/cyber-sentinel/codeql.yml?branch=main&style=flat-square&logo=github&label=CodeQL" style="margin-left:6px;"></a>
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" style="margin-left:6px;">
+    <img alt="MySQL" src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" style="margin-left:6px;">
+    <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-4.4-47A248?style=flat-square&logo=mongodb&logoColor=white" style="margin-left:6px;">
+    <img alt="n8n" src="https://img.shields.io/badge/Workflow-n8n-EA4B71?style=flat-square&logo=n8n&logoColor=white" style="margin-left:6px;">
+    <img alt="Grafana" src="https://img.shields.io/badge/Monitoring-Grafana-F46800?style=flat-square&logo=grafana&logoColor=white" style="margin-left:6px;">
+    <img alt="Prometheus" src="https://img.shields.io/badge/Metrics-Prometheus-E6522C?style=flat-square&logo=prometheus&logoColor=white" style="margin-left:6px;">
+    <img alt="Raspberry Pi" src="https://img.shields.io/badge/Raspberry%20Pi-5-A22846?style=flat-square&logo=raspberrypi&logoColor=white" style="margin-left:6px;">
     </p>
   </div>
 </div>
