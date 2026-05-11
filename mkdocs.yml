@@ -60,7 +60,8 @@ nav:
       - "06 · HashiCorp Vault": ansible-06-vault.md
   - "Docker components": components.md
   - "n8n Workflow": n8n.md
-  - "Database Schema": db.md
+  - "Grafana Dashboards": grafana.md
+  - Database : db.md
   - Project Releases: releases.md
   - Future Roadmap: future-roadmap.md
   - License & Security :
