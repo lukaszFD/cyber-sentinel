@@ -26,20 +26,6 @@
 #             - Models available to other containers via the
 #               cyber-sentinel_internal_network at http://ollama:11434
 #
-# Errors:     - "no such network" — playbook 04.2 was not run, or the
-#               compose project name doesn't match. Network is created
-#               here too via [04.5.1.1] as a safety net.
-#             - Model pull timeouts — large downloads on slow links.
-#               Ollama retries automatically; manual `docker exec ollama
-#               ollama pull <model>` can resume an interrupted pull.
-#             - OOMKilled on RPi — 4GB memory limit may be too tight
-#               with both models loaded. Adjust max_memory variable.
-#
-# Performance: Llama 3.2 3B Q4 inference on RPi 5 (8GB):
-#                - Cold start: ~5-8s for first token
-#                - Sustained:  ~3-5 tokens/sec
-#              Adequate for non-realtime threat triage; not adequate
-#              for interactive chat.
 # ============================================================
 
 - name: Deploy AI Suite for Cyber Sentinel (RPi 5 Optimized)

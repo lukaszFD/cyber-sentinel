@@ -14,14 +14,6 @@
 #             containing all `vault_*` secrets (API keys, passwords,
 #             certs). This file is for non-sensitive defaults only.
 #
-# KNOWN ISSUES (deferred — do not silently fix during this pass):
-#   * `vault_mysql_app_user: "{{ mysql_user }}"` is a redundant alias.
-#     Either inline `mysql_user` everywhere it's needed, or remove
-#     the duplicate. Currently both names refer to the same value.
-#   * `vault_address: "10.10.10.12"` is the Vault container's IP on
-#     the internal Docker network, but playbook 06 builds its Vault
-#     URL from `{{ ansible_host }}:8200` (host IP). This variable
-#     may be unused — search the codebase before relying on it.
 # ============================================================
 
 # ------------------------------------------------------------

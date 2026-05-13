@@ -22,26 +22,6 @@
 #             - n8n owner account created
 #             - n8n workflow imported and ready to be enabled
 #
-# Errors:     - "container not found" — corresponding container failed
-#               to start in 04.2; check `docker ps` and the container
-#               logs before re-running this playbook.
-#             - n8n setup returns 401 — the n8n container is up but
-#               the database isn't seeded yet. The until: loop in
-#               [04.4.3.2] handles this with up to 150s of retries.
-#             - SQLite "database is locked" on adlist insert — Pi-hole
-#               is mid-update; re-run after gravity finishes.
-#
-# KNOWN ISSUES (deferred — do not silently fix during this pass):
-#   * [04.4.2.3] Path "{{ remote_deploy_base }}/pihole/gravity.db"
-#     does not include "config/" prefix used elsewhere in 04.1.
-#     Verify whether gravity.db is actually at this path or under
-#     config/pihole/. If wrong, this task fails silently (sqlite3
-#     creates an empty file at the bogus path).
-#   * [04.4.4.1] Workflow JSON path uses spaces and a relative
-#     "../config/" reference. lookup('file', ...) is computed
-#     relative to the playbook file, not the CWD. Likely fails
-#     after release v1.0.2-rc1 (filename will change for the new
-#     1-5 scale workflow).
 # ============================================================
 
 - name: 04.4 - Post config

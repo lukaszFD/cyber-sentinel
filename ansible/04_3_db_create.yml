@@ -20,18 +20,6 @@
 #             - Rendered SQL temp file is removed after execution
 #               (does not linger on disk with credentials embedded)
 #
-# Errors:     - "Can't connect to MySQL server" — container not yet
-#               healthy. The retry loop [04.3.2.1] handles this with
-#               10 attempts × 10s delay (~100s total grace period).
-#             - ERROR 1007 (database exists) — treated as success by
-#               the until: condition; safe for re-runs.
-#             - Other SQL errors — check mysql_init.log for the full
-#               MySQL stderr output.
-#
-# Security:   The rendered SQL file contains the application user's
-#             password in plaintext during the brief window between
-#             [04.3.1.1] and [04.3.3.1]. Mode 0600 ensures only the
-#             deployment_user can read it during that window.
 # ============================================================
 
 - name: 04.3 - DB create
