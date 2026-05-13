@@ -19,18 +19,6 @@
 #             rebuild of custom images (pdns, log_processor, unsealer)
 #             on every run, picking up Dockerfile or script changes.
 #
-# Errors:     - "Cannot connect to Docker daemon" — deployment_user not
-#               in docker group; check that 03.2.7 reset_connection ran.
-#             - "compose file not found" — playbook 04.1 did not run or
-#               failed silently.
-#             - Image build failure — check Dockerfiles in 04.1 and
-#               outbound network access on the target.
-#             - Port conflicts (53, 443, 8200, etc.) — another service
-#               is using a port; check `ss -tlnp` on the host.
-#
-# Note:       This playbook does NOT verify that containers are healthy
-#             after start. Health checks happen implicitly in 04.3 (DB),
-#             04.4 (n8n/Portainer), and 04.6 (partitioning).
 # ============================================================
 
 - name: 04.2 - Deploy Docker stack

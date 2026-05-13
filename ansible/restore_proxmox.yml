@@ -39,30 +39,6 @@
 #             - SSH on dev_vm becomes responsive within ~30-90s
 #               (handled by the wait_for in [00.PRE.RESTORE.4.2])
 #
-# Errors:     - "Decryption failed" — vault password is wrong; check
-#               ansible.cfg vault_password_file path and contents.
-#             - "403 Forbidden: Permission check failed" — token
-#               lacks the privilege required for the failing
-#               operation. See "Depends on" above for the full
-#               privilege list.
-#             - "501 Method not implemented" — wrong API endpoint.
-#               The correct restore endpoint is /nodes/<node>/qemu
-#               with `archive` parameter, NOT /vzdump/extract.
-#             - "500 hostname lookup failed" — proxmox_node value
-#               does not match the actual node name. Check node
-#               name in Proxmox UI (left panel under Datacenter).
-#             - Task timeout — restore is slow; increase retries
-#               in [00.PRE.RESTORE.3.2] for very large VMs.
-#
-# KNOWN ISSUES (deferred):
-#   * Hardcoded vmid 100 — should come from inventory.
-#   * Hardcoded proxmox_node "local" — should also be sourced
-#     from inventory or group_vars for portability across hosts.
-#   * api_user.split('!') is fragile — should be two separate vars.
-#   * No rollback on partial failure.
-#   * validate_certs: false — acceptable for self-signed home-lab.
-#   * community.general.proxmox_kvm is deprecated — migrate to
-#     community.proxmox.proxmox_kvm before community.general v15.
 # ============================================================
 
 - name: 00.PRE.RESTORE - Proxmox Snapshot Restore (DEV VM only)

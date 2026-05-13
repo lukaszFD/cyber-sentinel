@@ -18,10 +18,6 @@
 #       * Provisions / updates secrets using vault_root_token from group_vars
 #       * Final message confirms success without exposing keys
 #
-# Security notes:
-#   - Unseal keys are NEVER written to Vault itself (chicken-and-egg)
-#   - All secret-bearing tasks use no_log: true
-#   - Pre-flight check fails fast if required vars are missing
 # ============================================================
 
 - name: Cyber Sentinel — Vault Full Lifecycle (Init + Unseal + Provision)

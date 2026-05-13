@@ -24,20 +24,6 @@
 #               10.10.10.100 on the cyber-sentinel_internal_network,
 #               publishing host ports 80 and 443.
 #
-# Errors:     - "container <upstream> not found in network" — Nginx
-#               fails to resolve upstream hostnames. Verify all
-#               services in the services list are running and on the
-#               cyber-sentinel_internal_network.
-#             - SSL handshake errors — cert/key mismatch in vault, or
-#               wrong PEM format. Verify by openssl x509 -text on the
-#               .crt and openssl rsa -check on the .key.
-#             - Port conflict on 80/443 — another service has them;
-#               check `ss -tlnp` on the host.
-#
-# Note:       Variable `domain_suffix` is computed but appears unused
-#             in this playbook directly. It is likely consumed by
-#             templates/nginx_service.conf.j2. Do not remove without
-#             checking the template.
 # ============================================================
 
 - name: 05 - Deploy Nginx Reverse Proxy with SSL

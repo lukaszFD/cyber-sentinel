@@ -286,7 +286,7 @@ These tokens are consumed by the [n8n threat enrichment workflow](n8n.md) at run
 
 ## Stage 5 — TLS certificates
 
-Certificate / key pairs for the three TLS-fronted services are stored under `cyber-sentinel/certs/<service>` for later consumption by the [Nginx reverse proxy playbook (05)](ansible-05-proxy.md). The list of services is driven by the `required_cert_services` variable.
+Certificate / key pairs for every TLS-fronted service are stored under `cyber-sentinel/certs/<service>` for later consumption by the [Nginx reverse proxy playbook (05)](ansible-05-proxy.md). The list of services iterated by this stage is driven by the `required_cert_services` variable.
 
 ```yaml title="ansible/06_initialize_provision_vault.yml" linenums="1"
 - name: "[CERTS] Provision TLS certs/keys for services"
@@ -303,13 +303,6 @@ Certificate / key pairs for the three TLS-fronted services are stored under `cyb
   loop: "{{ required_cert_services }}"
   no_log: true
 ```
-
-| Vault path | Cert variable | Key variable | Service docs |
-|---|---|---|---|
-| `cyber-sentinel/certs/pihole`  | `vault_pihole_cert`  | `vault_pihole_key`  | [Pi-hole](https://pi-hole.net/) |
-| `cyber-sentinel/certs/n8n`     | `vault_n8n_cert`     | `vault_n8n_key`     | [n8n](https://n8n.io/) |
-| `cyber-sentinel/certs/grafana` | `vault_grafana_cert` | `vault_grafana_key` | [Grafana](https://grafana.com/) |
-
 ---
 
 ## Stage 6 — Application & database credentials
@@ -353,9 +346,6 @@ All service passwords and database credentials are stored under `cyber-sentinel/
     # Email
     - { path: "gmail",             value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}" }
 ```
-
-!!! info "Gmail path simplified"
-The Gmail credentials path no longer hard-codes a specific account ID in the URL (previously `gmail/l94524506`). The path is now `cyber-sentinel/credentials/gmail`, with the actual username carried in the `user` field driven by `vault_n8n_user`. This aligns with how [n8n SMTP nodes](https://docs.n8n.io/integrations/builtin/credentials/smtp/) consume the credential.
 
 ---
 
@@ -451,7 +441,7 @@ Variables consumed by the playbook, grouped by purpose. All sensitive variables 
 | `portainer_admin_user` | Portainer admin username | — |
 | `n8n_admin_user` | n8n admin username | — |
 | `vault_mysql_app_user` | MySQL application username | — |
-| `vault_<service>_cert` / `vault_<service>_key` | TLS material for `pihole`, `n8n`, `grafana` | [Nginx playbook (05)](ansible-05-proxy.md) |
+| `vault_<service>_cert` / `vault_<service>_key` | TLS material for `pihole`, `n8n`, `grafana`, `portainer`, `firefox`, `hashicorp_vault` (consumed by playbook 05) | [Nginx playbook (05)](ansible-05-proxy.md) |
 
 ### Required only on re-runs
 
@@ -504,12 +494,9 @@ Variables consumed by the playbook, grouped by purpose. All sensitive variables 
       - grafana
 
   tasks:
-    # See sections above for the full task breakdown across stages 0-7.
-    # Canonical source:
-    # https://github.com/lukaszFD/cyber-sentinel/blob/main/ansible/06_initialize_provision_vault.yml
+  # See sections above for the full task breakdown across stages 0-7.
+  # Canonical source:
+  # https://github.com/lukaszFD/cyber-sentinel/blob/main/ansible/06_initialize_provision_vault.yml
 ```
-
-!!! tip "Source of truth"
-For brevity the complete task list is omitted from this excerpt — refer to [`06_initialize_provision_vault.yml` in the repository](https://github.com/lukaszFD/cyber-sentinel/blob/main/ansible/06_initialize_provision_vault.yml) for the canonical source.
 
 ---

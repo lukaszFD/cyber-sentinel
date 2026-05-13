@@ -25,17 +25,6 @@
 #             - partition_maintenance_log table for audit trail.
 #             - Setup log written to {{ retention_log }}.
 #
-# Errors:     - "Error 1503: PRIMARY KEY must include all columns in
-#               the partitioning function" — schema does not have
-#               composite PKs. Re-deploy DB with v3.0+ schema.
-#             - "Event scheduler is not enabled" — Section 2 should
-#               handle this; verify [04.6.2.2] ran.
-#             - "container not running" — playbook 04.2 was not run.
-#               Section 1 fails fast on this.
-#
-# Idempotency: Safe to re-run. The partitioning SQL uses
-#              `CREATE TABLE IF NOT EXISTS`, `DROP PROCEDURE IF EXISTS`,
-#              and `INFORMATION_SCHEMA` checks before adding partitions.
 # ============================================================
 
 - name: Deploy Database Partitioning & Retention Policy

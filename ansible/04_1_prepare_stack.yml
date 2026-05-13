@@ -20,17 +20,6 @@
 #               - Pre-created log file with permissive ownership for DNS container
 #               - Vault data directory with correct UID:GID
 #
-# Errors:     - "Could not find or access" — main_repo_source_dir is
-#               wrong or files are missing in the source repo.
-#             - "Permission denied" on /var-log/dns.log — UID 1000 on
-#               remote does not match the UID baked into the pdns image.
-#             - "Permission denied" on vault/data — UID 100 (vault user
-#               inside container) cannot write; check fix in [04.1.5].
-#
-# Note:       Variables `source_mysql_script` and `mysql_init_log` are
-#             defined but unused in this playbook — they are consumed
-#             by playbook 04.3. Consider removing the duplicates here
-#             in a future cleanup (left as-is per current scope).
 # ============================================================
 
 - name: 04.1 - Prepare Sentinel Stack environment

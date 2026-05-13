@@ -17,15 +17,6 @@
 #               - 53/udp   Pi-hole DNS (UDP)
 #               - 53/tcp   Pi-hole DNS (TCP fallback)
 #
-# Errors:     - "ufw: command not found" — APT install [02.1.1] failed,
-#               check internet access on target.
-#             - SSH lockout risk: if [02.2.2] does not run before
-#               [02.2.3] enables UFW, you lose remote access. The
-#               loop below is ordered to prevent this — do not reorder.
-#
-# Note:       hosts is "all" (not "all_servers") so the firewall is
-#             applied to every inventory host. Verify this matches
-#             your inventory groups.
 # ============================================================
 
 - name: 02 - Configure Firewall (UFW)

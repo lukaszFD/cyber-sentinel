@@ -172,31 +172,73 @@ ansible-vault view ansible/group_vars/all/vault.yml
 
 ### Required variables
 
-All variables prefixed with `vault_` must be defined in this file:
+All variables prefixed with `vault_` (plus the controller-level `ansible_become_password`) must be defined in this file. 
+#### Controller-level
 
 | Variable | Used in | Description |
 |----------|---------|-------------|
-| `vault_mongodb_password` | `env.j2`, `04_1`, `06_2` | MongoDB root password |
-| `vault_mysql_password` | `env.j2`, `06_2` | MySQL application user password |
-| `vault_mysql_root_password` | `env.j2`, `04_3`, `06_2` | MySQL root password |
-| `vault_grafana_password` | `env.j2`, `04_1`, `06_2` | Grafana admin password |
-| `vault_root_token` | `env.j2`, `06_2` | HashiCorp Vault root token (after init) |
-| `vault_pihole_admin_password` | `04_4`, `06_2` | Pi-hole web UI password |
-| `vault_portainer_password` | `04_4`, `06_2` | Portainer admin password |
-| `vault_n8n_password` | `04_4`, `06_2` | n8n owner account password |
-| `vault_n8n_gmail` | `06_2` | Gmail app password for n8n alerting |
-| `vault_unseal_keys` | `06_2` | List of Vault unseal keys (from `06_1` init output) |
-| `vault_virus_total_token` | `06_2` | VirusTotal API token |
-| `vault_gemini_api_key` | `06_2` | Google Gemini API key (home network) |
-| `vault_kali_gemini_api_key` | `06_2` | Google Gemini API key (Kali environment) |
-| `vault_abuse_api_key` | `06_2` | Abuse.ch API key (ThreatFox + URLHaus) |
-| `vault_grafana_api_key` | `06_2` | Grafana API key |
-| `vault_urlscanio_api_key` | `06_2` | urlscan.io API key |
-| `vault_<name>_cert` | `05`, `06_2` | SSL certificate PEM for each proxied service |
-| `vault_<name>_key` | `05`, `06_2` | SSL private key PEM for each proxied service |
+| `ansible_become_password` | All playbooks (`become: yes`) | Sudo password for `deployment_user` on every target host. Can be omitted if the user has `NOPASSWD: ALL` in sudoers. |
+
+#### Service & database passwords
+
+| Variable | Used in | Description |
+|----------|---------|-------------|
+| `vault_mongodb_password` | `env.j2`, `04_1`, `06` | MongoDB root password |
+| `vault_mysql_password` | `env.j2`, `06` | MySQL application user password |
+| `vault_mysql_root_password` | `env.j2`, `04_3`, `06` | MySQL root password |
+| `vault_grafana_password` | `env.j2`, `04_1`, `06` | Grafana admin password |
+| `vault_pihole_admin_password` | `04_4`, `06` | Pi-hole web UI password |
+| `vault_portainer_password` | `04_4`, `06` | Portainer admin password |
+| `vault_n8n_password` | `04_4`, `06` | n8n owner account password |
+| `vault_n8n_gmail` | `06` | Gmail app password for n8n alerting |
+| `vault_n8n_user` | `06` | Gmail address used as From: in n8n alerts |
+
+#### Third-party API tokens
+
+| Variable | Used in | Description |
+|----------|---------|-------------|
+| `vault_virus_total_token` | `06` | VirusTotal API token |
+| `vault_gemini_api_key` | `06` | Google Gemini API key (home network) |
+| `vault_kali_gemini_api_key` | `06` | Google Gemini API key (Kali environment) |
+| `vault_abuse_api_key` | `06` | Abuse.ch API key (ThreatFox + URLHaus) |
+| `vault_grafana_api_key` | `06` | Grafana API key |
+| `vault_urlscanio_api_key` | `06` | urlscan.io API key |
+
+#### TLS certificates and keys (Nginx — playbook 05)
+
+Playbook 05 fronts six services with Nginx. Each entry below requires a matching `vault_<service>_cert` and `vault_<service>_key` pair (PEM-encoded):
+
+| Service | Cert variable | Key variable |
+|---|---|---|
+| `pihole` | `vault_pihole_cert` | `vault_pihole_key` |
+| `n8n` | `vault_n8n_cert` | `vault_n8n_key` |
+| `grafana` | `vault_grafana_cert` | `vault_grafana_key` |
+| `portainer` | `vault_portainer_cert` | `vault_portainer_key` |
+| `firefox` | `vault_firefox_cert` | `vault_firefox_key` |
+| `hashicorp_vault` | `vault_hashicorp_vault_cert` | `vault_hashicorp_vault_key` |
+
+!!! warning "Pre-flight validation gap"
+Playbook `06_initialize_provision_vault.yml` pre-flight-checks cert/key pairs only for `pihole`, `n8n`, and `grafana`. Playbook `05_deploy_proxy.yml` consumes **all six pairs** at runtime. Define all six pairs upfront — otherwise 06 passes validation but 05 fails mid-run with an undefined-variable error.
+
+#### Vault keys (post-init)
+
+| Variable | Used in | Description |
+|----------|---------|-------------|
+| `vault_root_token` | `env.j2`, `06` | HashiCorp Vault root token (generated on first init) |
+| `vault_unseal_keys` | `06` | List of Vault unseal keys (from first-init output) |
 
 !!! warning "vault_unseal_keys and vault_root_token"
-These two variables are only available **after** running playbook `06_1_initialize_vault.yml` for the first time. Save the `vault operator init` output immediately, then add these values to `vault.yml` before running `06_2_provision_vault.yml`.
+These two variables are only available **after** the first run of `06_initialize_provision_vault.yml`. The playbook prints them once on first-init — save them immediately, then add them to `vault.yml` (encrypted) for subsequent re-runs.
+
+#### Optional — Proxmox auto-restore (DEV only)
+
+These variables are only consumed by `restore_proxmox.yml` and are required only when targeting the dev VM (`--limit vm-prox-dev` or `--limit dev_vm`). 
+
+| Variable | Used in | Description |
+|----------|---------|-------------|
+| `proxmox_host` | `restore_proxmox` | Hostname or IP of the Proxmox VE node (port 8006) |
+| `proxmox_user_token` | `restore_proxmox` | Token ID in `user@realm!tokenid` format |
+| `proxmox_api_secret` | `restore_proxmox` | Token secret value (UUID-shaped) |
 
 ---
 

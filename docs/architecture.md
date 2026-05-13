@@ -128,4 +128,4 @@ cyber-sentinel/
 ```
 
 !!! note "About `restore_proxmox.yml`"
-This playbook is **operator-side and optional** — it lives in the repo because the author always deploys onto a clean VM and uses Proxmox as the hypervisor. Anyone running Cyber Sentinel on a different setup (bare metal, another hypervisor, a public cloud, or restoring from a different backup tool) can simply ignore this file. It is not part of the documented deployment flow.
+This playbook is **operator-side and optional** — it lives in the repo because the author always deploys onto a clean VM and uses Proxmox as the hypervisor. Anyone running Cyber Sentinel on a different setup ( another hypervisor, a public cloud, or restoring from a different backup tool) can simply ignore this file. It is not part of the documented deployment flow.
