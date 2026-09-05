@@ -1,0 +1,17 @@
+[Unit]
+Description=Hailo-Ollama — Ollama-compatible API server on Hailo-10H NPU
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/hailo-ollama
+Restart=always
+RestartSec=5
+# No explicit User= — runs as the user set by the Ansible task deploying
+# this unit. /dev/hailo0 is world read/write (crw-rw-rw-, confirmed via
+# `ls -la /dev/hailo0` on rpi5-prod), so no special group membership is
+# required to access the NPU.
+
+[Install]
+WantedBy=multi-user.target

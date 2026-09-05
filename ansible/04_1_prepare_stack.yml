@@ -30,6 +30,15 @@
     project_name: "cyber-sentinel"
     docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
 
+    # Required by docker-compose-cyber-sentinel.yml's Jinja2
+    # ({{ domain_suffix }} in the n8n service block), now that
+    # [04.1.2.1] renders the file via `template`. Must stay
+    # identical to the definition in 05_deploy_proxy.yml — both
+    # need the same value for the same host, since 05 sets Nginx's
+    # server_name using this and 04.1 sets n8n's own idea of its
+    # hostname from it.
+    domain_suffix: "{{ 'local' if inventory_hostname in groups['vm-prox-dev'] else 'prod' }}"
+
     source_docker_compose_file: "{{ main_repo_source_dir }}/docker/{{ docker_compose_file_name }}"
     remote_docker_compose_file: "{{ remote_deploy_base }}/{{ docker_compose_file_name }}"
 
@@ -82,13 +91,33 @@
     # used by `docker compose up --build` in playbook 04.2.
     # ============================================================
 
-    - name: "[04.1.2.1] Copy docker-compose file"
-      ansible.builtin.copy:
+    # docker-compose-cyber-sentinel.yml contains live Jinja2
+    # ({{ domain_suffix }} in the n8n service's N8N_HOST and
+    # WEBHOOK_URL, per the file's own header comment). `template`
+    # is required here, not `copy` — copy would ship the literal
+    # string "{{ domain_suffix }}" to the remote host and break
+    # n8n's webhook URL and host header validation.
+    - name: "[04.1.2.1] Render docker-compose file (contains Jinja2 for domain_suffix)"
+      ansible.builtin.template:
         src: "{{ source_docker_compose_file }}"
         dest: "{{ remote_docker_compose_file }}"
         owner: "{{ deployment_user }}"
         group: "{{ deployment_user }}"
         mode: '0644'
+
+    # Plain copy, not template — docker-compose-hailo.yml has no
+    # Jinja2 in it. Only staged on rpi5-prod: open-webui is
+    # meaningless anywhere else (see file header). 04.2 only adds
+    # the matching `-f docker-compose-hailo.yml` flag on this same
+    # group, so the two stay in lockstep.
+    - name: "[04.1.2.1b] Copy Hailo/open-webui compose addon (rpi5-prod only)"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/docker/docker-compose-hailo.yml"
+        dest: "{{ remote_deploy_base }}/docker-compose-hailo.yml"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+      when: inventory_hostname in groups['rpi5-prod']
 
     - name: "[04.1.2.2] Copy Dockerfile for Passive DNS sniffer"
       ansible.builtin.copy:
@@ -125,28 +154,24 @@
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    # ============================================================
-    # SECTION 3 — Inject DB-related secrets into .env
-    # ------------------------------------------------------------
-    # Appends/updates the three database-tier passwords in the
-    # already-existing .env file (created by playbook 01). Uses
-    # lineinfile with a regexp anchor so re-runs UPDATE rather than
-    # APPEND duplicate lines if values rotate.
-    # ============================================================
+    # [04.1.2.7] Copy Dockerfile for hailo-ollama — REMOVED. hailo-ollama
+    # runs natively on the host (systemd service, playbook 04.7), not
+    # as a container. There is no Dockerfile.hailo-ollama.
 
-    - name: "[04.1.3.1] Ensure DB secrets are present in .env"
-      ansible.builtin.lineinfile:
-        path: "{{ remote_deploy_base }}/.env"
-        regexp: "^{{ item.key }}="
-        line: "{{ item.key }}={{ item.value }}"
-        create: yes
-        owner: "{{ deployment_user }}"
-        mode: '0600'
-      loop:
-        - { key: 'GRAFANA_PASSWORD',     value: "{{ vault_grafana_password }}" }
-        - { key: 'MONGODB_PASSWORD',     value: "{{ vault_mongodb_password }}" }
-        - { key: 'MYSQL_ROOT_PASSWORD',  value: "{{ vault_mysql_root_password }}" }
-      no_log: true
+    # ============================================================
+    # SECTION 3 — removed
+    # ------------------------------------------------------------
+    # Previously duplicated GRAFANA_PASSWORD, MONGODB_PASSWORD,
+    # MONGODB_USERNAME, MYSQL_ROOT_PASSWORD, and MYSQL_PASSWORD into
+    # .env via lineinfile. templates/env.j2 (rendered by playbook 01
+    # [01.1.2]) already writes all of these — confirmed by reading
+    # env.j2 directly. Keeping both was a dual-write path with no
+    # benefit and real drift risk: the MONGODB_USERNAME entry here
+    # referenced vault_mongodb_username, a variable that doesn't
+    # exist anywhere else in the project (env.j2 uses the correctly
+    # named mongodb_username). Removed rather than fixed, since
+    # env.j2 is the single correct source for these values.
+    # ============================================================
 
     # ============================================================
     # SECTION 4 — Service configuration files
@@ -188,11 +213,6 @@
         mode: '0644'
         directory_mode: '0755'
 
-    # Dashboard JSONs live under provisioning/dashboards/ in the repo
-    # but Grafana's file-based provisioning expects them in a separate
-    # directory referenced from dashboards.yml. Copying to BOTH paths
-    # keeps the source-of-truth in one place and satisfies Grafana's
-    # path expectations without symlinks.
     - name: "[04.1.4.5] Copy dashboard JSONs to Grafana's runtime path"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/grafana/provisioning/dashboards/"
@@ -200,6 +220,14 @@
         owner: "{{ deployment_user }}"
         group: "{{ deployment_user }}"
         mode: '0644'
+
+    # [04.1.4.6] Copy hailo-ollama configuration — REMOVED. No evidence
+    # hailo-ollama reads a config file at all (official docs show no
+    # such mechanism); this config/hailo/config.yaml was carried over
+    # from an earlier, unverified assumption. The systemd unit that
+    # actually matters (hailo-ollama.service) is deployed directly by
+    # playbook 04.7, not staged here — it's a host-level systemd file,
+    # not part of the Docker stack tree.
 
     # ============================================================
     # SECTION 5 — Container UID/permission fixes
@@ -211,9 +239,6 @@
     # with "permission denied" or silently log nothing.
     # ============================================================
 
-    # The pdns container writes to dns.log as UID 1000. Mode 0666 is
-    # intentional: the log_processor container reads from the same
-    # file and may run as a different UID.
     - name: "[04.1.5.1] Pre-create DNS log file with permissive ownership (UID 1000)"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
@@ -222,9 +247,6 @@
         group: "1000"
         mode: '0666'
 
-    # Vault server runs as UID 100 inside the container. Mode 0700
-    # is required by Vault — it refuses to start with a more
-    # permissive storage backend directory.
     - name: "[04.1.5.2] Set ownership for Vault data directory (UID 100)"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/config/vault/data"

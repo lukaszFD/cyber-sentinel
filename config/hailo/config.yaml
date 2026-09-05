@@ -1,0 +1,4 @@
+listen_address: "0.0.0.0"
+listen_port: 11434
+hailort_version: "5.1.1"
+models_path: "/root/.ollama/models"

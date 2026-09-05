@@ -29,6 +29,13 @@
     project_name: "cyber-sentinel"
     docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
 
+    # Appended to the compose command only on rpi5-prod — see
+    # docker-compose-hailo.yml's own header for why this is a
+    # separate file rather than a Jinja2 conditional inside the main
+    # compose file. Must stay in lockstep with the `when` guard on
+    # [04.1.2.1b], which stages this same file only on this group.
+    hailo_compose_flag: "{{ '-f docker-compose-hailo.yml' if inventory_hostname in groups['rpi5-prod'] else '' }}"
+
   tasks:
     # ============================================================
     # SECTION 1 — Build and start the stack
@@ -44,8 +51,17 @@
     # so container names are predictable (e.g. "pihole" instead of
     # "<dirname>-pihole-1"). All later playbooks reference containers
     # by these short names.
+    #
+    # Multiple -f flags merge compose files left to right; on
+    # rpi5-prod this becomes:
+    #   docker compose -f docker-compose-cyber-sentinel.yml
+    #                  -f docker-compose-hailo.yml -p cyber-sentinel ...
+    # and on every other host, just the base file — hailo_compose_flag
+    # renders empty and Jinja2 collapses the extra whitespace itself
+    # (this is a shell command string, not YAML, so there's no
+    # indentation-corruption risk like the compose-file approach had).
     - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:
-        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up --build -d"
+        cmd: "docker compose -f {{ docker_compose_file_name }} {{ hailo_compose_flag }} -p {{ project_name }} up --build -d"
         chdir: "{{ remote_deploy_base }}"
       register: deploy_output

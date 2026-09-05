@@ -1,0 +1,257 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 07 — Hardware Health Monitoring
+# ============================================================
+# Purpose:    Collects hardware health signals that node_exporter's
+#             default collectors do not cover, and exposes them to
+#             the existing Prometheus/Grafana stack via node_exporter's
+#             textfile collector:
+#               - NVMe SMART health for the external SSD (Samsung 980
+#                 500GB behind a JMicron USB-NVMe bridge, /dev/sda,
+#                 requires `-d sntjmicron` for correct translation)
+#               - Hailo-10H module liveness (hailortcli fw-control
+#                 identify — confirms the NPU still responds, not just
+#                 that /dev/hailo0 exists)
+#
+#             NOT duplicated here (already covered by node_exporter's
+#             default collectors, confirmed present in the current
+#             `command:` block in docker-compose-cyber-sentinel.yml):
+#               - Filesystem/disk usage (`--collector.filesystem`)
+#               - Raspberry Pi 5 SoC temperature (`--collector.thermal_zone`
+#                 reads /sys/class/thermal via --path.sysfs=/host/sys)
+#
+# Status:     ACTIVE. Restricted to rpi5-prod — the external SSD, USB
+#             bridge, and Hailo-10H are specific to this host and do
+#             not exist on the Dev environment (Dell Optiplex 7050).
+#
+# Run order:  Run manually after 00_main.yml has completed at least
+#             once. Not imported into 00_main.yml — this is host
+#             monitoring for an already-deployed stack, not part of
+#             initial provisioning.
+#
+# Depends on: - Playbook 03 (smartmontools, jq already installed)
+#             - Playbook 04.2 (node_exporter container running)
+#             - docker-compose-cyber-sentinel.yml node_exporter block
+#               updated with the textfile collector volume + flag
+#               (see accompanying compose diff — this playbook does
+#               NOT edit docker-compose itself, consistent with the
+#               rule that container definitions live in compose, not
+#               in ad-hoc Ansible docker_container tasks)
+#             - hailortcli available on the host (confirmed present,
+#               used earlier for `hailortcli fw-control identify`)
+#
+# Outputs:    - /opt/cyber-sentinel/monitoring/collect_hardware_metrics.sh
+#             - Cron job running the script every 5 minutes
+#             - Prometheus-format metrics written atomically to
+#               /opt/cyber-sentinel/monitoring/textfile_collector/hardware.prom
+#             - node_exporter recreated to pick up the new volume/flag
+#
+# Note:       This script surfaces raw values only. No thresholds or
+#             alert logic are embedded here — that belongs in
+#             Prometheus alerting rules / Grafana, not a shell script,
+#             so alert conditions stay in one place and are editable
+#             without redeploying this playbook.
+# ============================================================
+
+- name: 07 - Hardware Health Monitoring (rpi5-prod only)
+  hosts: rpi5-prod
+  become: yes
+
+  vars:
+    monitoring_base: "/opt/cyber-sentinel/monitoring"
+    textfile_collector_dir: "{{ monitoring_base }}/textfile_collector"
+    nvme_device: "/dev/sda"
+    nvme_device_type: "sntjmicron"
+    project_name: "cyber-sentinel"
+    docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — Prerequisites
+    # ------------------------------------------------------------
+    # smartmontools and jq are already installed by playbook 03.
+    # This is a safety net for standalone runs of this playbook.
+    # ============================================================
+
+    - name: "[07.1.1] Ensure smartmontools and jq are installed"
+      ansible.builtin.apt:
+        name:
+          - smartmontools
+          - jq
+        state: present
+
+    # ============================================================
+    # SECTION 2 — Directory structure
+    # ============================================================
+
+    - name: "[07.2.1] Create monitoring script directory"
+      ansible.builtin.file:
+        path: "{{ monitoring_base }}"
+        state: directory
+        owner: root
+        mode: '0755'
+
+    # node_exporter's container reads this path as a bind mount
+    # (read-only from its side). Owned by root:root, world-readable —
+    # node_exporter's container process needs read access and this
+    # directory never contains secrets, only metric text.
+    - name: "[07.2.2] Create textfile collector directory"
+      ansible.builtin.file:
+        path: "{{ textfile_collector_dir }}"
+        state: directory
+        owner: root
+        mode: '0755'
+
+    # ============================================================
+    # SECTION 3 — Metric collection script
+    # ------------------------------------------------------------
+    # Written to a .prom.tmp file first, then moved into place —
+    # node_exporter's textfile collector can read a file mid-write
+    # otherwise, producing a scrape error or partial metrics.
+    # ============================================================
+
+    - name: "[07.3.1] Deploy hardware metrics collection script"
+      ansible.builtin.copy:
+        dest: "{{ monitoring_base }}/collect_hardware_metrics.sh"
+        owner: root
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # ============================================================
+          # Cyber Sentinel — Hardware metrics collector
+          # Generated by Ansible playbook 07_setup_monitoring.yml
+          # Run as root via cron every 5 minutes. Writes Prometheus
+          # textfile-format metrics for node_exporter to scrape.
+          # ============================================================
+          set -euo pipefail
+
+          OUT_DIR="{{ textfile_collector_dir }}"
+          OUT_FILE="${OUT_DIR}/hardware.prom"
+          TMP_FILE="${OUT_FILE}.tmp"
+          NVME_DEV="{{ nvme_device }}"
+          NVME_TYPE="{{ nvme_device_type }}"
+
+          {
+            # --- NVMe SMART health (Samsung 980 behind JMicron USB bridge) ---
+            SMART_JSON=$(smartctl -d "${NVME_TYPE}" -a -j "${NVME_DEV}" 2>/dev/null || echo '{}')
+
+            SMART_PASSED=$(echo "${SMART_JSON}" | jq -r 'if .smart_status.passed == true then 1 elif .smart_status.passed == false then 0 else -1 end')
+            NVME_TEMP=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.temperature // -1')
+            NVME_PCT_USED=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.percentage_used // -1')
+            NVME_SPARE=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.available_spare // -1')
+            NVME_SPARE_THRESH=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.available_spare_threshold // -1')
+            NVME_MEDIA_ERRORS=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.media_errors // -1')
+            NVME_CRIT_WARNING=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.critical_warning // -1')
+            NVME_POWER_ON_HOURS=$(echo "${SMART_JSON}" | jq -r '.power_on_time.hours // -1')
+            NVME_UNSAFE_SHUTDOWNS=$(echo "${SMART_JSON}" | jq -r '.nvme_smart_health_information_log.unsafe_shutdowns // -1')
+
+            echo "# HELP cybersentinel_nvme_smart_passed Overall SMART self-assessment (1=PASSED, 0=FAILED, -1=unavailable)"
+            echo "# TYPE cybersentinel_nvme_smart_passed gauge"
+            echo "cybersentinel_nvme_smart_passed{device=\"${NVME_DEV}\"} ${SMART_PASSED}"
+
+            echo "# HELP cybersentinel_nvme_temperature_celsius Composite NVMe temperature"
+            echo "# TYPE cybersentinel_nvme_temperature_celsius gauge"
+            echo "cybersentinel_nvme_temperature_celsius{device=\"${NVME_DEV}\"} ${NVME_TEMP}"
+
+            echo "# HELP cybersentinel_nvme_percentage_used Vendor-normalized wear indicator (0-100+, not literal capacity used)"
+            echo "# TYPE cybersentinel_nvme_percentage_used gauge"
+            echo "cybersentinel_nvme_percentage_used{device=\"${NVME_DEV}\"} ${NVME_PCT_USED}"
+
+            echo "# HELP cybersentinel_nvme_available_spare_percent Remaining spare capacity"
+            echo "# TYPE cybersentinel_nvme_available_spare_percent gauge"
+            echo "cybersentinel_nvme_available_spare_percent{device=\"${NVME_DEV}\"} ${NVME_SPARE}"
+
+            echo "# HELP cybersentinel_nvme_available_spare_threshold_percent Vendor threshold for the spare-capacity warning"
+            echo "# TYPE cybersentinel_nvme_available_spare_threshold_percent gauge"
+            echo "cybersentinel_nvme_available_spare_threshold_percent{device=\"${NVME_DEV}\"} ${NVME_SPARE_THRESH}"
+
+            echo "# HELP cybersentinel_nvme_media_errors_total Cumulative media and data integrity errors"
+            echo "# TYPE cybersentinel_nvme_media_errors_total counter"
+            echo "cybersentinel_nvme_media_errors_total{device=\"${NVME_DEV}\"} ${NVME_MEDIA_ERRORS}"
+
+            echo "# HELP cybersentinel_nvme_critical_warning_bitmask Raw NVMe critical warning bitmask (0x00 = none)"
+            echo "# TYPE cybersentinel_nvme_critical_warning_bitmask gauge"
+            echo "cybersentinel_nvme_critical_warning_bitmask{device=\"${NVME_DEV}\"} ${NVME_CRIT_WARNING}"
+
+            echo "# HELP cybersentinel_nvme_power_on_hours Total power-on hours"
+            echo "# TYPE cybersentinel_nvme_power_on_hours gauge"
+            echo "cybersentinel_nvme_power_on_hours{device=\"${NVME_DEV}\"} ${NVME_POWER_ON_HOURS}"
+
+            echo "# HELP cybersentinel_nvme_unsafe_shutdowns_total Cumulative unsafe shutdown count"
+            echo "# TYPE cybersentinel_nvme_unsafe_shutdowns_total counter"
+            echo "cybersentinel_nvme_unsafe_shutdowns_total{device=\"${NVME_DEV}\"} ${NVME_UNSAFE_SHUTDOWNS}"
+
+            # --- Hailo-10H module liveness ---
+            if hailortcli fw-control identify >/dev/null 2>&1; then
+              HAILO_RESPONSIVE=1
+            else
+              HAILO_RESPONSIVE=0
+            fi
+
+            echo "# HELP cybersentinel_hailo_device_responsive Whether hailortcli fw-control identify succeeded (1=responsive, 0=not responding)"
+            echo "# TYPE cybersentinel_hailo_device_responsive gauge"
+            echo "cybersentinel_hailo_device_responsive{device=\"/dev/hailo0\"} ${HAILO_RESPONSIVE}"
+
+          } > "${TMP_FILE}"
+
+          mv "${TMP_FILE}" "${OUT_FILE}"
+
+    # ============================================================
+    # SECTION 4 — Scheduling
+    # ============================================================
+
+    - name: "[07.4.1] Schedule hardware metrics collection every 5 minutes"
+      ansible.builtin.cron:
+        name: "Cyber Sentinel hardware health metrics"
+        job: "{{ monitoring_base }}/collect_hardware_metrics.sh"
+        minute: "*/5"
+        user: root
+
+    # ============================================================
+    # SECTION 5 — Validation
+    # ------------------------------------------------------------
+    # Runs the script once immediately so the metrics file exists
+    # before node_exporter is recreated in Section 6, and confirms
+    # the output is non-empty and contains the expected metric names.
+    # ============================================================
+
+    - name: "[07.5.1] Run collection script once for validation"
+      ansible.builtin.command: "{{ monitoring_base }}/collect_hardware_metrics.sh"
+      changed_when: false
+
+    - name: "[07.5.2] Read generated metrics file"
+      ansible.builtin.slurp:
+        src: "{{ textfile_collector_dir }}/hardware.prom"
+      register: metrics_file
+
+    - name: "[07.5.3] Verify expected metrics are present"
+      ansible.builtin.assert:
+        that:
+          - "'cybersentinel_nvme_smart_passed' in (metrics_file.content | b64decode)"
+          - "'cybersentinel_hailo_device_responsive' in (metrics_file.content | b64decode)"
+        fail_msg: "hardware.prom was generated but is missing expected metric names — check collect_hardware_metrics.sh output manually."
+
+    # ============================================================
+    # SECTION 6 — Apply node_exporter compose change
+    # ------------------------------------------------------------
+    # Recreates only the node_exporter service so it picks up the
+    # textfile collector volume and --collector.textfile.directory
+    # flag added to docker-compose-cyber-sentinel.yml. Scoped to one
+    # service — does not touch the rest of the stack.
+    # ============================================================
+
+    - name: "[07.6.1] Recreate node_exporter with textfile collector enabled"
+      ansible.builtin.shell:
+        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up -d node_exporter"
+        chdir: "{{ remote_deploy_base }}"
+      register: node_exporter_recreate
+
+    - name: "[07.6.2] Wait for node_exporter to expose the new metrics"
+      ansible.builtin.uri:
+        url: "http://10.10.10.14:9100/metrics"
+        status_code: 200
+        return_content: yes
+      register: node_exporter_metrics
+      until: "'cybersentinel_nvme_smart_passed' in node_exporter_metrics.content"
+      retries: 6
+      delay: 5

@@ -12,8 +12,20 @@
 #             - All upstream services running with their expected
 #               container names (see services list below)
 #             - vault_<service>_cert and vault_<service>_key defined
-#               in group_vars for every entry in the services list
+#               in group_vars for every entry in the services list,
+#               including vault_open_webui_cert / vault_open_webui_key
 #             - templates/nginx_service.conf.j2 exists locally
+#
+# NOTE: service `name` values must use underscores, not hyphens —
+# lookup('vars', 'vault_' + item.name + '_cert') resolves item.name
+# as a Jinja2/Python variable name segment, and a hyphen breaks that
+# resolution. `name` is also used for cert/key filenames on disk,
+# where an underscore is harmless. It must NOT be used for the Nginx
+# server_name, though — DNS hostnames/TLS SNI don't permit
+# underscores (RFC 1123). Any service whose `name` differs from its
+# desired public hostname sets an explicit `hostname` field (see
+# open_webui below); nginx_service_conf.j2 falls back to `name` when
+# `hostname` is omitted, so single-word services are unaffected.
 #
 # Outputs:    - Per-service TLS certs at:
 #                 {{ remote_deploy_base }}/config/nginx/certs/<svc>.crt
@@ -41,13 +53,23 @@
     #   - <name>.conf                 in /config/nginx/conf.d/
     # The internal_host is the Docker DNS name Nginx uses to reach
     # the upstream container; port is the container-internal port.
-    services:
+    # Present on every host in the inventory.
+    base_services:
       - { name: "pihole",          port: 80,   internal_host: "pihole" }
       - { name: "n8n",             port: 5678, internal_host: "n8n-server" }
       - { name: "portainer",       port: 9000, internal_host: "portainer" }
       - { name: "firefox",         port: 3000, internal_host: "firefox" }
       - { name: "grafana",         port: 3000, internal_host: "grafana" }
       - { name: "hashicorp_vault", port: 8200, internal_host: "hashicorp_vault" }
+
+    # Only ever deployed on rpi5-prod (see docker-compose-cyber-sentinel.yml,
+    # which renders the open-webui service itself only for this group).
+    # Without this guard, vm-prox-dev / local-vm would get a dangling
+    # Nginx vhost pointing at a container that will never exist there.
+    rpi5_only_services:
+      - { name: "open_webui", port: 8080, internal_host: "open-webui", hostname: "open-webui" }
+
+    services: "{{ base_services + (rpi5_only_services if inventory_hostname in groups['rpi5-prod'] else []) }}"
 
   tasks:
     # ============================================================
