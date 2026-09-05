@@ -54,6 +54,9 @@
       - portainer_admin_user
       - n8n_admin_user
       - vault_mysql_app_user
+      - vault_webui_secret_key
+      - webui_admin_email
+      - vault_webui_admin_password
 
     # Cert/key pairs — checked dynamically via lookup
     required_cert_services:
@@ -206,6 +209,7 @@
         - { path: "abuse/api-key",                  value: "{{ vault_abuse_api_key }}" }
         - { path: "grafana/api-key",                value: "{{ vault_grafana_api_key }}" }
         - { path: "urlscanio/api-key",              value: "{{ vault_urlscanio_api_key }}" }
+        - { path: "open-webui/secret-key",          value: "{{ vault_webui_secret_key }}" }
 
     # ============================================================
     # STAGE 5 — CERTIFICATES
@@ -247,6 +251,7 @@
         - { path: "grafana",           value: "{{ vault_grafana_password }}" }
         - { path: "portainer",         value: "{{ vault_portainer_password }}", user: "{{ portainer_admin_user }}" }
         - { path: "n8n",               value: "{{ vault_n8n_password }}",       user: "{{ n8n_admin_user }}" }
+        - { path: "open_webui",        value: "{{ vault_webui_admin_password }}", user: "{{ webui_admin_email }}" }
         # Database roots
         - { path: "mysql/root",        value: "{{ vault_mysql_root_password }}", user: "root" }
         - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}",      user: "{{ vault_mysql_app_user }}" }

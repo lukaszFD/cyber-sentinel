@@ -26,6 +26,9 @@
 #               .6  dns_log_processor .13 prometheus
 #               .7  n8n              .14 node_exporter
 #               .8  mongo            .15 vault_unsealer (disabled)
+#               .16 (unused — hailo-ollama runs natively on the host,
+#                    not as a container; see playbook 04.7)
+#               .17 open-webui (docker-compose-hailo.yml, rpi5-prod only)
 #               .100 nginx-proxy (created by playbook 05)
 #
 # Env vars:   ${VAR} placeholders are resolved from the .env file
@@ -405,11 +408,17 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
+      # Textfile collector — feeds NVMe SMART and Hailo liveness
+      # metrics generated on the host by playbook 07 (cron, every
+      # 5 min). Read-only from the container's side; the host-side
+      # script is the only writer.
+      - /opt/cyber-sentinel/monitoring/textfile_collector:/textfile_collector:ro
     command:
       - '--path.procfs=/host/proc'
       - '--path.rootfs=/rootfs'
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.textfile.directory=/textfile_collector'
     networks:
       internal_network:
         ipv4_address: 10.10.10.14
@@ -429,21 +438,47 @@ services:
   # even though this service is disabled. Either remove those
   # tasks or re-enable the service below.
   # ------------------------------------------------------------
-#  vault_unsealer:
-#    build:
-#      context: .
-#      dockerfile: Dockerfile.unsealer
-#      args:
-#        - V_KEY1=${VAULT_KEY1}
-#        - V_KEY2=${VAULT_KEY2}
-#        - V_KEY3=${VAULT_KEY3}
-#    container_name: vault_unsealer
-#    networks:
-#      internal_network:
-#        ipv4_address: 10.10.10.15
-#    restart: unless-stopped
-#    depends_on:
-#      - vault
+  #  vault_unsealer:
+  #    build:
+  #      context: .
+  #      dockerfile: Dockerfile.unsealer
+  #      args:
+  #        - V_KEY1=${VAULT_KEY1}
+  #        - V_KEY2=${VAULT_KEY2}
+  #        - V_KEY3=${VAULT_KEY3}
+  #    container_name: vault_unsealer
+  #    networks:
+  #      internal_network:
+  #        ipv4_address: 10.10.10.15
+  #    restart: unless-stopped
+  #    depends_on:
+  #      - vault
+
+  # ------------------------------------------------------------
+  # [SVC.AI.HAILO] hailo-ollama — REMOVED, runs natively on the host
+  # ------------------------------------------------------------
+  # hailo-ollama is NOT containerized. It's an official Hailo binary
+  # (hailo-ai/hailo_model_zoo_genai, C++ on top of HailoRT) confirmed
+  # installed at /usr/bin/hailo-ollama on rpi5-prod, managed as a
+  # systemd service by playbook 04.7 (config/hailo/hailo-ollama.service).
+  # Its default and confirmed-actual port is 8000, not 11434 — earlier
+  # revisions of this file assumed an Ollama-style container on 11434
+  # and a config.yaml controlling listen address; neither is real.
+  # The PCIe kernel driver and the inference process both stay on the
+  # host — there was never a good reason to containerize this given
+  # HailoRT's device access model, and it's also the pattern Hailo's
+  # own documentation recommends.
+  #
+  # open-webui (the chat UI for hailo-ollama) is NOT defined in this
+  # file either — see docker-compose-hailo.yml. It's an rpi5-prod-only
+  # addon file, staged and included only on that host (playbooks 04.1
+  # / 04.2), rather than an inline Jinja2 conditional block in this
+  # file. An earlier revision tried the inline-conditional approach; Jinja2's
+  # whitespace handling around block tags silently corrupted the YAML
+  # indentation on render (duplicate "image" key errors from docker
+  # compose) — fragile enough to not be worth the alternative of a
+  # second file.
+  # ------------------------------------------------------------
 
 # ============================================================
 # Networks
@@ -469,6 +504,7 @@ networks:
 #   mongo_data      — threat_data_lake database files
 #   grafana_data    — dashboards (non-provisioned), users, prefs
 #   prometheus_data — TSDB metrics history
+#   (open_webui_data — declared in docker-compose-hailo.yml, rpi5-prod only)
 # ============================================================
 volumes:
   n8n_data:

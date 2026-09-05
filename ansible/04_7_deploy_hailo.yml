@@ -1,0 +1,207 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 04.7 — Hailo-10H Native Inference Service
+# ============================================================
+# Purpose:    Manages hailo-ollama as a native systemd service on the
+#             host — NOT a container. hailo-ollama (from hailo-ai's
+#             public hailo_model_zoo_genai project) is confirmed
+#             installed at /usr/bin/hailo-ollama on rpi5-prod, but was
+#             never wired into systemd, so it did not survive reboots
+#             or restart on crash.
+#
+#             This playbook does NOT install hailo-ollama itself — the
+#             binary's origin (pre-built .deb from Hailo's gated
+#             Developer Zone, or a source build) is not captured in
+#             this repo. It only takes an already-installed binary and
+#             makes it a managed, persistent service — consistent with
+#             the "no manual server intervention" principle, but this
+#             is the one component whose *installation* step is still
+#             a manual, undocumented prerequisite until that's traced
+#             down and IaC'd separately.
+#
+#             Earlier revisions of this playbook (and of
+#             docker-compose-cyber-sentinel.yml) assumed hailo-ollama
+#             ran as a Docker container built from a local Dockerfile.
+#             That assumption was wrong: the official hailo_model_zoo_genai
+#             documentation recommends running it natively, its default
+#             port is 8000 (not 11434), and its API paths are
+#             /api/chat, /api/pull, /hailo/v1/list (not Ollama's
+#             /api/tags). The container service, Dockerfile reference,
+#             and hailo_ollama_data volume have been removed from
+#             docker-compose-cyber-sentinel.yml.
+#
+# Status:     ACTIVE. Restricted to rpi5-prod — this hardware does not
+#             exist on the Dev environment (Dell Optiplex 7050).
+#
+# Depends on: - /usr/bin/hailo-ollama already present on the host
+#               (confirmed present; installation method not IaC'd yet)
+#             - Hailo-10H card physically installed, host-side PCIe
+#               driver (hailo1x) and firmware already loaded
+#
+# Outputs:    - /etc/systemd/system/hailo-ollama.service installed,
+#               enabled, and started
+#             - hailo-ollama reachable at http://127.0.0.1:8000
+#             - Models pulled via hailo-ollama's own /api/pull endpoint
+#               (NOT `docker exec` — there is no container)
+#
+# Model names — RESOLVED (previously flagged as open question):
+#   Confirmed against /hailo/v1/list on rpi5-prod on 2026-09-04.
+#   Real names use underscores (deepseek_r1_distill_qwen, not
+#   deepseek-r1-distill-qwen) and don't carry an -instruct suffix.
+#   llama3.2:1b-instruct doesn't exist in this zoo at all — only
+#   llama3.2:3b — accepted as the fallback model despite the larger
+#   footprint (operator decision, not a technical constraint).
+# ============================================================
+
+- name: Hailo-10H native service setup and model provisioning
+  hosts: rpi5-prod
+  become: yes
+
+  vars:
+    hailo_ollama_bin: "/usr/bin/hailo-ollama"
+    hailo_ollama_port: 8000
+    hailo_device: "/dev/hailo0"
+
+    # Confirmed against hailo-ollama's real /hailo/v1/list output on
+    # rpi5-prod (2026-09-04). The originally planned names used Ollama
+    # library conventions (hyphens, -instruct suffixes) that don't
+    # match this model zoo's actual naming, and llama3.2:1b-instruct
+    # doesn't exist here at all — only the 3b variant is available.
+    # Accepted as the fallback model despite the larger footprint;
+    # if RAM pressure becomes an issue, revisit against a fresh
+    # /hailo/v1/list (the zoo may add a smaller variant later).
+    ai_models:
+      - "deepseek_r1_distill_qwen:1.5b"
+      - "qwen2.5-coder:1.5b"
+      - "llama3.2:3b"
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — Host-side sanity checks
+    # ============================================================
+
+    - name: "[04.7.1.1] Verify Hailo device node exists on host"
+      ansible.builtin.stat:
+        path: "{{ hailo_device }}"
+      register: hailo_dev_stat
+
+    - name: "[04.7.1.2] Fail if Hailo device is not present"
+      ansible.builtin.fail:
+        msg: >
+          {{ hailo_device }} not found on host. The hailo1x PCIe driver
+          and SOC firmware must be loaded before this playbook runs.
+          Check `lspci | grep -i hailo`, `dmesg | grep -i hailo`, and
+          `hailortcli fw-control identify`.
+      when: not hailo_dev_stat.stat.exists
+
+    - name: "[04.7.1.3] Verify hailo-ollama binary is installed"
+      ansible.builtin.stat:
+        path: "{{ hailo_ollama_bin }}"
+      register: hailo_ollama_bin_stat
+
+    - name: "[04.7.1.4] Fail if hailo-ollama binary is missing"
+      ansible.builtin.fail:
+        msg: >
+          {{ hailo_ollama_bin }} not found. This playbook manages the
+          systemd service for an already-installed hailo-ollama binary
+          but does not install it. Install it first — either the
+          pre-built .deb from Hailo's Developer Zone, or build from
+          source per https://github.com/hailo-ai/hailo_model_zoo_genai
+          — then re-run this playbook.
+      when: not hailo_ollama_bin_stat.stat.exists
+
+    # ============================================================
+    # SECTION 2 — systemd service
+    # ============================================================
+
+    - name: "[04.7.2.1] Deploy hailo-ollama systemd unit"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/hailo/hailo-ollama.service"
+        dest: "/etc/systemd/system/hailo-ollama.service"
+        owner: root
+        group: root
+        mode: '0644'
+      register: hailo_unit_deployed
+
+    - name: "[04.7.2.2] Reload systemd daemon if unit changed"
+      ansible.builtin.systemd:
+        daemon_reload: yes
+      when: hailo_unit_deployed.changed
+
+    - name: "[04.7.2.3] Enable and start hailo-ollama service"
+      ansible.builtin.systemd:
+        name: hailo-ollama
+        state: started
+        enabled: yes
+
+    # ============================================================
+    # SECTION 3 — Wait for API and verify NPU is actually in use
+    # ============================================================
+
+    - name: "[04.7.3.1] Wait for hailo-ollama API to become responsive"
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ hailo_ollama_port }}/hailo/v1/list"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 15
+      delay: 5
+
+    # journalctl, not `docker exec ls`, since this is now a systemd
+    # service — confirms the process actually opened the device
+    # rather than failing silently and idling.
+    - name: "[04.7.3.2] Check recent hailo-ollama logs for device errors"
+      ansible.builtin.command: "journalctl -u hailo-ollama -n 50 --no-pager"
+      register: hailo_logs
+      changed_when: false
+
+    - name: "[04.7.3.3] Display recent hailo-ollama logs"
+      ansible.builtin.debug:
+        msg: "{{ hailo_logs.stdout_lines }}"
+
+    # ============================================================
+    # SECTION 4 — Model provisioning
+    # ------------------------------------------------------------
+    # Verifies configured model names actually exist in hailo-ollama's
+    # model zoo before attempting to pull, rather than assuming the
+    # names carried over from the old (incorrect) Ollama-based config.
+    # ============================================================
+
+    - name: "[04.7.4.1] Query available models from hailo-ollama"
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ hailo_ollama_port }}/hailo/v1/list"
+        method: GET
+        return_content: yes
+      register: available_models_raw
+
+    - name: "[04.7.4.2] Parse available model list"
+      ansible.builtin.set_fact:
+        available_models: "{{ (available_models_raw.content | from_json).models | default([]) }}"
+
+    - name: "[04.7.4.3] Fail if any configured model is not in the available list"
+      ansible.builtin.fail:
+        msg: >
+          Configured model '{{ item }}' was not found in hailo-ollama's
+          model zoo. Available models: {{ available_models }}.
+          Update ai_models in this playbook to match real model names
+          before re-running.
+      when: item not in available_models
+      loop: "{{ ai_models }}"
+
+    - name: "[04.7.4.4] Pull configured models via hailo-ollama API"
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ hailo_ollama_port }}/api/pull"
+        method: POST
+        body_format: json
+        body:
+          model: "{{ item }}"
+          stream: false
+        status_code: 200
+        timeout: 300
+      loop: "{{ ai_models }}"
+      register: pull_result
+
+    - name: "[04.7.4.5] Display pull results"
+      ansible.builtin.debug:
+        msg: "Pulled: {{ item.item }} — status {{ item.status }}"
+      loop: "{{ pull_result.results }}"

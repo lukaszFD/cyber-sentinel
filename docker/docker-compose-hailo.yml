@@ -1,0 +1,80 @@
+# ============================================================
+# Cyber Sentinel — Docker Compose Addon: Hailo/open-webui
+# ============================================================
+# Purpose:    Adds open-webui to the stack. Applied ONLY on rpi5-prod
+#             via `docker compose -f docker-compose-cyber-sentinel.yml
+#             -f docker-compose-hailo.yml up --build -d` — playbook
+#             04.2 appends the second -f flag only when
+#             inventory_hostname is in group rpi5-prod.
+#
+#             Kept as a separate file rather than a Jinja2
+#             {% if %} block inside the main compose file. That
+#             approach was tried first and discarded: Jinja2's
+#             whitespace handling around block tags corrupted the
+#             rendered YAML's indentation (docker compose failed with
+#             "mapping key already defined" — open-webui's `image:`
+#             key collided with node_exporter's). Two compose files
+#             merged via multiple -f flags is the standard Docker
+#             pattern for per-environment service sets and has none
+#             of that fragility — the file either exists and applies
+#             cleanly, or it isn't included in the command at all.
+#
+# Depends on: - hailo-ollama running natively on the host as a
+#               systemd service (playbook 04.7), listening on
+#               127.0.0.1:8000 and 0.0.0.0:8000 (confirmed via
+#               `ss -tlnp` on rpi5-prod)
+#             - vault_webui_secret_key, webui_admin_email,
+#               vault_webui_admin_password, webui_admin_name in .env
+#               (validated by playbook 01 [01.0.1])
+#             - internal_network already defined in
+#               docker-compose-cyber-sentinel.yml (this file attaches
+#               to it, doesn't redeclare it)
+#
+# Outputs:    - open-webui container at 10.10.10.17:8080
+#             - open_webui_data volume
+# ============================================================
+
+services:
+  # ------------------------------------------------------------
+  # [SVC.AI.WEBUI] open-webui — chat UI for the native hailo-ollama
+  # ------------------------------------------------------------
+  # OLLAMA_BASE_URL points at 10.10.10.1 — the gateway of
+  # internal_network (confirmed via `docker network inspect
+  # cyber-sentinel_internal_network`), which is reachable from any
+  # container on this network and routes to the host's hailo-ollama
+  # process on port 8000 (bound to 0.0.0.0, confirmed via `ss -tlnp`).
+  #
+  # NOT host.docker.internal: that resolves to 172.17.0.1, the
+  # default bridge's gateway, which containers on a custom network
+  # like internal_network have no route to — the `extra_hosts:
+  # host-gateway` mechanism only works reliably for Docker's default
+  # bridge network, not custom IPAM networks. Confirmed via
+  # `docker exec open-webui getent hosts host.docker.internal`
+  # returning 172.17.0.1, and the resulting connection hanging.
+  #
+  # WEBUI_ADMIN_EMAIL / WEBUI_ADMIN_PASSWORD / WEBUI_ADMIN_NAME —
+  # open-webui creates this admin account automatically on first
+  # startup if no users exist yet, and disables further self-signup
+  # (ENABLE_SIGNUP=False) once it does. No API call or Ansible task
+  # needed, unlike n8n/Portainer's owner-setup endpoints.
+  # ------------------------------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    hostname: open-webui
+    environment:
+      - OLLAMA_BASE_URL=http://10.10.10.1:8000
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - WEBUI_ADMIN_EMAIL=${WEBUI_ADMIN_EMAIL}
+      - WEBUI_ADMIN_PASSWORD=${WEBUI_ADMIN_PASSWORD}
+      - WEBUI_ADMIN_NAME=${WEBUI_ADMIN_NAME}
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.17
+    dns: 10.10.10.4
+    volumes:
+      - open_webui_data:/app/backend/data
+    restart: unless-stopped
+
+volumes:
+  open_webui_data:

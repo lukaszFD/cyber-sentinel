@@ -70,6 +70,7 @@
 #- import_playbook: 04_5_deploy_AI.yml          # [00.3.1] Optional — local Ollama AI models
 
 - import_playbook: 04_6_setup_partitioning.yml  # [00.3.2] MySQL partitioning + retention automation
+- import_playbook: 04_7_deploy_hailo.yml
 
 # ------------------------------------------------------------
 # [00.4] Stage 4 — Edge layer (proxy + secret store)

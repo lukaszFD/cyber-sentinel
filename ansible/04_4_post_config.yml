@@ -159,6 +159,12 @@
     # n8n is significantly slower to boot than Portainer (loads its
     # SQLite DB, runs migrations, starts the worker pool). 15 × 10s
     # = 150s grace period covers the worst case observed on RPi 5.
+    # n8n does NOT follow Portainer's 200/409 pattern for "already
+    # initialized" — it returns 400 with a specific message
+    # ("Instance owner already setup"). Treating any 400 as success
+    # would mask real errors (bad email format, weak password, etc.),
+    # so failed_when checks the exact message rather than widening
+    # status_code blindly.
     - name: "[04.4.3.2] Initialize n8n owner account via API"
       ansible.builtin.uri:
         url: "http://localhost:5678/rest/owner/setup"
@@ -169,11 +175,15 @@
           password: "{{ vault_n8n_password }}"
           firstName: "Hunter"
           lastName: "Sentinel"
-        status_code: [200, 409]
+        status_code: [200, 400]
       register: n8n_init
-      until: n8n_init.status in [200, 409]
+      until: n8n_init.status in [200, 400]
       retries: 15
       delay: 10
+      failed_when: >
+        n8n_init.status == 400 and
+        (n8n_init.json.message | default('')) != 'Instance owner already setup'
+      changed_when: n8n_init.status == 200
 
     # ============================================================
     # SECTION 4 — Import n8n workflow
