@@ -12,9 +12,12 @@ This document outlines the planned technical improvements and new features for t
 | **1. Database** | User-Device correlation (`user_devices`) |  🔵 Planned  | — | — |
 | **1. Database** | Integrity Hash Storage (FIM) |  🔵 Planned  | — | Tied to Section 4 |
 | **1. Database** | Schema versioning (Liquibase) |  🟡 Partial  | — | Implemented on the [`liquibase` branch](https://github.com/lukaszFD/cyber-sentinel/tree/liquibase) for MySQL. On hold pending Postgres migration — design needs to be revisited for the new engine before merging to `main`. |
-| **2. Local LLM** | Ollama deployment with CPU/RAM limits | 🟢 Delivered | v1.0.1-alpha | See `04_5_ai_suite.yml` |
-| **2. Local LLM** | Llama 3.2 3b for security analysis |  🟡 Partial  | — | Model deployed; analysis workflow pending |
-| **2. Local LLM** | Embedding model (`nomic-embed-text`) |  🔵 Planned  | — | New addition — required by RAG pipeline (Section 8) |
+| **2. Local LLM** | Ollama (CPU-only path) with CPU/RAM limits | ⚫ Abandoned | v1.0.1-alpha | `04_5_deploy_AI.yml` — remains in the repo, disabled by default, as a historical/reference artifact only. No further work planned; Hailo-10H (Section 2b) is the sole local-inference investment going forward. |
+| **2. Local LLM** | Llama 3.2 3b for security analysis (CPU path) |  ⚫ Abandoned  | — | Superseded by Hailo-10H's own `llama3.2:3b` (Section 2b) — the CPU-path analysis workflow will not be built |
+| **2. Local LLM** | Hailo-10H native inference service (`hailo-ollama`) | 🟢 Delivered | v1.0.3 | Runs as a systemd service (not containerized), rpi5-prod only — see Section 2b |
+| **2. Local LLM** | Open WebUI chat interface | 🟢 Delivered | v1.0.3 | Containerized, auto-provisioned admin account, reachable via Nginx at `open-webui.prod` |
+| **2. Local LLM** | Hailo-10H models wired into n8n AI Agent pipeline |  🔵 Planned  | — | Models verified working standalone via Open WebUI only; Gemini remains the pipeline's reasoning engine — see Section 2b findings |
+| **2. Local LLM** | Embedding model (`nomic-embed-text`) |  🔵 Planned  | — | New addition — required by RAG pipeline (Section 8). Host must now be Hailo-10H — the CPU-Ollama option is abandoned, see Section 8.7 |
 | **3. Hardening** | MFA / Hardware keys (YubiKey) | 🟢 Delivered | — | YubiKey 5 Series integrated and operational on production servers (SSH + Vault + Proxmox). Ansible role to be merged. |
 | **3. Hardening** | TOTP for web interfaces |  🔵 Planned  | — | — |
 | **3. Hardening** | Port Knocking |  🔵 Planned  | — | — |
@@ -45,7 +48,7 @@ This document outlines the planned technical improvements and new features for t
 | **8. RAG & Postgres** | Knowledge-base collection (MITRE / malware) |  🔵 Planned  | — | Second pgvector table indexed from static corpus |
 | **8. RAG & Postgres** | Decommission MySQL + MongoDB containers |  🔵 Planned  | — | Final cleanup step after data migration validated |
 
-Legend: 🟢 Delivered · 🟡 Partial · 🔵 Planned
+Legend: 🟢 Delivered · 🟡 Partial · 🔵 Planned · ⚫ Abandoned
 
 ---
 
@@ -62,11 +65,28 @@ Legend: 🟢 Delivered · 🟡 Partial · 🔵 Planned
 
 ---
 
-## 2. Local LLM Integration (Ollama)
+## 2. Local LLM Integration — CPU Ollama (Abandoned)
 
-* 🟢 **Resource-Aware Ansible Playbook** — *delivered in v1.0.1-alpha.* `04_5_ai_suite.yml` deploys Ollama with strict hardware limits suitable for Raspberry Pi 5 (CPU pinned to 2 cores, RAM capped at 4 GB).
-* **Llama 3.2 3b for security analysis** 🔵 — model is deployed, but the analysis workflow that leverages it for automated vulnerability identification is still pending.
-* **`nomic-embed-text` for RAG embeddings** 🔵 — 137M-parameter embedding model, 768-dim output, Apache 2.0. Required by Section 8. Pulled via `ollama pull nomic-embed-text` and exposed through the same `/api/embeddings` endpoint as the chat model. Expected throughput on Pi 5: ~200 ms per embedding (acceptable given the 15-minute schedule).
+* ⚫ **Resource-Aware Ansible Playbook** — *delivered in v1.0.1-alpha, no further work planned.* `04_5_deploy_AI.yml` deploys Ollama with strict hardware limits suitable for Raspberry Pi 5 (CPU pinned to 2 cores, RAM capped at 4 GB). Kept in the repo, disabled by default, as a historical artifact — Hailo-10H (Section 2b) is now the only local-inference path being developed.
+* ⚫ **Llama 3.2 3b for security analysis (CPU path)** — model was deployed but the analysis workflow was never built, and won't be. Superseded by Hailo-10H's own `llama3.2:3b`.
+* ⚫ **`nomic-embed-text` for RAG embeddings (CPU path)** — 137M-parameter embedding model, 768-dim output, Apache 2.0. Required by Section 8, but the CPU-Ollama hosting option described here is abandoned along with the rest of this section — embeddings must now come from Hailo-10H if the model is available there. See Section 8.7.
+
+---
+
+## 2b. Hailo-10H NPU Inference
+
+* 🟢 **Native inference service** — *delivered in v1.0.3.* `hailo-ollama` (Hailo's own Ollama-compatible API server, built on HailoRT) runs as a systemd service directly on the Raspberry Pi 5 host, not as a container — this matches Hailo's own deployment guidance and avoids the PCIe device-passthrough complexity of containerizing it. Playbook `04.7` stages the unit file, starts and enables the service, verifies the NPU device is actually in use (not silently falling back), and pulls the configured models via the service's own API.
+* 🟢 **Three models provisioned** — *delivered in v1.0.3.* `deepseek_r1_distill_qwen:1.5b`, `qwen2.5-coder:1.5b`, `llama3.2:3b` — confirmed via the service's `/hailo/v1/list` and `/api/tags` endpoints. Model names and availability were confirmed empirically against the live device, not assumed from Hailo's published model catalog, which does not fully match what's actually installed.
+* 🟢 **Open WebUI chat interface** — *delivered in v1.0.3.* Containerized (`docker-compose-hailo.yml`, rpi5-prod only), auto-provisions its admin account from Vault-managed secrets on first start, reachable through the existing Nginx reverse proxy.
+* 🟡 **Model suitability evaluation** — *completed for v1.0.3, findings below.* Manual testing against structured, multi-source threat-scoring prompts (VirusTotal + ThreatFox + URLHaus, the same shape of data the n8n pipeline uses) surfaced consistent reliability issues across all four available models at the 1.5–3B scale on this hardware:
+  * Factual confabulation presented with high confidence (e.g. an incorrect TLD attribution, a fabricated RFC citation, a malware family name silently substituted with a different, invented one)
+  * Direct contradiction of provided input data in one case (asserting ThreatFox showed no active threat when the input explicitly stated `threatfox_active: true`)
+  * Internally inconsistent structured output (e.g. `threat_score: 4` paired with `is_malicious: false`, which violates the stated scoring policy within the same response)
+  * A generation timeout on the largest available model (`llama3.2:3b`) when given the full-length production-style prompt
+  * **Conclusion:** Gemini remains the primary reasoning engine for the n8n AI Agent pipeline. Local Hailo-10H inference is not currently wired into n8n (see Status Overview) and is not recommended for unattended multi-source scoring decisions at this model scale. Better-fit candidate uses identified: single-source tool-output summarization (e.g. Kali command output already executed and captured, not model-selected), and lower-stakes triage/classification tasks without cross-field logical constraints.
+* 🔵 **n8n workflow integration** — not yet started. Scoped as a possible future addition once a narrower, better-suited task is identified (see evaluation findings above), rather than a like-for-like replacement of the Gemini-based reasoning agent.
+* 🔵 **Host-only installation gap** — `hailo-ollama`'s own installation (the binary at `/usr/bin/hailo-ollama`, and the underlying HailoRT + `hailo1x` driver) predates this repo's IaC and is not yet captured in Ansible. Playbook `04.7` verifies it's present and manages it from that point forward, but a clean-host bootstrap isn't automated yet.
+* All Hailo-10H components (service, Open WebUI, and the UFW rule opening `hailo-ollama`'s port to `internal_network` only) are scoped exclusively to the `rpi5-prod` inventory group and are structurally prevented from being scheduled on the Dev environment (Dell Optiplex 7050).
 
 ---
 
@@ -246,14 +266,14 @@ The cut-over is a single coordinated release. Sub-stages are sequential — each
 | Component | RAM | Notes |
 |-----------|-----|-------|
 | Postgres 16 + pgvector | ~1.0 GB | `shared_buffers=256MB`, `work_mem=16MB` |
-| Ollama (Llama 3.2 3b chat) | ~3.0 GB | Existing |
-| Ollama (`nomic-embed-text`) | ~0.3 GB | Loaded on demand; shared Ollama process |
+| Ollama (Llama 3.2 3b chat) | — | **Removed from this budget** — CPU-Ollama path abandoned (Section 2); chat inference now runs on Hailo-10H NPU, outside host RAM |
+| Ollama (`nomic-embed-text`) | TBD | Host undecided pending Section 8.7 — figure depends on whether this ends up on Hailo-10H or elsewhere |
 | n8n | ~0.5 GB | Existing |
 | Pi-hole + Unbound + passive DNS | ~0.4 GB | Existing |
 | Grafana + Prometheus + node_exporter | ~0.6 GB | Existing |
 | Vault | ~0.2 GB | Existing |
 | Other (nginx, portainer, firefox) | ~0.4 GB | Existing |
-| **Total** | **~6.4 GB** | Within budget; MySQL + MongoDB removal frees ~1.0 GB |
+| **Total** | **TBD** | Recalculate once the embedding host (Section 8.7) is decided — removing the CPU-Ollama chat model from this budget frees ~3.0 GB versus the original estimate, but the actual total now depends on where `nomic-embed-text` ends up running |
 
 ### 8.6 Risks & mitigations
 
@@ -268,6 +288,7 @@ The cut-over is a single coordinated release. Sub-stages are sequential — each
 
 ### 8.7 Open questions
 
+* **Embedding host: Hailo-10H only, availability unconfirmed** — the RAG design in 8.3 assumes `nomic-embed-text` runs via an "Ollama `/api/embeddings`" endpoint, written before Hailo-10H's native `hailo-ollama` existed and before the CPU-Ollama path (Section 2) was abandoned. With CPU Ollama no longer an option, Hailo-10H is now the only remaining candidate host for this model — but it's unconfirmed whether `nomic-embed-text` is even in Hailo's model catalog, or whether embedding workloads suit the NPU's access pattern as well as chat inference does (Section 2b's evaluation only covered chat/instruct models). Needs a decision, and a suitability check, before Stage 4 (RAG tables & indexer) is implemented — if `nomic-embed-text` isn't available on Hailo-10H, an alternative embedding model or host needs to be found.
 * **`pg_cron` vs `pgAgent` vs external `cron`** for partition rotation. `pg_cron` is the simplest single-container option but requires extension installation; needs confirmation that the `pgvector/pgvector:pg16` image bundles it (it does not by default — fallback is the `postgres:16-bookworm` base with both extensions installed via a custom Dockerfile).
 * **Embedding model lock-in** — `nomic-embed-text` is 768-dim. Switching models means re-embedding the entire corpus. Acceptable for v1.1.0 but should be documented as a known constraint.
 * **Knowledge-base curation** — MITRE ATT&CK has a published JSON feed (STIX 2.1), MalwareBazaar has a CSV daily dump. In-house runbooks are not yet written. Knowledge-base RAG (RAG-B) ships only when a minimum corpus exists.
