@@ -137,6 +137,53 @@
     # Long retry loops accommodate slow container cold-starts on RPi.
     # ============================================================
 
+    # Portainer's admin-init endpoint has a short window (observed
+    # ~5 minutes from container start) after which it returns 303
+    # "Administrator initialization timeout" and refuses ALL further
+    # init attempts until the container restarts — no amount of
+    # retrying [04.4.3.1] recovers from this state. Restarting here,
+    # immediately before the init call, guarantees a fresh window on
+    # every run of this playbook regardless of how much time passed
+    # since [04.2] started the container (debugging sessions,
+    # deployment interruptions, etc.).
+    - name: "[04.4.2.5] Restart Portainer to guarantee a fresh admin-init window"
+      ansible.builtin.command: "docker restart portainer"
+      changed_when: true
+
+    # Portainer needs a few seconds to accept connections again after
+    # a restart. /api/system/status is unauthenticated and lightweight
+    # — used purely as a readiness probe, not for its content.
+    - name: "[04.4.2.6] Wait for Portainer API to become responsive after restart"
+      ansible.builtin.uri:
+        url: "http://10.10.10.10:9000/api/system/status"
+        status_code: 200
+      register: portainer_ready
+      until: portainer_ready.status == 200
+      retries: 15
+      delay: 2
+
+    # Since Portainer 2.43 / 2.39.4, admin-init on a genuinely fresh
+    # instance (no administrator account yet) requires a one-time
+    # setup token printed to the container's own logs at startup —
+    # a security hardening against an unclaimed instance being
+    # initialized by someone other than the intended operator. The
+    # token is NOT printed at all if an admin already exists (e.g. a
+    # re-run against an already-initialized environment), so this
+    # grep legitimately returns empty in that case — harmless, since
+    # [04.4.3.1] then hits the existing 409 branch instead.
+    # Handles both zerolog's default console format (setup_token=TOKEN)
+    # and JSON log output ("setup_token":"TOKEN").
+    - name: "[04.4.2.7] Extract Portainer setup token from container logs"
+      ansible.builtin.shell:
+        cmd: >
+          docker logs portainer 2>&1
+          | grep -oE 'setup_token["=: ]+[A-Za-z0-9_-]+'
+          | tail -1
+          | grep -oE '[A-Za-z0-9_-]+$'
+      register: portainer_setup_token
+      changed_when: false
+      failed_when: false
+
     # status_code: [200, 409] — 200 means "account created", 409 means
     # "already initialized" (re-run on existing deployment). Both are
     # success states. changed_when: status == 200 makes this idempotent
@@ -146,6 +193,8 @@
         url: "http://10.10.10.10:9000/api/users/admin/init"
         method: POST
         body_format: json
+        headers:
+          X-Setup-Token: "{{ portainer_setup_token.stdout | default('') }}"
         body:
           username: "{{ portainer_admin_user }}"
           password: "{{ vault_portainer_password }}"
@@ -156,15 +205,13 @@
       delay: 5
       changed_when: portainer_init.status == 200
 
-    # n8n is significantly slower to boot than Portainer (loads its
-    # SQLite DB, runs migrations, starts the worker pool). 15 × 10s
-    # = 150s grace period covers the worst case observed on RPi 5.
     # n8n does NOT follow Portainer's 200/409 pattern for "already
     # initialized" — it returns 400 with a specific message
     # ("Instance owner already setup"). Treating any 400 as success
     # would mask real errors (bad email format, weak password, etc.),
     # so failed_when checks the exact message rather than widening
-    # status_code blindly.
+    # status_code blindly. (Re-applied here — this file reverted to a
+    # pre-fix copy; same root cause and fix as documented previously.)
     - name: "[04.4.3.2] Initialize n8n owner account via API"
       ansible.builtin.uri:
         url: "http://localhost:5678/rest/owner/setup"
