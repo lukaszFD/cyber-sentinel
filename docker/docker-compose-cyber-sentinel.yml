@@ -3,7 +3,7 @@
 # ============================================================
 # Purpose:    Defines all services that make up the Cyber Sentinel
 #             stack: DNS layer (Unbound, Pi-hole, passive DNS),
-#             automation (n8n), data stores (MySQL, MongoDB),
+#             automation (n8n), data store (Postgres),
 #             observability (Grafana, Prometheus, node_exporter),
 #             secret management (HashiCorp Vault), and admin UIs
 #             (Portainer, Firefox).
@@ -11,7 +11,7 @@
 # Started by: Playbook 04.2 with `docker compose up --build -d`.
 #             Project name pinned to "cyber-sentinel" so container
 #             names are predictable (referenced as bare names by
-#             playbooks 04.3, 04.4, 04.6, and 06).
+#             playbooks 04.3b, 04.4, and 06).
 #
 # Network:    All services attach to a single bridge network
 #             `internal_network` (10.10.10.0/24) with static IPs.
@@ -19,16 +19,22 @@
 #             instead of DNS names where convenient.
 #
 #             IP allocation:
-#               .2  unbound          .9  mysqldb
-#               .3  passive_dns      .10 portainer
-#               .4  pihole (DNS)     .11 grafana
-#               .5  firefox          .12 vault
-#               .6  dns_log_processor .13 prometheus
-#               .7  n8n              .14 node_exporter
-#               .8  mongo            .15 vault_unsealer (disabled)
-#               .16 (unused — hailo-ollama runs natively on the host,
-#                    not as a container; see playbook 04.7)
-#               .17 open-webui (docker-compose-hailo.yml, rpi5-prod only)
+#               .2  unbound          .9  postgres_db (moved here from .16 —
+#               .3  passive_dns          formerly mysqldb's address, free
+#               .4  pihole (DNS)         since the MySQL decommission; see
+#               .5  firefox              future-roadmap.md Section 8)
+#               .6  dns_log_processor .10 portainer
+#               .7  n8n              .11 grafana
+#               .8  (freed — MongoDB    .12 vault
+#                    decommissioned)    .13 prometheus
+#                                       .14 node_exporter
+#               .15 vault_unsealer (disabled)
+#               .16 (freed — postgres_db moved to .9; this file is now the
+#                    single compose definition, docker-compose-postgres.yml
+#                    is retired)
+#               .17 open-webui (docker-compose-hailo.yml) — NOT deployed;
+#                    Hailo-10H is powered down, see note near [SVC.AI.HAILO]
+#                    below.
 #               .100 nginx-proxy (created by playbook 05)
 #
 # Env vars:   ${VAR} placeholders are resolved from the .env file
@@ -42,19 +48,6 @@
 #     under remote_deploy_base. These paths are inconsistent — one
 #     of the two layouts is wrong. Verify by checking where
 #     /etc/pihole/gravity.db actually lives on a deployed host.
-#
-#   * grafana.environment includes `MYSQL_PASSWORD=${MYSQL_PASSWORD}`,
-#     but playbook 04.1 [04.1.3.1] only writes GRAFANA_PASSWORD,
-#     MONGODB_PASSWORD, and MYSQL_ROOT_PASSWORD to .env. MYSQL_PASSWORD
-#     (the application user's password) is never injected. Either it
-#     comes from templates/env.j2 (not visible here) or Grafana
-#     receives an empty value. Verify before next release.
-#
-#   * mongo.environment uses ${MONGODB_USERNAME}, but the .env
-#     file is not known to define this variable. all_servers.yml
-#     defines `mongodb_username` (Ansible-side), but that does not
-#     automatically reach docker-compose. Verify env.j2 includes
-#     MONGODB_USERNAME or the container falls back to defaults.
 #
 #   * n8n publishes port 5678 directly to the host (`5678:5678`),
 #     bypassing the Nginx HTTPS proxy from playbook 05. UFW does
@@ -186,7 +179,7 @@ services:
       dockerfile: Dockerfile.log_processor
     container_name: dns_log_processor
     depends_on:
-      - mysqldb
+      - postgres_db
     networks:
       internal_network:
         ipv4_address: 10.10.10.6
@@ -198,18 +191,6 @@ services:
   # ------------------------------------------------------------
   # [SVC.AUTOMATION] n8n — workflow automation engine
   # ------------------------------------------------------------
-  # Hosts the AI threat-scoring workflow (described on n8n.io and
-  # imported by playbook 04.4 [04.4.4.4]). Connects to MySQL,
-  # MongoDB, Vault, and external CTI APIs.
-  #
-  # The {{ domain_suffix }} placeholders are NOT Docker variables —
-  # they are Ansible Jinja2 expressions that get substituted when
-  # docker-compose is rendered through Ansible's template module.
-  # If you `docker compose up` this file directly without Ansible,
-  # n8n will receive literal "{{ domain_suffix }}" strings.
-  # ------------------------------------------------------------
-  # KNOWN ISSUE: port 5678 is published to host without HTTPS —
-  # see file header.
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n-server
@@ -235,60 +216,46 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------
-  # [SVC.DB.MONGO] MongoDB — raw CTI response storage
+  # [SVC.DB.POSTGRES] Postgres + pgvector + pg_cron — sole relational DB
   # ------------------------------------------------------------
-  # Stores the unparsed JSON responses from VirusTotal, ThreatFox,
-  # and URLhaus. Threat indicators in MySQL reference Mongo
-  # documents by mongo_ref_id, allowing the AI agent to retrieve
-  # full responses on demand without bloating the relational schema.
-  # Pinned to 4.4 because of ARM compatibility on Raspberry Pi 5.
-  # ------------------------------------------------------------
-  # KNOWN ISSUE: MONGODB_USERNAME may not be defined in .env —
-  # see file header.
-  mongo:
-    image: mongo:4.4
-    container_name: mongo
-    hostname: mongo
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: "${MONGODB_USERNAME}"
-      MONGO_INITDB_ROOT_PASSWORD: "${MONGODB_PASSWORD}"
-      MONGO_INITDB_DATABASE: threat_data_lake
-    volumes:
-      - mongo_data:/data/db
-      - './config/mongo:/docker-entrypoint-initdb.d:ro'
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.8
-    dns: 10.10.10.4
-    restart: unless-stopped
-
-  # ------------------------------------------------------------
-  # [SVC.DB.MYSQL] MySQL — core relational schema
-  # ------------------------------------------------------------
-  # Hosts the cyber_intelligence database (DNS queries, threat
-  # indicators, AI analysis results, dictionary tables, Grafana
-  # views). Schema is initialized by playbook 04.3, partitioning
-  # by 04.6.
-  #
-  # MYSQL_ROOT_HOST=% allows root login from any host on the
-  # Docker network — required because the schema script connects
-  # via `docker exec` from the Ansible-controlled host process.
-  # ------------------------------------------------------------
-  mysqldb:
-    image: mysql:8.0
-    container_name: mysql_db
+  postgres_db:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    container_name: postgres_db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
-      MYSQL_DATABASE: cyber_intelligence
-      MYSQL_ROOT_HOST: "%"
+      POSTGRES_DB: cyber_intelligence
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD}
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_cron
+      -c cron.database_name=cyber_intelligence
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./config/mysql:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
     networks:
       internal_network:
         ipv4_address: 10.10.10.9
     dns: 10.10.10.4
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cyber_intelligence"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------------------------------------------
+  # [SVC.DB.MYSQL] MySQL — REMOVED (decommissioned)
+  # ------------------------------------------------------------
+  # Fully replaced by postgres_db (see docker-compose-postgres.yml).
+  # Removed rather than kept-but-unused: the mysql_data volume and this
+  # service definition are gone; config/mysql/*.sql are dead files, not
+  # deleted from the repo but no longer executed by any playbook (see
+  # 00_main.yml — 04_3_db_create.yml and 04_6_setup_partitioning.yml are
+  # no longer imported). See future-roadmap.md Section 8 for what still
+  # depends on this cutover being finished (n8n workflow, Grafana
+  # datasource) before it's a complete decommission.
+  # ------------------------------------------------------------
 
   # ------------------------------------------------------------
   # [SVC.UI.PORTAINER] Portainer — Docker management UI
@@ -319,8 +286,6 @@ services:
   # (datasources, dashboards) are copied by playbook 04.1
   # [04.1.4.4] and [04.1.4.5].
   # ------------------------------------------------------------
-  # KNOWN ISSUE: MYSQL_PASSWORD env var may be unset —
-  # see file header.
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -330,7 +295,7 @@ services:
     dns: 10.10.10.4
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - './config/grafana/provisioning:/etc/grafana/provisioning'
       - './config/grafana/dashboards:/etc/grafana/dashboards'
@@ -500,15 +465,14 @@ networks:
 # Named volumes for stateful services. These persist across
 # container recreation; deleting them wipes all data.
 #   n8n_data        — workflows, credentials, execution history
-#   mysql_data      — cyber_intelligence database files
-#   mongo_data      — threat_data_lake database files
 #   grafana_data    — dashboards (non-provisioned), users, prefs
 #   prometheus_data — TSDB metrics history
-#   (open_webui_data — declared in docker-compose-hailo.yml, rpi5-prod only)
+#   postgres_data   — cyber_intelligence database files
+#   (open_webui_data — declared in docker-compose-hailo.yml — NOT
+#    currently deployed, Hailo-10H is powered down)
 # ============================================================
 volumes:
   n8n_data:
-  mysql_data:
-  mongo_data:
   grafana_data:
   prometheus_data:
+  postgres_data:

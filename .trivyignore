@@ -1,0 +1,22 @@
+# Trivy ignore file — every entry here needs a reason, not just an ID.
+#
+# DS-0002 — "Image user should not be 'root'" — config/postgres/Dockerfile.postgres
+#
+# False positive for this specific Dockerfile. It's FROM pgvector/pgvector:pg16,
+# which inherits the official postgres image's docker-entrypoint.sh pattern:
+# the container starts as root DELIBERATELY so the entrypoint script can fix
+# ownership/permissions on the (often-empty, freshly-mounted) postgres_data
+# volume on first run, then the entrypoint itself drops privileges via `gosu`
+# to the "postgres" user before actually starting the postgres process.
+#
+# Adding `USER postgres` in this Dockerfile would run BEFORE that entrypoint
+# logic executes, breaking `initdb` on a fresh volume with a permissions
+# error — the container would never start. Trivy's check is static (looks
+# for a USER directive in the Dockerfile) and has no visibility into what
+# docker-entrypoint.sh does at runtime, so it can't see that the daemon
+# itself already ends up running as a non-root "postgres" user regardless.
+#
+# Re-evaluate this ignore only if the base image's entrypoint behavior
+# changes (i.e. if a future pgvector/pgvector:pg16 release stops needing
+# root at container start).
+DS-0002

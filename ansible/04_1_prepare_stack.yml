@@ -16,7 +16,7 @@
 # Outputs:    Fully populated {{ remote_deploy_base }} tree containing:
 #               - docker-compose YAML
 #               - Dockerfiles for custom images (pdns, log_processor, vault unsealer)
-#               - Service configs (unbound, mongo init, prometheus, grafana)
+#               - Service configs (unbound, prometheus, grafana)
 #               - Pre-created log file with permissive ownership for DNS container
 #               - Vault data directory with correct UID:GID
 #
@@ -70,8 +70,8 @@
         - "config/nginx/conf.d"                        # Nginx server blocks (populated in 05)
         - "config/nginx/certs"                         # TLS certs (populated in 05)
         - "config/nginx/html"                          # Static error pages
-        - "config/mongo"                               # MongoDB init script
-        - "config/mysql"                               # MySQL init scripts (populated in 04.3)
+        - "config/mysql"                               # MySQL init scripts (dead — MySQL decommissioned, kept for reference only)
+        - "config/postgres"                            # Postgres init scripts (populated in 04.3b)
         - "config/unbound"                             # Recursive DNS resolver config
         - "config/dns/dnsmasq.d"                       # Pi-hole local DNS overrides
         - "config/dns/var-log"                         # Passive DNS log volume
@@ -106,18 +106,28 @@
         mode: '0644'
 
     # Plain copy, not template — docker-compose-hailo.yml has no
-    # Jinja2 in it. Only staged on rpi5-prod: open-webui is
-    # meaningless anywhere else (see file header). 04.2 only adds
-    # the matching `-f docker-compose-hailo.yml` flag on this same
-    # group, so the two stay in lockstep.
-    - name: "[04.1.2.1b] Copy Hailo/open-webui compose addon (rpi5-prod only)"
+    # Jinja2 in it.
+    #
+    # DISABLED: Hailo-10H is powered down to avoid drawing power while
+    # unused. `when: false` here is the staging-side twin of
+    # hailo_compose_flag being hardcoded to "" in 04_2_deploy_containers.yml
+    # — kept in sync deliberately so there's no dangling half-enabled
+    # state. Revert both together to re-enable.
+    - name: "[04.1.2.1b] Copy Hailo/open-webui compose addon (DISABLED — Hailo-10H powered down)"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/docker/docker-compose-hailo.yml"
         dest: "{{ remote_deploy_base }}/docker-compose-hailo.yml"
         owner: "{{ deployment_user }}"
         group: "{{ deployment_user }}"
         mode: '0644'
-      when: inventory_hostname in groups['rpi5-prod']
+      when: false
+
+    - name: "[04.1.2.1d] Copy Dockerfile for Postgres + pgvector + pg_cron"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/postgres/Dockerfile.postgres"
+        dest: "{{ remote_deploy_base }}/Dockerfile.postgres"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
 
     - name: "[04.1.2.2] Copy Dockerfile for Passive DNS sniffer"
       ansible.builtin.copy:
@@ -189,12 +199,10 @@
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.4.2] Copy MongoDB initialization script"
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/mongo/init_mongo.js"
-        dest: "{{ remote_deploy_base }}/config/mongo/db_init.js"
-        owner: "{{ deployment_user }}"
-        mode: '0644'
+    # [04.1.4.2] Copy MongoDB initialization script — REMOVED. MongoDB is
+    # decommissioned (future-roadmap.md Section 8); init_mongo.js stays in
+    # the repo under config/mongo/ for reference but nothing stages or
+    # executes it anymore.
 
     - name: "[04.1.4.3] Copy Prometheus scrape configuration"
       ansible.builtin.copy:

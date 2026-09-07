@@ -51,13 +51,14 @@
 # ------------------------------------------------------------
 # [00.2] Stage 2 — Core stack deployment
 # ------------------------------------------------------------
-# Builds and starts all Docker containers (Pi-hole, n8n, MySQL,
+# Builds and starts all Docker containers (Pi-hole, n8n, Postgres,
 # MongoDB, Vault, Grafana, Prometheus, Portainer). Initializes the
-# MySQL schema and runs post-deployment configuration.
+# Postgres schema and runs post-deployment configuration. MySQL has
+# been decommissioned — see future-roadmap.md Section 8.
 # ------------------------------------------------------------
 - import_playbook: 04_1_prepare_stack.yml      # [00.2.1] Copy compose files, configs, scripts to remote
 - import_playbook: 04_2_deploy_containers.yml  # [00.2.2] docker compose up --build -d
-- import_playbook: 04_3_db_create.yml          # [00.2.3] Render and execute MySQL init schema
+- import_playbook: 04_3b_db_postgres.yml       # [00.2.3b] Render and execute Postgres schema + partitioning
 - import_playbook: 04_4_post_config.yml        # [00.2.4] Configure Fail2Ban, Pi-hole, init Portainer/n8n
 
 # ------------------------------------------------------------
@@ -69,7 +70,6 @@
 # ------------------------------------------------------------
 #- import_playbook: 04_5_deploy_AI.yml          # [00.3.1] Optional — local Ollama AI models
 
-- import_playbook: 04_6_setup_partitioning.yml  # [00.3.2] MySQL partitioning + retention automation
 - import_playbook: 04_7_deploy_hailo.yml
 
 # ------------------------------------------------------------

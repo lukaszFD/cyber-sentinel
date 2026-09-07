@@ -1,0 +1,112 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 04.3b — Postgres Schema Initialization
+# ============================================================
+# Purpose:    Renders the Postgres schema + partitioning scripts through
+#             Jinja2 (reusing {{ mysql_user }} / {{ vault_mysql_password }}
+#             so the Postgres app role has an identical username/password
+#             to the MySQL one during the parallel-run period — see
+#             future-roadmap.md Section 8), pushes them into the running
+#             postgres_db container, and executes them IN ORDER: schema
+#             first, then partitioning (the partitioned parent tables
+#             reject every INSERT until at least one partition exists).
+#
+# Runs ALONGSIDE 04_3_db_create.yml (MySQL) — does not replace it yet.
+# Both execute during the parallel-run period (future-roadmap.md Section 8,
+# Stage 0-6). Remove 04_3_db_create.yml from the deployment flow only at
+# Stage 6, once validation passes.
+#
+# Depends on: - Playbook 04.2 (postgres_db container running, built from
+#               Dockerfile.postgres with pg_cron preloaded)
+#             - vault_postgres_root_password defined (group_vars) — used
+#               by docker-compose-postgres.yml's POSTGRES_ROOT_PASSWORD,
+#               not directly by this playbook
+#             - mysql_user / vault_mysql_password available for Jinja2
+#               substitution (reused for the Postgres app role)
+#             - Source SQL at:
+#                 {{ main_repo_source_dir }}/config/postgres/db_deployment.sql
+#                 {{ main_repo_source_dir }}/config/postgres/db_partitioning_retention.sql
+#
+# Outputs:    - cyber_intelligence database fully provisioned on Postgres
+#             - {{ remote_deploy_base }}/postgres_init.log with execution
+#               timestamps and any psql output (success or errors)
+#             - Rendered SQL temp files removed after execution (contain
+#               the app user's password in cleartext)
+#
+# SCHEMA VERSIONING NOTE: Liquibase is NOT used here. That approach has
+# been abandoned entirely (future-roadmap.md Section 1) — it only ever
+# worked against the MySQL schema and was never adapted for Postgres.
+# Versioning continues via plain, numbered SQL files under config/postgres/,
+# deployed idempotently by this playbook — same model as config/mysql/.
+# ============================================================
+
+- name: 04.3b - Postgres DB create
+  hosts: all_servers
+  become: yes
+
+  vars:
+    source_postgres_schema: "{{ main_repo_source_dir }}/config/postgres/db_deployment.sql"
+    source_postgres_partitioning: "{{ main_repo_source_dir }}/config/postgres/db_partitioning_retention.sql"
+    postgres_init_log: "{{ remote_deploy_base }}/postgres_init.log"
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — Render scripts with secrets injected
+    # ============================================================
+
+    - name: "[04.3b.1.1] Render Postgres schema script with actual credentials"
+      ansible.builtin.template:
+        src: "{{ source_postgres_schema }}"
+        dest: "{{ remote_deploy_base }}/init_postgres_schema_rendered.sql"
+        owner: "{{ deployment_user }}"
+        mode: '0600'
+
+    - name: "[04.3b.1.2] Render Postgres partitioning/retention script"
+      ansible.builtin.template:
+        src: "{{ source_postgres_partitioning }}"
+        dest: "{{ remote_deploy_base }}/init_postgres_partitioning_rendered.sql"
+        owner: "{{ deployment_user }}"
+        mode: '0600'
+
+    # ============================================================
+    # SECTION 2 — Execute against Postgres container, in order
+    # ------------------------------------------------------------
+    # -v ON_ERROR_STOP=1 makes psql return non-zero on the first real SQL
+    # error rather than continuing past it silently. Retry loop exists
+    # for the same reason as MySQL's: Postgres/pg_cron can take longer
+    # than the first connection attempt to accept queries on cold start.
+    # A genuine syntax error will also retry uselessly for ~100s before
+    # failing — same tradeoff MySQL's 04_3_db_create.yml already accepts.
+    # ============================================================
+
+    - name: "[04.3b.2.1] Execute schema script against Postgres container"
+      ansible.builtin.shell:
+        cmd: |
+          echo "--- Schema Execution Date: $(date) ---" >> {{ postgres_init_log }}
+          docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_schema_rendered.sql >> {{ postgres_init_log }} 2>&1
+      register: pg_schema_result
+      until: (pg_schema_result.rc | default(-1)) == 0
+      retries: 10
+      delay: 10
+
+    - name: "[04.3b.2.2] Execute partitioning/retention script against Postgres container"
+      ansible.builtin.shell:
+        cmd: |
+          echo "--- Partitioning Execution Date: $(date) ---" >> {{ postgres_init_log }}
+          docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_partitioning_rendered.sql >> {{ postgres_init_log }} 2>&1
+      register: pg_partition_result
+      until: (pg_partition_result.rc | default(-1)) == 0
+      retries: 10
+      delay: 10
+
+    # ============================================================
+    # SECTION 3 — Cleanup
+    # ============================================================
+
+    - name: "[04.3b.3.1] Remove rendered SQL scripts (contain cleartext password)"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ remote_deploy_base }}/init_postgres_schema_rendered.sql"
+        - "{{ remote_deploy_base }}/init_postgres_partitioning_rendered.sql"

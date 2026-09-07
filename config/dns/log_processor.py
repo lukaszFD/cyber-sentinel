@@ -1,5 +1,5 @@
 import os
-import mysql.connector
+import psycopg2
 from dotenv import load_dotenv
 from datetime import datetime
 import re
@@ -9,16 +9,15 @@ load_dotenv()
 
 def connect_to_db():
     try:
-        conn = mysql.connector.connect(
-            host=os.getenv("MYSQL_HOST"),
-            user=os.getenv("MYSQL_USER"),
-            password=os.getenv("MYSQL_PASSWORD"),
-            database=os.getenv("MYSQL_DATABASE"),
-            charset='utf8mb4'
+        conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+            dbname=os.getenv("POSTGRES_DATABASE")
         )
         return conn
     except Exception as e:
-        print(f"Błąd połączenia z bazą: {e}")
+        print(f"Erorr (Postgres): {e}")
         return None
 
 def process_log_line(line):
@@ -54,9 +53,9 @@ def insert_dns_record(conn, record):
     try:
         cursor = conn.cursor()
         sql = """
-        INSERT INTO dns_queries (timestamp, query_type, record_type, domain, source_ip, response_ip)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """
+              INSERT INTO dns_queries (timestamp, query_type, record_type, domain, source_ip, response_ip)
+              VALUES (%s, %s, %s, %s, %s, %s) \
+              """
         cursor.execute(sql, (
             record['timestamp'],
             record['query_type'],

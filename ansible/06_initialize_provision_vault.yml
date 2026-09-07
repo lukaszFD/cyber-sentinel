@@ -26,8 +26,7 @@
 
   vars:
     vault_url: "http://{{ ansible_host }}:8200"
-    mysql_host: "10.10.10.9"
-    mongo_host: "10.10.10.8"
+    postgres_host: "10.10.10.9"
 
     # Vars required for re-runs (initialized Vault). Skipped on first run
     # because the freshly generated creds are used instead.
@@ -47,13 +46,12 @@
       - vault_grafana_password
       - vault_portainer_password
       - vault_n8n_password
-      - vault_mysql_root_password
-      - vault_mysql_password
-      - vault_mongodb_password
+      - vault_postgres_password
+      - vault_postgres_root_password
       - vault_n8n_gmail
       - portainer_admin_user
       - n8n_admin_user
-      - vault_mysql_app_user
+      - postgres_user
       - vault_webui_secret_key
       - webui_admin_email
       - vault_webui_admin_password
@@ -253,9 +251,8 @@
         - { path: "n8n",               value: "{{ vault_n8n_password }}",       user: "{{ n8n_admin_user }}" }
         - { path: "open_webui",        value: "{{ vault_webui_admin_password }}", user: "{{ webui_admin_email }}" }
         # Database roots
-        - { path: "mysql/root",        value: "{{ vault_mysql_root_password }}", user: "root" }
-        - { path: "mysql/app_manager", value: "{{ vault_mysql_password }}",      user: "{{ vault_mysql_app_user }}" }
-        - { path: "mongodb/admin",     value: "{{ vault_mongodb_password }}",    user: "admin" }
+        - { path: "postgres/root",        value: "{{ vault_postgres_root_password }}", user: "postgres" }
+        - { path: "postgres/app_manager", value: "{{ vault_postgres_password }}",       user: "{{ postgres_user }}" }
         # Email
         - { path: "gmail",   value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}" }
 
