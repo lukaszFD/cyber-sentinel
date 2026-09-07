@@ -1,0 +1,20 @@
+# ============================================================
+# Cyber Sentinel — Postgres 16 + pgvector + pg_cron
+# ============================================================
+# pgvector/pgvector:pg16 is built FROM the official postgres:16 image and
+# already carries the PGDG apt repo, but does NOT bundle pg_cron by default
+# (confirmed — see future-roadmap.md Section 8.7, "open questions"). This
+# adds it via the PGDG package, same pattern the project already uses for
+# adding upstream repos (see 03_setup_system.yml's Docker CE repo setup).
+#
+# pg_cron additionally requires shared_preload_libraries='pg_cron' set at
+# postmaster startup — that is done via the `command:` override in
+# docker-compose-postgres.yml, NOT in this Dockerfile, since it's a runtime
+# flag rather than an image-build concern.
+# ============================================================
+
+FROM pgvector/pgvector:pg16
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-16-cron \
+    && rm -rf /var/lib/apt/lists/*

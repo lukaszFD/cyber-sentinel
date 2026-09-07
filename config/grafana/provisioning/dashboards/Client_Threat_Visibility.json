@@ -1,0 +1,153 @@
+{
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n    source_ip,\n    COUNT(*) AS malicious_hits\nFROM cyber_sentinel.v_grafana_threat_alerts\nWHERE $__timeFilter(detection_time)\nGROUP BY source_ip\nORDER BY malicious_hits DESC\nLIMIT 15;",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Local Clients Reaching Malicious Destinations",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n    observable_ip,\n    COUNT(*) AS hits,\n    COUNT(DISTINCT source_ip) AS distinct_clients\nFROM cyber_sentinel.v_grafana_threat_alerts\nWHERE $__timeFilter(detection_time)\nGROUP BY observable_ip\nORDER BY hits DESC\nLIMIT 15;",
+          "refId": "A"
+        }
+      ],
+      "title": "Most-Targeted Malicious IPs",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 9 },
+      "id": 3,
+      "options": {
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [{ "displayName": "detection_time", "desc": true }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n    detection_time,\n    source_ip,\n    fqdn,\n    observable_ip,\n    threat_label,\n    threat_score,\n    action_recommended\nFROM cyber_sentinel.v_grafana_threat_alerts\nWHERE $__timeFilter(detection_time)\nORDER BY detection_time DESC\nLIMIT 200;",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Malicious Contacts — Who Talked to What",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisPlacement": "auto",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "hideZeros": false, "mode": "single", "sort": "none" }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n    date_trunc('hour', timestamp) AS hour,\n    ROUND(100.0 * COUNT(*) FILTER (WHERE record_type = 'N/A') / NULLIF(COUNT(*), 0), 2) AS nxdomain_pct\nFROM cyber_sentinel.dns_queries\nWHERE $__timeFilter(timestamp)\n  AND query_type = 'reply'\nGROUP BY hour\nORDER BY hour ASC;",
+          "refId": "A"
+        }
+      ],
+      "title": "NXDOMAIN Rate — % of lookups that resolved to nothing",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "id": 5,
+      "options": {
+        "footer": { "show": false },
+        "showHeader": true,
+        "sortBy": [{ "displayName": "first_seen", "desc": true }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT domain, first_seen\nFROM (\n    SELECT domain, MIN(timestamp) AS first_seen\n    FROM cyber_sentinel.dns_queries\n    GROUP BY domain\n) fs\nWHERE $__timeFilter(first_seen)\nORDER BY first_seen DESC\nLIMIT 50;",
+          "refId": "A"
+        }
+      ],
+      "title": "Domains Seen For The First Time Ever",
+      "type": "table"
+    }
+  ],
+  "preload": false,
+  "refresh": "1m",
+  "schemaVersion": 42,
+  "tags": ["dns", "security", "threat-intel"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Client & Threat Visibility",
+  "uid": "client-threat-visibility"
+}

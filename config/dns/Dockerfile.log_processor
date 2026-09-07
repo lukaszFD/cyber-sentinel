@@ -8,7 +8,7 @@ RUN mkdir -p /app/logs
 WORKDIR /app
 
 # Install necessary libraries
-RUN pip install --no-cache-dir requests python-dotenv mysql-connector-python tailer Flask
+RUN pip install --no-cache-dir requests python-dotenv psycopg2-binary tailer Flask
 
 # Copy the script
 COPY log_processor.py .

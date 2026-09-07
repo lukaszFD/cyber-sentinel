@@ -40,22 +40,17 @@ remote_deploy_base: "/home/{{ ansible_user }}"
 deployment_user: "{{ ansible_user }}"
 
 # ------------------------------------------------------------
-# [VARS.DATABASES] MongoDB and MySQL connection identity
+# [VARS.DATABASES] Postgres connection identity
 # ------------------------------------------------------------
+postgres_user: "hunter"
 
-# MongoDB application user (consumed by env.j2 → MONGODB_USERNAME).
-mongodb_username: "hunter"
+# Postgres database name.
+postgres_database: "cyber_intelligence"
 
-# MySQL hostname as resolved inside the internal_network. Matches
-# the container_name of the MySQL service in docker-compose.
-mysql_host: "mysqldb"
-
-# MySQL application user. Created by db_deployment.sql with limited
-# privileges (SELECT/INSERT/UPDATE/DELETE) on cyber_intelligence.
-mysql_user: "hunter"
-
-# Default database name created by the schema script.
-mysql_database: "cyber_intelligence"
+# Postgres hostname as resolved inside the internal_network. Matches
+# the service name in docker-compose-cyber-sentinel.yml (container_name
+# is also "postgres_db", so either resolves the same way).
+postgres_host: "postgres_db"
 
 # ------------------------------------------------------------
 # [VARS.ADMIN_ACCOUNTS] Admin usernames for stack services
@@ -68,19 +63,8 @@ n8n_admin_user: "n8n_manager"
 n8n_admin_email: "hunter@cyber-sentinel.local"
 
 # ------------------------------------------------------------
-# [VARS.VAULT_REFS] Aliases consumed by Vault provisioning
+# [VARS.VAULT_REFS]
 # ------------------------------------------------------------
-# The Vault provisioning playbook (06) writes secrets under paths
-# that include the application user name. These aliases let it
-# reference values that originate elsewhere in this file.
-
-# Database name shipped to Vault under credentials/mysql metadata.
-vault_mysql_database: "{{ mysql_database }}"
-
-# MySQL app user name shipped to Vault. KNOWN ISSUE — duplicate
-# of `mysql_user` above; consider consolidating.
-vault_mysql_app_user: "{{ mysql_user }}"
-
 # Vault server's IP on the Docker internal_network. Used by any
 # component that talks to Vault from inside the container network.
 # KNOWN ISSUE — playbook 06 uses {{ ansible_host }}:8200 instead;

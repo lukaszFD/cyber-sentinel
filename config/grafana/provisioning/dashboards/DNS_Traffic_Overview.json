@@ -1,0 +1,208 @@
+{
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS pending_domains FROM cyber_sentinel.v_pending_analysis;",
+          "refId": "A"
+        }
+      ],
+      "title": "Domains Awaiting AI Analysis",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        }
+      },
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "pieType": "donut",
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT query_type, COUNT(*) AS count\nFROM cyber_sentinel.dns_queries\nWHERE $__timeFilter(timestamp)\nGROUP BY query_type\nORDER BY count DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Query vs Reply Split",
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        }
+      },
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 0 },
+      "id": 3,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "pieType": "donut",
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT record_type, COUNT(*) AS count\nFROM cyber_sentinel.dns_queries\nWHERE $__timeFilter(timestamp)\nGROUP BY record_type\nORDER BY count DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Record Type Breakdown (A / AAAA / NXDOMAIN / other)",
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "none" }
+      },
+      "pluginVersion": "12.3.1",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n    hour_group,\n    total_queries,\n    unique_domains,\n    unique_sources\nFROM cyber_sentinel.v_grafana_dns_hourly_traffic\nWHERE $__timeFilter(hour_group)\nORDER BY hour_group ASC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Traffic Trend — Queries vs Unique Domains vs Unique Sources",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 15 },
+      "id": 5,
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT domain, COUNT(*) AS lookups\nFROM cyber_sentinel.dns_queries\nWHERE $__timeFilter(timestamp)\nGROUP BY domain\nORDER BY lookups DESC\nLIMIT 15;",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 15 Most-Queried Domains",
+      "type": "barchart"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 15 },
+      "options": {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none"
+      },
+      "id": 6,
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "PCF4C4661FE7E0A44" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT source_ip, COUNT(*) AS lookups\nFROM cyber_sentinel.dns_queries\nWHERE $__timeFilter(timestamp)\n  AND query_type = 'query'\nGROUP BY source_ip\nORDER BY lookups DESC\nLIMIT 15;",
+          "refId": "A"
+        }
+      ],
+      "title": "Top 15 Chattiest Source IPs",
+      "type": "barchart"
+    }
+  ],
+  "preload": false,
+  "refresh": "1m",
+  "schemaVersion": 42,
+  "tags": ["dns", "traffic"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "DNS Traffic Overview",
+  "uid": "dns-traffic-overview"
+}
