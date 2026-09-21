@@ -94,16 +94,37 @@
     # ============================================================
 
     - name: "[04.4.2.1] Set Pi-hole admin password from Vault"
-      ansible.builtin.shell:
-        cmd: "docker exec pihole pihole setpassword '{{ vault_pihole_admin_password }}'"
+      community.docker.docker_container_exec:
+        container: pihole
+        argv:
+          - pihole
+          - setpassword
+          - "{{ vault_pihole_admin_password }}"
       register: pihole_pass_result
       no_log: true
-      changed_when: "'New password set' in pihole_pass_result.stdout"
+      changed_when: "'New password set' in (pihole_pass_result.stdout | default(''))"
 
     - name: "[04.4.2.2] Confirm Pi-hole password update (debug)"
       ansible.builtin.debug:
         msg: "Pi-hole web interface password has been updated successfully."
       when: pihole_pass_result.changed
+
+    # Pi-hole's default upstream (unbound, 10.10.10.2) bypasses passive_dns
+    # entirely — no query/response ever reaches the file dns_log_processor
+    # tails, so dns_queries stays empty regardless of how correct the DB
+    # layer is. Correct chain: pihole -> passive_dns (10.10.10.3) -> unbound
+    # (10.10.10.2). Must run after [04.4.2.1] (pihole container confirmed
+    # reachable) and before [04.4.2.4]'s gravity rebuild.
+    - name: "[04.4.2.8] Set Pi-hole upstream DNS to passive_dns (10.10.10.3)"
+      community.docker.docker_container_exec:
+        container: pihole
+        argv:
+          - pihole-FTL
+          - --config
+          - dns.upstreams
+          - '["10.10.10.3#53"]'
+      register: pihole_upstream_result
+      changed_when: "'10.10.10.3' in (pihole_upstream_result.stdout | default(''))"
 
     # KNOWN ISSUE: path may need "config/" prefix to match 04.1 layout.
     # Reads adlists.txt from the repo, one URL per line. Empty lines

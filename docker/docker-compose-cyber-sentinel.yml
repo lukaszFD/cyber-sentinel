@@ -49,10 +49,11 @@
 #     of the two layouts is wrong. Verify by checking where
 #     /etc/pihole/gravity.db actually lives on a deployed host.
 #
-#   * n8n publishes port 5678 directly to the host (`5678:5678`),
-#     bypassing the Nginx HTTPS proxy from playbook 05. UFW does
-#     NOT block this port. If this is intentional (debug access),
-#     leave it; otherwise n8n is reachable over plain HTTP from LAN.
+#   * (RESOLVED) n8n and Vault previously published their ports as
+#     5678:5678 / 8200:8200 (0.0.0.0), bypassing the Nginx HTTPS
+#     proxy from playbook 05 — Docker's published-port DNAT bypasses
+#     UFW's INPUT rules regardless of allow_ports. Both now bind
+#     127.0.0.1 only; see the port mapping comments on each service.
 # ============================================================
 
 services:
@@ -184,6 +185,8 @@ services:
       internal_network:
         ipv4_address: 10.10.10.6
     dns: 10.10.10.4
+    env_file:
+      - .env
     volumes:
       - './config/dns/var-log:/var/log/dns:ro'
     restart: unless-stopped
@@ -199,7 +202,16 @@ services:
         ipv4_address: 10.10.10.7
     dns: 10.10.10.4
     ports:
-      - "5678:5678"
+      # Loopback-only: Nginx (playbook 05) reverse-proxies n8n externally
+      # via 443. Docker's published-port DNAT bypasses UFW's INPUT rules
+      # regardless of allow_ports (well-known Docker+UFW interaction), so
+      # a 0.0.0.0 bind here was reachable from the LAN despite UFW —
+      # binding to 127.0.0.1 removes the external listener entirely
+      # rather than relying on a firewall rule that doesn't actually
+      # apply to Docker-published ports. Also closes the window where
+      # n8n's /rest/owner/setup (unauthenticated on a fresh instance)
+      # was reachable from the network before playbook 04.4 claims it.
+      - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     user: "1000:1000"
@@ -319,7 +331,14 @@ services:
     image: hashicorp/vault:1.21.3
     container_name: hashicorp_vault
     ports:
-      - "8200:8200"
+      # Loopback-only — same rationale as n8n above. Vault is also
+      # reverse-proxied externally via Nginx (playbook 05,
+      # hashicorp_vault service entry). Playbook 06 calls this port
+      # directly over HTTP as http://127.0.0.1:8200 from tasks that
+      # run ON this host (no delegate_to), so loopback-only doesn't
+      # break provisioning — it just stops 8200 from being reachable
+      # off-host outside of Nginx's TLS-terminated proxy.
+      - "127.0.0.1:8200:8200"
     environment:
       VAULT_LOCAL_CONFIG: '{"storage": {"file": {"path": "/vault/file"}}, "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": 1}}}'
       VAULT_ADDR: "http://0.0.0.0:8200"

@@ -9,13 +9,18 @@
 #       * Initializes Vault, captures root_token + unseal_keys
 #       * Auto-unseals using freshly generated keys
 #       * Provisions all secrets, certs, credentials
-#       * Displays root_token + unseal_keys ONCE at the end
-#         (operator must save them manually — never written anywhere)
+#       * Mints a scoped, read-only Vault token for n8n (Stage 7)
+#       * Displays root_token + unseal_keys, and the n8n token,
+#         ONCE at the end (operator must save them manually —
+#         never written anywhere)
 #
 #   - Re-run (initialized Vault):
 #       * Skips init
 #       * Auto-unseals from group_vars (vault_unseal_keys) if sealed
 #       * Provisions / updates secrets using vault_root_token from group_vars
+#       * Renews the existing n8n token (via its accessor) instead of
+#         minting a new one, if vault_n8n_token_accessor is set —
+#         see Stage 7 header for why this matters
 #       * Final message confirms success without exposing keys
 #
 # ============================================================
@@ -25,7 +30,7 @@
   gather_facts: false
 
   vars:
-    vault_url: "http://{{ ansible_host }}:8200"
+    vault_url: "http://127.0.0.1:8200"
     postgres_host: "10.10.10.9"
 
     # Vars required for re-runs (initialized Vault). Skipped on first run
@@ -83,7 +88,7 @@
         that:
           - vars[item] is defined
           - vars[item] | string | length > 0
-        fail_msg: "Required variable '{{ item }}' is missing or empty. Define it in group_vars."
+        fail_msg: "Required variable '{{ item }}' (referenced by templates/env.j2) is missing or empty."
         quiet: true
       loop: "{{ required_vars_always }}"
 
@@ -257,7 +262,196 @@
         - { path: "gmail",   value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}" }
 
     # ============================================================
-    # STAGE 7 — FINAL MESSAGE
+    # STAGE 7 — N8N READ-ONLY TOKEN (LEAST PRIVILEGE)
+    # ------------------------------------------------------------
+    # n8n previously authenticated to Vault using vault_root_token —
+    # full admin access to every secret, cert, and Vault's own
+    # storage backend, from inside a workflow engine that executes
+    # AI-agent-driven, internet-facing HTTP requests. This stage
+    # replaces that with a dedicated Vault ACL policy + token,
+    # scoped to READ-ONLY on exactly the paths the n8n workflow
+    # actually consumes (see the HashiCorp Vault node secretPath
+    # values in config/n8n/workflows/*.json — keep this policy in
+    # sync if those change).
+    #
+    # Deliberately NOT included (n8n never reads these at runtime):
+    #   - certs/*                      (Nginx-only, staged by playbook 05)
+    #   - credentials/postgres/root    (Ansible-only, playbook 04.3b)
+    #   - credentials/pihole|grafana|portainer|n8n
+    #     (admin UI passwords, consumed by Ansible in 04.4, not n8n)
+    #   - api-keys/grafana/*, api-keys/open-webui/*
+    #     (consumed by Ansible/Grafana provisioning, not n8n)
+    #
+    # api-keys/* is granted as a whole subtree rather than one leaf
+    # path per provider — CTI API keys are exactly the class of
+    # secret this workflow exists to consume, and a new provider
+    # (e.g. urlscan.io, already in dic_source_providers but not yet
+    # wired into the workflow) shouldn't require a policy change to
+    # start using. Narrow this to exact leaf paths if you want it
+    # tighter than that.
+    #
+    # TOKEN LIFECYCLE:
+    #   - Period is 1 year (8760h) by default — chosen so this needs
+    #       manual attention once a year, not once a month. There is
+    #       still no automatic renewal mechanism (no cron, no n8n
+    #       self-renew workflow): "renewal" means someone re-running
+    #       this playbook before the period elapses. Track that date
+    #       somewhere outside Vault.
+    #   - Vault's token auth backend defaults to a 768h (32 day) max
+    #       lease TTL, which would silently cap the requested period
+    #       regardless of what's asked for — the tune task right
+    #       below raises that ceiling first, scoped to the token auth
+    #       mount only.
+    #   - First run (no vault_n8n_token_accessor in group_vars):
+    #       mints a new orphan, periodic token and displays it ONCE
+    #       — same "shown once" convention as root_token/unseal_keys
+    #       above. Paste it into n8n's "HashiCorp Vault account"
+    #       credential (Token auth), then save the printed accessor
+    #       as vault_n8n_token_accessor in group_vars (ansible-vault
+    #       encrypted) so future runs renew instead of recreating.
+    #   - Re-run (accessor present): RENEWS the existing token via
+    #       its accessor instead of minting a new one. Vault only
+    #       ever reveals a token's raw value at creation time, so
+    #       nothing new is printed on renewal — the token already
+    #       configured in n8n keeps working, its period just resets.
+    #       This matters: minting a fresh token on every re-run
+    #       without revoking the old one would leave old, still-valid
+    #       tokens orphaned in Vault indefinitely — the exact class
+    #       of problem this stage exists to get away from.
+    #   - If renewal fails (accessor stale/revoked, or Vault was
+    #       reset), falls back to minting a fresh orphan token and
+    #       displays it again — update n8n and group_vars once more.
+    #
+    # NOT AUTOMATED HERE: swapping n8n's own "HashiCorp Vault
+    # account" credential to the new token. n8n's credential values
+    # live inside n8n_data (its internal DB), not in this repo, and
+    # there is no reliable non-interactive n8n CLI path to set a
+    # single credential's value (unlike workflow import in 04.4,
+    # which the CLI does support). Pasting the printed token into
+    # n8n's UI remains a manual step after this playbook completes.
+    # ============================================================
+
+    - name: "[N8N-TOKEN] Set effective renewal period"
+      ansible.builtin.set_fact:
+        n8n_token_period: "{{ vault_n8n_token_period | default('8760h') }}"
+
+    # Vault's token auth backend caps every token's period/TTL at its own
+    # max_lease_ttl, which defaults to 768h (32 days) — independent of
+    # whatever `period` a create-orphan call requests. Without raising
+    # this first, a requested 8760h period would be silently truncated
+    # to 768h by Vault itself (create-orphan does not error on this —
+    # it just grants the capped value), and the "renews once a year"
+    # plan below would quietly turn into "renews once a month" again.
+    # Scoped to the token auth mount only (auth/token/tune), not the
+    # server-wide default_lease_ttl/max_lease_ttl — leaves lease
+    # durations for KV secrets and everything else untouched.
+    - name: "[N8N-TOKEN] Raise token auth backend's max lease TTL to allow the configured period"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/auth/token/tune"
+        method: POST
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body_format: json
+        body:
+          max_lease_ttl: "{{ n8n_token_period }}"
+        status_code: [200, 204]
+
+    - name: "[N8N-TOKEN] Create/update the n8n read-only ACL policy"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/sys/policies/acl/n8n-readonly"
+        method: PUT
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body_format: json
+        body:
+          policy: |
+            path "secret/data/cyber-sentinel/api-keys/*" {
+              capabilities = ["read"]
+            }
+
+            path "secret/data/cyber-sentinel/credentials/postgres/app_manager" {
+              capabilities = ["read"]
+            }
+
+            path "secret/data/cyber-sentinel/credentials/gmail/*" {
+              capabilities = ["read"]
+            }
+        status_code: [200, 204]
+
+    - name: "[N8N-TOKEN] Attempt to renew existing n8n token (re-run path)"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/auth/token/renew-accessor"
+        method: POST
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body_format: json
+        body:
+          accessor: "{{ vault_n8n_token_accessor }}"
+        status_code: [200, 400, 403]
+      register: n8n_token_renew
+      when: vault_n8n_token_accessor is defined and vault_n8n_token_accessor | length > 0
+      no_log: true
+
+    - name: "[N8N-TOKEN] Determine whether a new token must be minted"
+      ansible.builtin.set_fact:
+        n8n_token_needs_creation: >-
+          {{ (vault_n8n_token_accessor is not defined) or
+             (vault_n8n_token_accessor | length == 0) or
+             (n8n_token_renew is defined and n8n_token_renew.status != 200) }}
+
+    - name: "[N8N-TOKEN] Mint a new orphan, periodic, read-only token for n8n"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/auth/token/create-orphan"
+        method: POST
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body_format: json
+        body:
+          policies: ["n8n-readonly"]
+          period: "{{ n8n_token_period }}"
+          renewable: true
+          no_default_policy: true
+          display_name: "n8n-readonly"
+        status_code: [200]
+      register: n8n_token_create
+      when: n8n_token_needs_creation
+      no_log: true
+
+    - name: "[N8N-TOKEN] Display newly minted token (SAVE THIS NOW — shown only once)"
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "  N8N READ-ONLY VAULT TOKEN — SAVE THE FOLLOWING NOW"
+          - "============================================================"
+          - ""
+          - "  Token:    {{ n8n_token_create.json.auth.client_token }}"
+          - "  Accessor: {{ n8n_token_create.json.auth.accessor }}"
+          - "  Policy:   n8n-readonly (read-only — api-keys/*, "
+          - "            credentials/postgres/app_manager, "
+          - "            credentials/gmail/* — see this playbook's"
+          - "            Stage 7 header for the full rationale)"
+          - "  Period:   {{ n8n_token_period }} (~1 year). Renewal is NOT"
+          - "            automatic — nothing in this stack runs on a"
+          - "            schedule. This token expires unless someone"
+          - "            re-runs this playbook (Stage 7 renews it via"
+          - "            the accessor below) before the period elapses."
+          - "            Put a reminder outside Vault for that date —"
+          - "            Vault will not warn you before it expires."
+          - ""
+          - "  ACTION REQUIRED:"
+          - "    1. In n8n: Credentials -> 'HashiCorp Vault account' ->"
+          - "       replace its token with the value above."
+          - "    2. Add to group_vars (ansible-vault encrypted):"
+          - "         vault_n8n_token_accessor: \"{{ n8n_token_create.json.auth.accessor }}\""
+          - "       Without this, every future run mints ANOTHER token"
+          - "       and this one is left valid but orphaned in Vault."
+          - "  This token value will NEVER be displayed again."
+          - "============================================================"
+      when: n8n_token_needs_creation
+
+    - name: "[N8N-TOKEN] Confirm renewal (re-run path, nothing new to display)"
+      ansible.builtin.debug:
+        msg: "n8n Vault token renewed via accessor {{ vault_n8n_token_accessor }} — still valid, no changes needed in n8n."
+      when: not n8n_token_needs_creation
+
+    # ============================================================
+    # STAGE 8 — FINAL MESSAGE
     # ============================================================
     # On first init: display creds ONCE so operator can save them manually.
     # On re-run: just confirm success, never re-display anything sensitive.

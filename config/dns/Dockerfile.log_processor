@@ -12,7 +12,6 @@ RUN pip install --no-cache-dir requests python-dotenv psycopg2-binary tailer Fla
 
 # Copy the script
 COPY log_processor.py .
-COPY .env .
 
 # Define the default command to run
 CMD ["python", "log_processor.py"]
