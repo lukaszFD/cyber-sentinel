@@ -94,16 +94,37 @@
     # ============================================================
 
     - name: "[04.4.2.1] Set Pi-hole admin password from Vault"
-      ansible.builtin.shell:
-        cmd: "docker exec pihole pihole setpassword '{{ vault_pihole_admin_password }}'"
+      community.docker.docker_container_exec:
+        container: pihole
+        argv:
+          - pihole
+          - setpassword
+          - "{{ vault_pihole_admin_password }}"
       register: pihole_pass_result
       no_log: true
-      changed_when: "'New password set' in pihole_pass_result.stdout"
+      changed_when: "'New password set' in (pihole_pass_result.stdout | default(''))"
 
     - name: "[04.4.2.2] Confirm Pi-hole password update (debug)"
       ansible.builtin.debug:
         msg: "Pi-hole web interface password has been updated successfully."
       when: pihole_pass_result.changed
+
+    # Pi-hole's default upstream (unbound, 10.10.10.2) bypasses passive_dns
+    # entirely — no query/response ever reaches the file dns_log_processor
+    # tails, so dns_queries stays empty regardless of how correct the DB
+    # layer is. Correct chain: pihole -> passive_dns (10.10.10.3) -> unbound
+    # (10.10.10.2). Must run after [04.4.2.1] (pihole container confirmed
+    # reachable) and before [04.4.2.4]'s gravity rebuild.
+    - name: "[04.4.2.8] Set Pi-hole upstream DNS to passive_dns (10.10.10.3)"
+      community.docker.docker_container_exec:
+        container: pihole
+        argv:
+          - pihole-FTL
+          - --config
+          - dns.upstreams
+          - '["10.10.10.3#53"]'
+      register: pihole_upstream_result
+      changed_when: "'10.10.10.3' in (pihole_upstream_result.stdout | default(''))"
 
     # KNOWN ISSUE: path may need "config/" prefix to match 04.1 layout.
     # Reads adlists.txt from the repo, one URL per line. Empty lines
@@ -246,13 +267,44 @@
     # with admin privileges by default.
     # ============================================================
 
-    # KNOWN ISSUE: filename has spaces; relative path "../config/..."
-    # is computed relative to this playbook file. Verify the path
-    # resolves correctly. Likely needs to change for the v1.0.2-rc1
-    # workflow (different filename, dynamic 1-5 scale).
+    # KNOWN ISSUE: filename has spaces; browser downloads also drop "&"
+    # from it, so the default name below has no "&". Override with
+    # n8n_workflow_file_name (group_vars) if your copy is named differently.
+    #
+    # The JSON keeps the id of the original workflow (ILhKRbyvF5NaIRYL), so
+    # a re-import updates it in place instead of adding a second copy.
+    # The CLI import leaves it INACTIVE — publish it in the n8n UI.
+    # Requires config/postgres/db_ai_pipeline.sql (playbook 04.3b [04.3b.2.3]).
+    #
+    # Pre-check on the control host: fails with the list of files that DO
+    # exist, instead of the lookup plugin's bare "File not found". Path is
+    # built from main_repo_source_dir (same base 04.1 / 04.3b use) rather
+    # than "../config", so it does not depend on the working directory.
+    - name: "[04.4.4.0] Verify workflow JSON exists on control host"
+      ansible.builtin.find:
+        paths: "{{ main_repo_source_dir }}/config/n8n/workflows"
+        patterns: "*.json"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: n8n_workflow_files
+
+    - name: "[04.4.4.0b] Fail with the list of available workflow files if the expected one is missing"
+      ansible.builtin.assert:
+        that:
+          - n8n_workflow_file in (n8n_workflow_files.files | map(attribute='path') | map('basename') | list)
+        fail_msg: >-
+          '{{ n8n_workflow_file }}' not found in {{ main_repo_source_dir }}/config/n8n/workflows.
+          Files present: {{ n8n_workflow_files.files | map(attribute='path') | map('basename') | list }}.
+          Copy the workflow JSON there under exactly this name, or set n8n_workflow_file_name.
+        quiet: true
+      run_once: true
+      vars:
+        n8n_workflow_file: "{{ n8n_workflow_file_name | default('Automated AI Domain & IP Reputation Guard.json') }}"
+
     - name: "[04.4.4.1] Read workflow JSON from repo into memory"
       set_fact:
-        workflow_content: "{{ lookup('file', '../config/n8n/workflows/Automated Domain & IP Reputation Guard with HashiCorp Vault.json') | from_json }}"
+        workflow_content: "{{ lookup('file', main_repo_source_dir ~ '/config/n8n/workflows/' ~ (n8n_workflow_file_name | default('Automated AI Domain & IP Reputation Guard.json'))) | from_json }}"
 
     # Re-serializes the parsed JSON. This normalizes formatting and
     # validates that the source file is parseable JSON before we

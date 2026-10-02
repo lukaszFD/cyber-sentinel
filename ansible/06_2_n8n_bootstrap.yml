@@ -1,0 +1,224 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 06.2 — n8n Bootstrap
+# ============================================================
+# Purpose:    Makes n8n fully usable without any manual UI step:
+#               1. installs required community node packages
+#               2. imports all credentials referenced by the workflow,
+#                  with the SAME IDs the workflow JSON expects
+#
+# Depends on: - 04.2 (n8n-server running)
+#             - 04.4 (owner account exists, workflow imported)
+#             - 06.1 (Vault provisioned; n8n read-only token either
+#                     minted in THIS run or saved in ansible-vault)
+#
+# Vault token for n8n — resolution order:
+#   1. Token minted by 06.1 Stage 7 earlier in the SAME run
+#      (registered var n8n_token_create survives across plays).
+#      Takes priority because it is guaranteed to be valid for the
+#      Vault instance that is running right now — a fresh dev deploy
+#      re-initializes Vault, which invalidates any stored token.
+#   2. vault_n8n_vault_token from ansible-vault — used when 06.1 only
+#      RENEWED the existing token (renewal never returns its value).
+#   Keep the stored token per host (host_vars/<host>/vault.yml):
+#   dev and prod run separate Vault instances with separate tokens.
+#
+# Idempotent: packages are installed only when missing; credential
+#             import is an upsert by id, so re-runs refresh secrets
+#             in place instead of creating duplicates.
+# ============================================================
+
+- name: 06.2 - n8n bootstrap (community nodes + credentials)
+  hosts: all_servers
+  become: yes
+
+  vars:
+    n8n_container: "n8n-server"
+    n8n_url: "http://localhost:5678"
+
+    # Pin versions — "latest" makes deployments non-reproducible.
+    n8n_community_packages:
+      - { name: "n8n-nodes-hashi-vault", version: "latest" }
+
+    # Empty when 06.1 did not mint a token in this run (renewal path,
+    # or this playbook executed standalone).
+    n8n_vault_token_from_deploy: "{{ n8n_token_create.json.auth.client_token | default('') }}"
+    n8n_vault_token_effective: "{{ n8n_vault_token_from_deploy | default(vault_n8n_vault_token | default(''), true) }}"
+
+    # IDs MUST match the "credentials" blocks in the workflow JSON.
+    # Field names inside `data` must match the credential type's
+    # schema — verify once with `n8n export:credentials --decrypted`
+    # (hashiCorpVaultApi field names are not confirmed yet).
+    n8n_credentials:
+      - id: "1QU8HZJWvrIPg75B"
+        name: "HashiCorp Vault account"
+        type: "hashiCorpVaultApi"
+        data:
+          url: "http://{{ vault_address }}:8200"
+          authMethod: "token"
+          token: "{{ n8n_vault_token_effective }}"
+      - id: "kin1B7xj2oBNB0Mj"
+        name: "Postgres account"
+        type: "postgres"
+        data:
+          host: "{{ postgres_host }}"
+          port: 5432
+          database: "{{ postgres_database }}"
+          user: "{{ postgres_user }}"
+          password: "{{ vault_postgres_password }}"
+          ssl: "disable"
+      - id: "JJXaAGWm6Kg1DmUJ"
+        name: "Google Gemini(PaLM) Api account"
+        type: "googlePalmApi"
+        data:
+          host: "https://generativelanguage.googleapis.com"
+          apiKey: "{{ vault_gemini_api_key }}"
+      - id: "adTLsyZpBC1gVJK2"
+        name: "SMTP account"
+        type: "smtp"
+        data:
+          user: "{{ vault_n8n_user }}"
+          password: "{{ vault_n8n_gmail }}"
+          host: "smtp.gmail.com"
+          port: 465
+          secure: true
+
+  tasks:
+    # ============================================================
+    # SECTION 0 — Pre-flight
+    # ============================================================
+
+    - name: "[06.2.0.1] Assert secrets required by n8n credentials are defined"
+      ansible.builtin.assert:
+        that:
+          - lookup('vars', item, default='') | string | length > 0
+        fail_msg: >-
+          '{{ item }}' is empty. For the Vault token: either run this playbook
+          in the same 00_main.yml run as 06.1 on a fresh Vault (Stage 7 mints
+          a new token), or set vault_n8n_vault_token in ansible-vault.
+          A renewal in 06.1 does not return the token value.
+        quiet: true
+      loop:
+        - n8n_vault_token_effective
+        - vault_address
+        - vault_postgres_password
+        - vault_gemini_api_key
+        - vault_n8n_user
+        - vault_n8n_gmail
+        - postgres_host
+        - postgres_database
+        - postgres_user
+
+    # Shows only the SOURCE of the token, never its value.
+    - name: "[06.2.0.2] Report where the n8n Vault token came from"
+      ansible.builtin.debug:
+        msg: >-
+          n8n Vault token source:
+          {{ 'minted by 06.1 in this run - save it to ansible-vault (host_vars) for future renew-only runs'
+             if (n8n_vault_token_from_deploy | length > 0)
+             else 'ansible-vault (vault_n8n_vault_token)' }}
+
+    - name: "[06.2.0.3] Wait for n8n to become healthy"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/healthz"
+        status_code: 200
+      register: n8n_health
+      until: n8n_health.status == 200
+      retries: 20
+      delay: 5
+
+    # ============================================================
+    # SECTION 1 — Community node packages
+    # ------------------------------------------------------------
+    # n8n loads every package found in ~/.n8n/nodes/node_modules at
+    # startup. There is no CLI for community packages (only the
+    # session-authenticated REST API), so npm is invoked directly
+    # inside the container as the `node` user.
+    # ============================================================
+
+    - name: "[06.2.1.1] Check which community packages are already installed"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec -u node {{ n8n_container }}
+          test -d /home/node/.n8n/nodes/node_modules/{{ item.name }}
+      loop: "{{ n8n_community_packages }}"
+      register: n8n_pkg_check
+      changed_when: false
+      failed_when: false
+
+    # --omit=peer / --ignore-scripts: without them npm also pulls
+    # n8n-workflow (a peer dependency of every community node) and its
+    # native module isolated-vm, whose node-gyp build needs Python, which
+    # the n8n image does not ship. The community node itself is plain JS,
+    # and n8n provides n8n-workflow at runtime. Same flags as n8n's own
+    # built-in community package installer.
+    - name: "[06.2.1.2] Install missing community packages"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec -u node {{ n8n_container }} sh -c
+          "mkdir -p /home/node/.n8n/nodes && cd /home/node/.n8n/nodes
+          && npm install --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund
+          {{ item.item.name }}@{{ item.item.version }}"
+      loop: "{{ n8n_pkg_check.results }}"
+      when: item.rc != 0
+      register: n8n_pkg_install
+
+    # New node types are only registered at startup.
+    - name: "[06.2.1.3] Restart n8n to load newly installed packages"
+      ansible.builtin.command: "docker restart {{ n8n_container }}"
+      when: n8n_pkg_install.changed
+
+    - name: "[06.2.1.4] Wait for n8n after restart"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/healthz"
+        status_code: 200
+      register: n8n_health_restart
+      until: n8n_health_restart.status == 200
+      retries: 20
+      delay: 5
+      when: n8n_pkg_install.changed
+
+    # ============================================================
+    # SECTION 2 — Credentials with fixed IDs
+    # ------------------------------------------------------------
+    # import:credentials encrypts plain `data` objects with the
+    # instance's N8N_ENCRYPTION_KEY and upserts by id. The file is
+    # built with to_json (not a hand-written template), so quotes or
+    # backslashes in passwords cannot break the JSON.
+    # The plaintext file is piped via stdin (never lands in a bind
+    # mount) and removed in `always`, even if the import fails.
+    # ============================================================
+
+    - name: "[06.2.2.X] Import n8n credentials"
+      block:
+        - name: "[06.2.2.1] Stage credentials file on host (plaintext secrets)"
+          ansible.builtin.copy:
+            content: "{{ n8n_credentials | to_json }}"
+            dest: "/tmp/n8n_credentials.json"
+            mode: '0600'
+          no_log: true
+
+        - name: "[06.2.2.2] Copy credentials file into n8n container"
+          ansible.builtin.shell:
+            cmd: >-
+              docker exec -i -u node {{ n8n_container }}
+              sh -c 'umask 077 && cat > /tmp/n8n_credentials.json'
+              < /tmp/n8n_credentials.json
+          no_log: true
+
+        - name: "[06.2.2.3] Import credentials via n8n CLI"
+          ansible.builtin.command:
+            cmd: >-
+              docker exec -u node {{ n8n_container }}
+              n8n import:credentials --input=/tmp/n8n_credentials.json
+          register: n8n_cred_import
+          changed_when: "'Successfully imported' in n8n_cred_import.stdout"
+          no_log: true
+
+      always:
+        - name: "[06.2.2.4] Remove plaintext credentials file (host + container)"
+          ansible.builtin.shell:
+            cmd: >-
+              rm -f /tmp/n8n_credentials.json;
+              docker exec -u root {{ n8n_container }} rm -f /tmp/n8n_credentials.json
+          changed_when: false

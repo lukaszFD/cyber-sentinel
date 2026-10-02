@@ -96,25 +96,25 @@ ORDER BY tc.table_name;
 -- 9. Quick peek at data in every core table (uncomment what you need —
 --    left commented since most are empty right after deployment)
 -- ------------------------------------------------------------
--- SELECT * FROM cyber_sentinel.dic_indicator_types;
--- SELECT * FROM cyber_sentinel.dic_source_providers;
--- SELECT * FROM cyber_sentinel.dic_threat_levels;
--- SELECT * FROM cyber_sentinel.dns_queries LIMIT 100;
--- SELECT * FROM cyber_sentinel.network_events LIMIT 100;
--- SELECT * FROM cyber_sentinel.threat_indicators LIMIT 100;
--- SELECT * FROM cyber_sentinel.threat_indicator_details LIMIT 100;
--- SELECT * FROM cyber_sentinel.ai_analysis_results LIMIT 100;
--- SELECT * FROM cyber_sentinel.threat_data_raw LIMIT 100;
--- SELECT * FROM cyber_sentinel.partition_maintenance_log ORDER BY executed_at DESC LIMIT 50;
+SELECT * FROM cyber_sentinel.dic_indicator_types;
+SELECT * FROM cyber_sentinel.dic_source_providers;
+SELECT * FROM cyber_sentinel.dic_threat_levels;
+SELECT * FROM cyber_sentinel.dns_queries LIMIT 100;
+SELECT * FROM cyber_sentinel.network_events LIMIT 100;
+SELECT * FROM cyber_sentinel.threat_indicators LIMIT 100;
+SELECT * FROM cyber_sentinel.threat_indicator_details LIMIT 100;
+SELECT * FROM cyber_sentinel.ai_analysis_results LIMIT 100;
+SELECT * FROM cyber_sentinel.threat_data_raw LIMIT 100;
+SELECT * FROM cyber_sentinel.partition_maintenance_log ORDER BY executed_at DESC LIMIT 50;
 
 -- ------------------------------------------------------------
 -- 10. Grafana views — confirm they return data once dns_queries has rows
 -- ------------------------------------------------------------
--- SELECT * FROM cyber_sentinel.v_pending_analysis LIMIT 50;
--- SELECT * FROM cyber_sentinel.v_latest_threat_reports LIMIT 50;
--- SELECT * FROM cyber_sentinel.v_grafana_malicious_stats;
--- SELECT * FROM cyber_sentinel.v_grafana_daily_trends LIMIT 50;
--- SELECT * FROM cyber_sentinel.v_grafana_dns_hourly_traffic LIMIT 50;
--- SELECT * FROM cyber_sentinel.v_grafana_threat_explorer LIMIT 50;
--- SELECT * FROM cyber_sentinel.v_grafana_threat_alerts LIMIT 50;
--- SELECT * FROM cyber_sentinel.v_threat_scale_for_agent;
+SELECT * FROM cyber_sentinel.v_pending_analysis LIMIT 50;
+SELECT * FROM cyber_sentinel.v_latest_threat_reports LIMIT 50;
+SELECT * FROM cyber_sentinel.v_grafana_malicious_stats;
+SELECT * FROM cyber_sentinel.v_grafana_daily_trends LIMIT 50;
+SELECT * FROM cyber_sentinel.v_grafana_dns_hourly_traffic LIMIT 50;
+SELECT * FROM cyber_sentinel.v_grafana_threat_explorer LIMIT 50;
+SELECT * FROM cyber_sentinel.v_grafana_threat_alerts LIMIT 50;
+SELECT * FROM cyber_sentinel.v_threat_scale_for_agent;
