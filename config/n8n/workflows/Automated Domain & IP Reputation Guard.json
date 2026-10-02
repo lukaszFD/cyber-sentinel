@@ -1,0 +1,1312 @@
+{
+  "name": "Automated Domain & IP Reputation Guard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -576,
+        112
+      ],
+      "id": "409f0724-4b79-50cf-8655-247f7dcae085",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/postgres/app_manager",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        112
+      ],
+      "id": "0d09130a-913f-5ad0-b679-0383ae3a29a8",
+      "name": "Postgres Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Settings, threat scale and the active AI Agent prompt, read once per run.\nSELECT\n    (SELECT jsonb_object_agg(key, value) FROM cyber_sentinel_ai.ai_settings) AS settings,\n    (SELECT string_agg(formatted_line, E'\\n' ORDER BY score)\n       FROM cyber_sentinel.v_threat_scale_for_agent)                         AS threat_scale,\n    (SELECT jsonb_object_agg(score, jsonb_build_object(\n                'description', description,\n                'action', action_recommended,\n                'is_malicious', is_malicious_flag))\n       FROM cyber_sentinel.dic_threat_levels)                                AS threat_levels,\n    p.version                                                                AS prompt_version,\n    p.system_prompt\nFROM (SELECT 1) AS one\nLEFT JOIN cyber_sentinel_ai.prompt_templates p ON p.is_active;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -576,
+        336
+      ],
+      "id": "878783b7-fd36-57c2-97d4-cc575011c7c4",
+      "name": "Load AI configuration",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One observable per run (VirusTotal free tier: 4 requests/min, 500/day).\nSELECT * FROM cyber_sentinel_ai.v_pending_observables LIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -400,
+        336
+      ],
+      "id": "3048802b-0bce-5dad-b067-c36795968720",
+      "name": "Select pending observable",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/virustotal",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        336
+      ],
+      "id": "bf20210b-fe8b-5d4c-9fef-5fa9f784e65a",
+      "name": "Virus total API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/ip_addresses/{{ $('Select pending observable').item.json.observable_ip }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-apikey",
+              "value": "={{ $json.data.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16,
+        336
+      ],
+      "id": "85825cda-21ec-5245-af30-6ea083524278",
+      "name": "VirusTotal IP Scan",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Data reduction - VirusTotal (PRIMARY source)\n// Turns the raw VirusTotal v3 IP report into a compact evidence object and\n// starts the `record` that every following node reads and extends.\n// Mode: Run Once for Each Item.\n\nconst observable = $('Select pending observable').item.json;\nconst res = $json; // full HTTP response: { statusCode, body }\n\nlet status;\nif (res.statusCode === 200) {\n  status = 'ok';\n} else if (res.statusCode === 404) {\n  status = 'no_data'; // VirusTotal has never seen this IP\n} else {\n  // Quota (429), auth (401/403) and server errors must never be stored as a\n  // clean verdict. Failing here leaves the observable in the queue, so the\n  // next scheduled run retries it.\n  const msg = res.body?.error?.message || res.statusMessage || 'unknown error';\n  throw new Error(`VirusTotal HTTP ${res.statusCode} for ${observable.observable_ip}: ${msg}`);\n}\n\nconst body = res.body && typeof res.body === 'object' ? res.body : {};\nconst attr = body.data?.attributes || {};\nconst stats = attr.last_analysis_stats || {};\nconst num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);\n\n// Engines that flagged the IP; malicious first, then suspicious.\nconst flaggedBy = Object.entries(attr.last_analysis_results || {})\n  .filter(([, r]) => r && (r.category === 'malicious' || r.category === 'suspicious'))\n  .map(([engine, r]) => ({ engine, category: r.category, result: r.result || null }))\n  .sort((a, b) => (a.category === b.category ? a.engine.localeCompare(b.engine) : a.category === 'malicious' ? -1 : 1));\n\nconst vt = {\n  status,\n  malicious: num(stats.malicious),\n  suspicious: num(stats.suspicious),\n  harmless: num(stats.harmless),\n  undetected: num(stats.undetected),\n  engines_total: Object.values(stats).reduce((sum, v) => sum + num(v), 0),\n  flagged_by: flaggedBy.slice(0, 25), // bounded for the prompt\n  as_owner: attr.as_owner || null,\n  asn: attr.asn || null,\n  country: attr.country || null,\n  network: attr.network || null,\n  reputation: attr.reputation ?? null,\n  tags: Array.isArray(attr.tags) ? attr.tags : [],\n  last_analysis_date: attr.last_analysis_date ? new Date(attr.last_analysis_date * 1000).toISOString() : null,\n};\n\nconst gateMin = Number($('Load AI configuration').first().json.settings.vt_gate_min_malicious);\n\nreturn {\n  json: {\n    record: {\n      observable: {\n        dns_query_id: Number(observable.dns_query_id),\n        fqdn: observable.fqdn,\n        observable_ip: observable.observable_ip,\n        source_ips: observable.source_ips,\n        query_count: Number(observable.query_count), // BIGINT arrives as a string\n        first_seen: observable.first_seen,\n        last_seen: observable.last_seen,\n      },\n      vt,\n      gate: { min_malicious: gateMin, passed: status === 'ok' && vt.malicious >= gateMin },\n      // Raw payloads are written to cyber_sentinel.threat_data_raw by \"Insert raw payloads\".\n      raw: status === 'ok'\n        ? [{ source: 'VirusTotal', resource: observable.observable_ip, payload: body }]\n        : [],\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        336
+      ],
+      "id": "0ebc1555-41fd-5f0b-a8c1-bca98acd676e",
+      "name": "Data reduction - VirusTotal"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4199a388-514e-53a3-bd07-438c138c8a60",
+              "leftValue": "={{ $json.record.vt.malicious }}",
+              "rightValue": "={{ $('Load AI configuration').first().json.settings.vt_gate_min_malicious }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        352,
+        336
+      ],
+      "id": "0d0a154b-3439-588e-ab53-6d431fb9904b",
+      "name": "VirusTotal detections ≥ threshold?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/abuse/api-key",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        544,
+        176
+      ],
+      "id": "7372b70a-91a8-5c22-9011-0631d1885155",
+      "name": "Abuse API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://threatfox-api.abuse.ch/api/v1/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Auth-Key",
+              "value": "={{ $json.data.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: 'search_ioc', search_term: $('Data reduction - VirusTotal').item.json.record.observable.observable_ip }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        176
+      ],
+      "id": "e4a6e6e8-31dc-5bb7-ad6c-9909c5fefaf0",
+      "name": "Abuse.CH_ThreatFox request",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://urlhaus-api.abuse.ch/v1/host/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Auth-Key",
+              "value": "={{ $('Abuse API TOKEN').item.json.data.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "host",
+              "value": "={{ $('Data reduction - VirusTotal').item.json.record.observable.fqdn }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        176
+      ],
+      "id": "c3884334-cf4a-512e-ab41-56cd8891b93a",
+      "name": "Abuse.CH_URLHaus request",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Data reduction - abuse.ch (SUPPORTING sources: ThreatFox + URLhaus)\n// Adds compact ThreatFox and URLhaus evidence to the record and builds the\n// `features` object consumed by cyber_sentinel_ai.compute_threat_score().\n// A failed lookup never stops the pipeline: it is recorded as status \"error\"\n// and the scoring trace shows it.\n// Mode: Run Once for Each Item.\n\nconst record = $('Data reduction - VirusTotal').item.json.record;\nconst settings = $('Load AI configuration').first().json.settings;\nconst tfRes = $('Abuse.CH_ThreatFox request').item.json;\nconst uhRes = $json; // Abuse.CH_URLHaus request\nconst obs = record.observable;\n\n// Normalises an HTTP node result (full response, or the error output).\nfunction httpOutcome(res) {\n  if (!res || res.error) return { ok: false, error: String(res?.error?.message || res?.error || 'request failed') };\n  if (res.statusCode !== 200) return { ok: false, error: `HTTP ${res.statusCode}` };\n  let body = res.body;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch (e) { return { ok: false, error: 'non-JSON response' }; }\n  }\n  return body && typeof body === 'object' ? { ok: true, body } : { ok: false, error: 'empty response' };\n}\n\n// Host part of any ThreatFox IOC type: \"ip:port\", domain or URL.\nfunction iocHost(ioc) {\n  try {\n    return new URL(String(ioc).includes('://') ? ioc : `http://${ioc}`).hostname.toLowerCase();\n  } catch (e) {\n    return null;\n  }\n}\n\n// abuse.ch timestamps look like \"2026-09-01 10:11:12 UTC\".\nfunction parseAbuseDate(value) {\n  if (typeof value !== 'string' || !value) return null;\n  const d = new Date(value.replace(' UTC', 'Z').replace(' ', 'T'));\n  return Number.isNaN(d.getTime()) ? null : d;\n}\n\n// URLs are untrusted data: defang them for the prompt and the e-mail.\nconst defang = (url) => String(url).replace(/^http/i, 'hxxp').replace(/\\./g, '[.]');\n\nfunction countTop(values, limit) {\n  const counts = {};\n  for (const v of values) {\n    const key = String(v || '').trim().toLowerCase();\n    if (key) counts[key] = (counts[key] || 0) + 1;\n  }\n  return Object.entries(counts)\n    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))\n    .slice(0, limit)\n    .map(([value, count]) => ({ value, count }));\n}\n\n// ---------- ThreatFox (searched by IP) ----------\nconst tfHttp = httpOutcome(tfRes);\nlet threatfox;\nif (!tfHttp.ok) {\n  threatfox = { status: 'error', error: tfHttp.error };\n} else if (tfHttp.body.query_status === 'no_result') {\n  threatfox = { status: 'no_data' };\n} else if (tfHttp.body.query_status !== 'ok') {\n  threatfox = { status: 'error', error: `query_status=${tfHttp.body.query_status}` };\n} else {\n  // The search matches substrings (1.2.3.4 also finds 1.2.3.45:80), and an exact\n  // search would miss \"ip:port\" C2 entries - so keep IOCs whose host is the IP.\n  const iocs = (Array.isArray(tfHttp.body.data) ? tfHttp.body.data : [])\n    .filter((d) => iocHost(d.ioc) === String(obs.observable_ip).toLowerCase());\n  if (iocs.length === 0) {\n    threatfox = { status: 'no_data' };\n  } else {\n    const cutoff = Date.now() - Number(settings.tf_active_days) * 86400000;\n    const seen = iocs.map((d) => parseAbuseDate(d.last_seen) || parseAbuseDate(d.first_seen)).filter(Boolean);\n    threatfox = {\n      status: 'ok',\n      ioc_count: iocs.length,\n      active: seen.some((d) => d.getTime() >= cutoff),\n      // \"Unknown malware\" is a ThreatFox placeholder, not an identified family.\n      malware_families: [...new Set(iocs.map((d) => d.malware_printable).filter((m) => m && !/^unknown/i.test(m)))],\n      threat_types: [...new Set(iocs.map((d) => d.threat_type).filter(Boolean))],\n      max_confidence: Math.max(...iocs.map((d) => Number(d.confidence_level) || 0)),\n      last_seen: seen.length ? new Date(Math.max(...seen)).toISOString() : null,\n      tags: countTop(iocs.flatMap((d) => d.tags || []), 10),\n      iocs: iocs.slice(0, 10).map((d) => ({\n        ioc: defang(d.ioc),\n        threat_type: d.threat_type || null,\n        malware: d.malware_printable || null,\n        confidence: Number(d.confidence_level) || 0,\n        first_seen: d.first_seen || null,\n        last_seen: d.last_seen || null,\n      })),\n    };\n  }\n}\n\n// ---------- URLhaus (searched by domain - URLs are hosted on names) ----------\nconst uhHttp = httpOutcome(uhRes);\nlet urlhaus;\nif (!uhHttp.ok) {\n  urlhaus = { status: 'error', error: uhHttp.error };\n} else if (uhHttp.body.query_status === 'no_results') {\n  urlhaus = { status: 'no_data' };\n} else if (uhHttp.body.query_status !== 'ok') {\n  urlhaus = { status: 'error', error: `query_status=${uhHttp.body.query_status}` };\n} else {\n  const urls = Array.isArray(uhHttp.body.urls) ? uhHttp.body.urls : [];\n  const online = urls.filter((u) => u.url_status === 'online');\n  urlhaus = {\n    status: 'ok',\n    url_count: Number(uhHttp.body.url_count) || urls.length,\n    urls_online: online.length,\n    threats: countTop(urls.map((u) => u.threat), 5),\n    tags: countTop(urls.flatMap((u) => u.tags || []), 10),\n    blacklists: uhHttp.body.blacklists || null,\n    online_samples: online.slice(0, 5).map((u) => ({ url: defang(u.url), threat: u.threat || null })),\n    reference: uhHttp.body.urlhaus_reference || null,\n  };\n}\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      threatfox,\n      urlhaus,\n      features: {\n        fqdn: obs.fqdn,\n        vt_status: record.vt.status,\n        vt_malicious: record.vt.malicious,\n        vt_as_owner: record.vt.as_owner,\n        tf_status: threatfox.status,\n        tf_ioc_count: threatfox.ioc_count || 0,\n        tf_active: threatfox.active === true,\n        tf_malware_families: threatfox.malware_families || [],\n        uh_status: urlhaus.status,\n        uh_urls_online: urlhaus.urls_online || 0,\n      },\n      raw: [\n        ...record.raw,\n        { source: 'Abuse_ThreatFox', resource: obs.observable_ip, payload: tfHttp.ok ? tfHttp.body : null },\n        { source: 'Abuse_URLhaus', resource: obs.fqdn, payload: uhHttp.ok ? uhHttp.body : null },\n      ],\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        176
+      ],
+      "id": "99f74541-5fc9-59dc-9cba-438108dd2219",
+      "name": "Data reduction - abuse.ch"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Supporting sources not checked\n// VirusTotal detections are below the gate, so ThreatFox and URLhaus are not\n// queried. The record gets the same `features` shape as the enriched path,\n// so \"Compute rule-based score\" works identically for both branches.\n// Mode: Run Once for Each Item.\n\nconst record = $json.record;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      threatfox: { status: 'not_checked' },\n      urlhaus: { status: 'not_checked' },\n      features: {\n        fqdn: record.observable.fqdn,\n        vt_status: record.vt.status,\n        vt_malicious: record.vt.malicious,\n        vt_as_owner: record.vt.as_owner,\n        tf_status: 'not_checked',\n        uh_status: 'not_checked',\n      },\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        512
+      ],
+      "id": "39d7d52b-4de8-5342-9e68-be2b2b1b7121",
+      "name": "Supporting sources not checked"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Deterministic scoring rules (steps 1-5); thresholds live in cyber_sentinel_ai.ai_settings.\nSELECT $1::jsonb || jsonb_build_object(\n           'rule', cyber_sentinel_ai.compute_threat_score($1::jsonb -> 'features')\n       ) AS record;",
+        "options": {
+          "queryReplacement": "={{ [ $json.record ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1360,
+        336
+      ],
+      "id": "8cb1cf9b-93a5-58d9-8368-4dd9abac3235",
+      "name": "Compute rule-based score",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4f499a47-57a9-5cc2-8406-a802108ac7fc",
+              "leftValue": "={{ $json.record.gate.passed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1616,
+        336
+      ],
+      "id": "53d12288-49a6-51d4-b030-f5e3632f97ef",
+      "name": "AI analysis required?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/gemini/home-network-guardian",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        176
+      ],
+      "id": "811f9fa4-23b0-5e7e-a8fd-f68a7dc128d5",
+      "name": "Gemini AI Studio",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build AI prompt\n// Prepares both messages for the AI Agent. Everything comes from the database\n// or from this run's evidence - nothing is hard-coded in the workflow:\n//   system message -> active row of cyber_sentinel_ai.prompt_templates\n//   threat scale   -> cyber_sentinel.v_threat_scale_for_agent\n//   rule_engine    -> cyber_sentinel_ai.compute_threat_score()\n//   evidence       -> VirusTotal / ThreatFox / URLhaus (raw payloads excluded)\n// Mode: Run Once for Each Item.\n\nconst config = $('Load AI configuration').first().json;\nconst record = $('Compute rule-based score').item.json.record;\n\nif (!config.system_prompt) {\n  throw new Error('No active prompt: set is_active = true on one row of cyber_sentinel_ai.prompt_templates');\n}\n\nconst systemMessage = config.system_prompt\n  .replaceAll('[[THREAT_SCALE]]', config.threat_scale)\n  .replaceAll('[[MAX_DEVIATION]]', String(config.settings.ai_max_deviation));\n\n// Refuse to send a prompt with an unresolved placeholder.\nconst leftover = systemMessage.match(/\\[\\[[A-Z_]+\\]\\]/);\nif (leftover) {\n  throw new Error(`Unresolved placeholder ${leftover[0]} in prompt version ${config.prompt_version}`);\n}\n\nconst userMessage = {\n  observable: {\n    domain: record.observable.fqdn,\n    ip: record.observable.observable_ip,\n    dns_query_count: record.observable.query_count,\n    first_seen: record.observable.first_seen,\n    last_seen: record.observable.last_seen,\n  },\n  evidence: {\n    virustotal: record.vt,\n    threatfox: record.threatfox,\n    urlhaus: record.urlhaus,\n  },\n  rule_engine: record.rule,\n};\n\nreturn {\n  json: {\n    system_message: systemMessage,\n    user_message: JSON.stringify(userMessage, null, 2),\n    record,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        176
+      ],
+      "id": "5105373f-2574-58d6-a429-547bbd9e802d",
+      "name": "Build AI prompt"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_message }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.system_message }}",
+          "maxIterations": 5
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2240,
+        176
+      ],
+      "id": "ae780cfb-46df-588c-846d-552399ada6b4",
+      "name": "AI Agent",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "maxOutputTokens": 2048,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2112,
+        352
+      ],
+      "id": "16166117-61fd-5838-8064-3f2f275178a5",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JJXaAGWm6Kg1DmUJ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "historical_verdicts",
+        "toolDescription": "Search earlier Cyber Sentinel verdicts that are similar to the current evidence. Input: a short English description of the evidence (malware family, threat type, hosting owner, engine verdicts). Returns verdict text with analysis_result_id, domain, IP, score and label in metadata.",
+        "tableName": "cyber_sentinel_ai.verdict_vectors",
+        "topK": 5,
+        "options": {
+          "distanceStrategy": "cosine"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.2,
+      "position": [
+        2224,
+        416
+      ],
+      "id": "21a328a8-5e53-5c1e-b294-d4719fe21eee",
+      "name": "Postgres PGVector Store",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        544
+      ],
+      "id": "f446d55c-a260-5c6c-b5b9-bf42b28eb590",
+      "name": "Embeddings Google Gemini",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JJXaAGWm6Kg1DmUJ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"verdict_label\": {\n      \"type\": \"string\",\n      \"description\": \"2-5 word English label\"\n    },\n    \"summary_en\": {\n      \"type\": \"string\",\n      \"description\": \"One or two English sentences\"\n    },\n    \"primary_evidence\": {\n      \"type\": \"string\",\n      \"description\": \"VirusTotal (and ThreatFox) facts with numbers\"\n    },\n    \"supporting_context\": {\n      \"type\": \"string\",\n      \"description\": \"What URLhaus and historical verdicts added, or 'none'\"\n    },\n    \"analysis_pl\": {\n      \"type\": \"string\",\n      \"description\": \"2-4 sentences in Polish for the analyst\"\n    },\n    \"proposed_score\": {\n      \"type\": \"integer\",\n      \"minimum\": 1,\n      \"maximum\": 5\n    },\n    \"deviation_reason\": {\n      \"type\": \"string\",\n      \"description\": \"Empty when proposed_score equals rule_score\"\n    },\n    \"historical_match_ids\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"integer\"\n      }\n    }\n  },\n  \"required\": [\n    \"verdict_label\",\n    \"summary_en\",\n    \"primary_evidence\",\n    \"supporting_context\",\n    \"analysis_pl\",\n    \"proposed_score\",\n    \"deviation_reason\",\n    \"historical_match_ids\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2512,
+        368
+      ],
+      "id": "4f283f27-39d3-5b12-a3a4-09ae818f1a9d",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse AI Agent output\n// Validates the structured answer of the AI Agent and turns it into the\n// verdict that is persisted. Safety rules applied here:\n//   - the final score may differ from the rule score by at most\n//     ai_max_deviation (ai_settings), whatever the model proposes;\n//   - if the agent failed or returned something invalid, the rule-based\n//     verdict is stored and ai_status = 'failed' (nothing is lost).\n// Mode: Run Once for Each Item.\n\n// Keep in sync with the model selected in the \"Google Gemini Chat Model\" node.\nconst AI_MODEL = 'gemini-3.1-flash-lite';\n\nconst config = $('Load AI configuration').first().json;\nconst record = $('Build AI prompt').item.json.record;\nconst agent = $json; // { output: {...} } or { error: ... } (node continues on error)\n\nconst ruleScore = Number(record.rule.rule_score);\nconst maxDeviation = Number(config.settings.ai_max_deviation);\nconst levels = config.threat_levels;\n\n// Single-line, trimmed text with a length limit.\nfunction text(value, field, { required = true, max = 2000 } = {}) {\n  if (typeof value !== 'string') throw new Error(`\"${field}\" is not a string`);\n  const clean = value.replace(/\\s+/g, ' ').trim();\n  if (required && !clean) throw new Error(`\"${field}\" is empty`);\n  return clean.slice(0, max);\n}\n\nlet ai = null;\nlet aiError = null;\ntry {\n  if (agent.error) throw new Error(`AI Agent failed: ${agent.error.message || JSON.stringify(agent.error)}`);\n  const out = typeof agent.output === 'string' ? JSON.parse(agent.output) : agent.output;\n  if (!out || typeof out !== 'object') throw new Error('AI Agent returned no structured output');\n\n  const proposed = Number(out.proposed_score);\n  if (!Number.isInteger(proposed) || proposed < 1 || proposed > 5) {\n    throw new Error(`proposed_score must be an integer 1-5, got ${JSON.stringify(out.proposed_score)}`);\n  }\n\n  ai = {\n    verdict_label: text(out.verdict_label, 'verdict_label', { max: 50 }),\n    summary_en: text(out.summary_en, 'summary_en'),\n    primary_evidence: text(out.primary_evidence, 'primary_evidence'),\n    supporting_context: text(out.supporting_context ?? '', 'supporting_context', { required: false }),\n    analysis_pl: text(out.analysis_pl, 'analysis_pl'),\n    proposed_score: proposed,\n    deviation_reason: text(out.deviation_reason ?? '', 'deviation_reason', { required: false, max: 500 }),\n    // Existence of cited ids is checked again in \"Insert AI audit\".\n    historical_match_ids: (Array.isArray(out.historical_match_ids) ? out.historical_match_ids : [])\n      .map(Number)\n      .filter(Number.isInteger),\n  };\n} catch (e) {\n  aiError = e.message;\n}\n\n// Clamp the AI proposal to the allowed window around the rule score.\nconst finalScore = ai\n  ? Math.min(5, Math.max(1, Math.min(ruleScore + maxDeviation, Math.max(ruleScore - maxDeviation, ai.proposed_score))))\n  : ruleScore;\nconst deviated = finalScore !== ruleScore;\n\nconst verdict = ai\n  ? {\n      threat_score: finalScore,\n      threat_label: ai.verdict_label,\n      summary_en: ai.summary_en,\n      analysis_pl: ai.analysis_pl,\n    }\n  : {\n      threat_score: ruleScore,\n      threat_label: levels[ruleScore].description.slice(0, 50),\n      summary_en: `Rule-based verdict (AI unavailable): ${record.rule.trace.join('; ')}`,\n      analysis_pl: null,\n    };\n\n// Text stored in vector memory: what the feeds saw plus the verdict.\n// Domain and IP are kept in metadata, not in the text, so similarity is\n// about threat characteristics rather than identity.\nconst list = (a, fallback = 'none') => (a && a.length ? a.join(', ') : fallback);\nconst engineVerdicts = [...new Set(record.vt.flagged_by.map((f) => f.result).filter(Boolean))];\nconst vectorDocument = ai\n  ? [\n      `Verdict: ${ai.verdict_label} (score ${finalScore}/5). ${ai.summary_en}`,\n      `VirusTotal: ${record.vt.malicious} malicious of ${record.vt.engines_total} engines; verdicts: ${list(engineVerdicts)}.`,\n      `Hosting: ${record.vt.as_owner || 'unknown owner'}, country ${record.vt.country || 'unknown'}.`,\n      record.threatfox.status === 'ok'\n        ? `ThreatFox: malware ${list(record.threatfox.malware_families, 'unidentified')}, threat types ${list(record.threatfox.threat_types)}, ${record.threatfox.active ? 'active' : 'inactive'}.`\n        : 'ThreatFox: not listed.',\n      record.urlhaus.status === 'ok'\n        ? `URLhaus: ${record.urlhaus.url_count} URL(s), ${record.urlhaus.urls_online} online, threats ${list(record.urlhaus.threats.map((t) => t.value))}.`\n        : 'URLhaus: not listed.',\n    ].join('\\n')\n  : null;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      verdict,\n      audit: {\n        vt_malicious: record.vt.malicious,\n        rule_score: ruleScore,\n        final_score: finalScore,\n        ai_status: ai ? 'ok' : 'failed',\n        deviation_reason: deviated ? ai.deviation_reason || 'not given' : null,\n        primary_evidence: ai ? ai.primary_evidence : null,\n        supporting_context: ai ? ai.supporting_context : null,\n        historical_match_ids: ai ? ai.historical_match_ids : [],\n        rule_trace: record.rule,\n        evidence: { virustotal: record.vt, threatfox: record.threatfox, urlhaus: record.urlhaus },\n        ai_error: aiError,\n        ai_model: AI_MODEL,\n        prompt_version: config.prompt_version,\n      },\n      vector: vectorDocument ? { document: vectorDocument } : null,\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        176
+      ],
+      "id": "c81d5aec-cf59-5322-a294-3d02392444dc",
+      "name": "Parse AI Agent output"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build clean scan verdict\n// Observable below the VirusTotal gate: the rule-based score is the verdict.\n// No AI call, no vector memory, no e-mail. It is still persisted, so the\n// same domain + IP pair is not looked up again within cache_ttl_days.\n// Mode: Run Once for Each Item.\n\nconst config = $('Load AI configuration').first().json;\nconst record = $json.record; // from \"Compute rule-based score\"\nconst score = Number(record.rule.rule_score);\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      verdict: {\n        threat_score: score,\n        threat_label: config.threat_levels[score].description.slice(0, 50),\n        summary_en: `Rule-based verdict (below VirusTotal gate, AI not called): ${record.rule.trace.join('; ')}`,\n        analysis_pl: null,\n      },\n      audit: {\n        vt_malicious: record.vt.malicious,\n        rule_score: score,\n        final_score: score,\n        ai_status: 'skipped',\n        deviation_reason: null,\n        primary_evidence: null,\n        supporting_context: null,\n        historical_match_ids: [],\n        rule_trace: record.rule,\n        evidence: { virustotal: record.vt, threatfox: record.threatfox, urlhaus: record.urlhaus },\n        ai_error: null,\n        ai_model: null,\n        prompt_version: null,\n      },\n      vector: null,\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        768
+      ],
+      "id": "bd42cb73-99dc-504d-917e-a1c2515432b1",
+      "name": "Build clean scan verdict"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Layer 1: raw CTI payloads (one row per source that answered).\nWITH rec AS (\n    SELECT $1::jsonb AS r\n), inserted AS (\n    INSERT INTO cyber_sentinel.threat_data_raw (resource, source_provider, scan_date, raw_data)\n    SELECT p->>'resource', p->>'source', LOCALTIMESTAMP, p->'payload'\n    FROM rec, jsonb_array_elements(rec.r->'raw') AS p\n    WHERE jsonb_typeof(p->'payload') = 'object'\n    RETURNING id, source_provider\n)\nSELECT (rec.r - 'raw')\n       || jsonb_build_object('raw_ids', COALESCE((SELECT jsonb_object_agg(source_provider, id) FROM inserted), '{}'::jsonb))\n       AS record\nFROM rec;",
+        "options": {
+          "queryReplacement": "={{ [ $json.record ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2960,
+        176
+      ],
+      "id": "2a46d21e-1b71-5ea3-aaf7-03f0acb185e1",
+      "name": "Insert raw payloads",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Layer 2: verdict -> indicator -> per-source details (tables used by Grafana).\nWITH rec AS (\n    SELECT $1::jsonb AS r\n), verdict AS (\n    INSERT INTO cyber_sentinel.ai_analysis_results (threat_score, threat_label, verdict_summary_en, analysis_pl)\n    SELECT (r->'verdict'->>'threat_score')::int,\n           LEFT(r->'verdict'->>'threat_label', 50),\n           r->'verdict'->>'summary_en',\n           r->'verdict'->>'analysis_pl'\n    FROM rec\n    RETURNING id\n), indicator AS (\n    INSERT INTO cyber_sentinel.threat_indicators (dns_query_id, type_id, analysis_result_id, last_scan, scan_count)\n    SELECT (r->'observable'->>'dns_query_id')::int,\n           (SELECT id FROM cyber_sentinel.dic_indicator_types WHERE name = 'IP'),\n           verdict.id,\n           LOCALTIMESTAMP,\n           1 + (SELECT count(*) FROM cyber_sentinel_ai.verdict_audit va\n                WHERE va.fqdn = r->'observable'->>'fqdn'\n                  AND va.observable_ip = r->'observable'->>'observable_ip')\n    FROM rec, verdict\n    RETURNING id, analysis_result_id, scan_count\n), details AS (\n    INSERT INTO cyber_sentinel.threat_indicator_details (indicator_id, source_id, raw_data_id, raw_response_hash, fetched_at)\n    SELECT indicator.id, sp.id, raw.id,\n           encode(sha256(convert_to(raw.raw_data::text, 'UTF8')), 'hex'),\n           LOCALTIMESTAMP\n    FROM rec, indicator, jsonb_each_text(rec.r->'raw_ids') AS src(source_name, raw_id)\n    JOIN cyber_sentinel.dic_source_providers sp ON sp.name = src.source_name\n    JOIN cyber_sentinel.threat_data_raw raw ON raw.id = src.raw_id::bigint\n    RETURNING id\n)\nSELECT rec.r || jsonb_build_object(\n           'analysis_result_id', indicator.analysis_result_id,\n           'indicator_id',       indicator.id,\n           'scan_count',         indicator.scan_count,\n           'source_details',     (SELECT count(*) FROM details)\n       ) AS record\nFROM rec, indicator;",
+        "options": {
+          "queryReplacement": "={{ [ $json.record ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3168,
+        176
+      ],
+      "id": "a4a513df-58c0-508a-b7b1-5a07f9354811",
+      "name": "Insert AI verdict",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- AI-only details in the separate schema (1:1 with ai_analysis_results).\n-- Cited historical ids are kept only if those verdicts really exist.\nWITH rec AS (\n    SELECT $1::jsonb AS r\n), audit AS (\n    INSERT INTO cyber_sentinel_ai.verdict_audit (\n        analysis_result_id, fqdn, observable_ip, vt_malicious, rule_score, final_score,\n        ai_status, deviation_reason, primary_evidence, supporting_context,\n        historical_match_ids, rule_trace, evidence, ai_error, ai_model, prompt_version)\n    SELECT (r->>'analysis_result_id')::int,\n           r->'observable'->>'fqdn',\n           r->'observable'->>'observable_ip',\n           (r->'audit'->>'vt_malicious')::int,\n           (r->'audit'->>'rule_score')::int,\n           (r->'audit'->>'final_score')::int,\n           r->'audit'->>'ai_status',\n           r->'audit'->>'deviation_reason',\n           r->'audit'->>'primary_evidence',\n           r->'audit'->>'supporting_context',\n           ARRAY(SELECT a.id\n                 FROM jsonb_array_elements_text(r->'audit'->'historical_match_ids') AS h(v)\n                 JOIN cyber_sentinel.ai_analysis_results a ON a.id::text = h.v),\n           r->'audit'->'rule_trace',\n           r->'audit'->'evidence',\n           r->'audit'->>'ai_error',\n           r->'audit'->>'ai_model',\n           r->'audit'->>'prompt_version'\n    FROM rec\n    RETURNING analysis_result_id\n)\nSELECT rec.r AS record FROM rec, audit;",
+        "options": {
+          "queryReplacement": "={{ [ $json.record ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3376,
+        176
+      ],
+      "id": "a6f31845-cca6-58ae-ba99-4f0ff8beb2dc",
+      "name": "Insert AI audit",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e6ea792-8f94-5048-8950-a5e52123b7ec",
+              "leftValue": "={{ $json.record.audit.ai_status === 'ok' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3568,
+        176
+      ],
+      "id": "5fac1ca3-52ca-5421-a99e-3ab497f50621",
+      "name": "AI verdict to remember?"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": "cyber_sentinel_ai.verdict_vectors",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.2,
+      "position": [
+        3840,
+        160
+      ],
+      "id": "9dd38b79-9037-5491-80a2-297ef85bd4c2",
+      "name": "Store verdict in vector memory",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.record.vector.document }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "analysis_result_id",
+                "value": "={{ $json.record.analysis_result_id }}"
+              },
+              {
+                "name": "fqdn",
+                "value": "={{ $json.record.observable.fqdn }}"
+              },
+              {
+                "name": "observable_ip",
+                "value": "={{ $json.record.observable.observable_ip }}"
+              },
+              {
+                "name": "threat_score",
+                "value": "={{ $json.record.verdict.threat_score }}"
+              },
+              {
+                "name": "verdict_label",
+                "value": "={{ $json.record.verdict.threat_label }}"
+              },
+              {
+                "name": "analyzed_on",
+                "value": "={{ $now.toFormat('yyyy-MM-dd') }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        3952,
+        336
+      ],
+      "id": "3474153c-2325-5c2a-975e-6ee8a2d86f02",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        3776,
+        336
+      ],
+      "id": "3d51f6c4-7dfe-5557-8401-5327b90f087c",
+      "name": "Embeddings Google Gemini (store)",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JJXaAGWm6Kg1DmUJ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b1011c17-a2f5-5639-8263-c51325c468b2",
+              "leftValue": "={{ $json.record.audit.ai_status !== 'skipped' && $json.record.verdict.threat_score >= $('Load AI configuration').first().json.settings.email_min_score }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3168,
+        704
+      ],
+      "id": "6525fd9a-c7ea-5d9e-ae96-19336bce3a03",
+      "name": "Send alert?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        3376,
+        704
+      ],
+      "id": "48e1a5eb-1a9a-56e5-bb13-2ea6271e2790",
+      "name": "Get Email Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build alert e-mail\n// Renders the persisted verdict as a severity-coloured HTML e-mail (same\n// look as the original Cyber Sentinel report). Every dynamic value is\n// HTML-escaped: domains, URLs and AI text are untrusted input.\n// Mode: Run Once for Each Item.\n\nconst record = $('Insert AI audit').item.json.record;\nconst level = $('Load AI configuration').first().json.threat_levels[record.verdict.threat_score];\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst score = Number(record.verdict.threat_score);\nconst theme = score >= 4\n  ? { label: '🚨 ALERT', accent: '#f44336', text: '#ff5252', header: '#3a1f1f' }\n  : score === 3\n    ? { label: '⚠️ REVIEW', accent: '#ffb300', text: '#ffd54f', header: '#332a13' }\n    : { label: '✅ INFO', accent: '#4caf50', text: '#81c784', header: '#1b3320' };\n\nconst audit = record.audit;\nconst scoreNote = audit.deviation_reason\n  ? `Rule engine ${esc(audit.rule_score)}/5 &rarr; AI adjusted: ${esc(audit.deviation_reason)}`\n  : `Rule engine score ${esc(audit.rule_score)}/5 confirmed`;\n\nconst section = (title, body) => (body\n  ? `<p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">${title}</p>\n     <div style=\"background:#252525;padding:12px;border-radius:4px;font-size:14px;line-height:1.6;\">${esc(body)}</div>`\n  : '');\n\nconst sources = ['VirusTotal', record.threatfox.status === 'ok' && 'ThreatFox', record.urlhaus.status === 'ok' && 'URLhaus']\n  .filter(Boolean)\n  .map((s) => `<span style=\"display:inline-block;background:#37474f;color:#cfd8dc;padding:2px 8px;border-radius:3px;font-size:11px;margin-right:5px;\">${s}</span>`)\n  .join('');\n\nconst html = `<!DOCTYPE html>\n<html><body style=\"font-family:'Segoe UI',Tahoma,sans-serif;background:#121212;color:#e0e0e0;margin:0;padding:20px;\">\n<div style=\"max-width:640px;margin:auto;background:#1e1e1e;border:1px solid #333;border-top:4px solid ${theme.accent};border-radius:8px;overflow:hidden;\">\n  <div style=\"background:${theme.header};padding:15px;text-align:center;\">\n    <h2 style=\"margin:0;color:${theme.text};\">${theme.label}: Cyber Sentinel</h2>\n  </div>\n  <div style=\"padding:24px;\">\n    <div style=\"background:#2d2d2d;border:1px solid #444;border-radius:5px;padding:10px;text-align:center;margin-bottom:18px;\">\n      <div style=\"font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;\">Threat Severity Score</div>\n      <div style=\"font-size:36px;font-weight:bold;color:${theme.text};\">${esc(score)}/5</div>\n      <div style=\"font-size:12px;color:#aaa;text-transform:uppercase;\">${esc(level.description)} &middot; ${esc(level.action)}</div>\n      <div style=\"font-size:11px;color:#999;margin-top:6px;\">${scoreNote}</div>\n    </div>\n    <p><strong>Obiekt (IP):</strong> <span style=\"font-family:'Courier New',monospace;color:#64ffda;font-size:18px;font-weight:bold;\">${esc(record.observable.observable_ip)}</span></p>\n    <p><strong>Powiązana domena:</strong> <span style=\"color:#90caf9;\">${esc(record.observable.fqdn)}</span></p>\n    <p><strong>Werdykt:</strong> ${esc(record.verdict.threat_label)}</p>\n    <p><strong>Klienci:</strong> ${esc(record.observable.source_ips)} &middot; <strong>Zapytania DNS:</strong> ${esc(record.observable.query_count)}</p>\n    <p><strong>Aktywne źródła danych:</strong><br>${sources}</p>\n    ${audit.ai_status === 'ok' ? '' : '<p style=\"color:#ffd54f;\">AI analysis unavailable - rule-based verdict only.</p>'}\n    ${section('Analiza (PL)', record.verdict.analysis_pl)}\n    ${section('Summary (EN)', record.verdict.summary_en)}\n    ${section('Primary evidence', audit.primary_evidence)}\n    ${section('Supporting context', audit.supporting_context)}\n    <p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">Scoring trace</p>\n    <ol style=\"font-size:12px;color:#bbb;line-height:1.5;padding-left:18px;\">${record.rule.trace.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>\n  </div>\n  <div style=\"text-align:center;font-size:11px;color:#777;padding:12px;\">\n    Raport wygenerowany przez system Cyber Sentinel &middot; analysis #${esc(record.analysis_result_id)} &middot; indicator #${esc(record.indicator_id)}\n  </div>\n</div></body></html>`;\n\nreturn {\n  json: {\n    subject: `Cyber Sentinel ${theme.label} ${score}/5 | ${record.observable.fqdn} (${record.observable.observable_ip})`,\n    html,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3584,
+        704
+      ],
+      "id": "a8dff11a-9846-58f9-9ae8-fb9eb40d11cc",
+      "name": "Build alert e-mail"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Get Email Pass').item.json.data.user }}",
+        "toEmail": "home-network-guardian@proton.me",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3792,
+        704
+      ],
+      "id": "621f571c-a241-5f0c-bdb0-e88633e12691",
+      "name": "Send an Email",
+      "webhookId": "8539911c-3863-45ef-a785-86dd6d09607c",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# 🛡️ Project: Cyber Sentinel\n\n### **Purpose**\nAutonomous **Cyber Threat Intelligence (CTI)** & **Passive DNS Monitoring**. This workflow orchestrates the analysis of DNS telemetry using AI to detect malicious patterns and trigger autonomous response playbooks.\n\n---\n\n### **🚀 Setup Instructions**\n1.  **Secret Management:** Ensure **HashiCorp Vault** is connected to handle API keys and credentials securely.\n2.  **AI Engine:** Configure the **Google Gemini** credential used by the Chat Model and Embeddings nodes to enable bilingual threat assessment (**EN/PL**).\n3.  **Data Layer:** Verify the connection to the **PostgreSQL** database (Neural Lake) with **pgvector** — CTI data in `cyber_sentinel`, AI settings, prompt and vector memory in `cyber_sentinel_ai`.\n\n---\n\n### **🔗 Resources**\n* **Documentation:** [https://lukaszfd.github.io/cyber-sentinel/](https://lukaszfd.github.io/cyber-sentinel/)\n* **Author:** Łukasz Dejko",
+        "height": 432,
+        "width": 688
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        672,
+        -464
+      ],
+      "id": "64e0139b-fe03-5459-861a-178fb64403de",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "content": "## Orchestration & Data Ingestion\n\n",
+        "height": 736,
+        "width": 416,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        0
+      ],
+      "id": "f03de7a5-aa71-5d69-9a5b-53e96a197770",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "## Multi-Source Threat Intelligence Enrichment\n\n",
+        "height": 736,
+        "width": 1728,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        0
+      ],
+      "id": "20694825-45ca-5a31-884b-adee855f9f74",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "## AI Synthesis & Cognitive Analysis\n\n",
+        "height": 912,
+        "width": 1232,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1584,
+        0
+      ],
+      "id": "b3c027dc-bd89-5cd6-a820-db4884fb2c42",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "## Dual-Layer Persistence Strategy\n",
+        "height": 528,
+        "width": 1296,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2848,
+        0
+      ],
+      "id": "76c26e0e-6fc3-5b27-883f-bdd641d60b9a",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "## Incident Reporting & Remediation\n\n",
+        "height": 320,
+        "width": 1280,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2864,
+        592
+      ],
+      "id": "7a1f665b-99fb-519f-b65e-166b6212a27a",
+      "name": "Sticky Note10"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Postgres Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Pass": {
+      "main": [
+        [
+          {
+            "node": "Load AI configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load AI configuration": {
+      "main": [
+        [
+          {
+            "node": "Select pending observable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select pending observable": {
+      "main": [
+        [
+          {
+            "node": "Virus total API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Virus total API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal IP Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal IP Scan": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - VirusTotal": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal detections ≥ threshold?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "Abuse.CH_ThreatFox request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse.CH_ThreatFox request": {
+      "main": [
+        [
+          {
+            "node": "Abuse.CH_URLHaus request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse.CH_URLHaus request": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - abuse.ch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - abuse.ch": {
+      "main": [
+        [
+          {
+            "node": "Compute rule-based score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supporting sources not checked": {
+      "main": [
+        [
+          {
+            "node": "Compute rule-based score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal detections ≥ threshold?": {
+      "main": [
+        [
+          {
+            "node": "Abuse API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supporting sources not checked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute rule-based score": {
+      "main": [
+        [
+          {
+            "node": "AI analysis required?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI analysis required?": {
+      "main": [
+        [
+          {
+            "node": "Gemini AI Studio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build clean scan verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini AI Studio": {
+      "main": [
+        [
+          {
+            "node": "Build AI prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Agent output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres PGVector Store": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Postgres PGVector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Agent output": {
+      "main": [
+        [
+          {
+            "node": "Insert raw payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build clean scan verdict": {
+      "main": [
+        [
+          {
+            "node": "Insert raw payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert raw payloads": {
+      "main": [
+        [
+          {
+            "node": "Insert AI verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert AI verdict": {
+      "main": [
+        [
+          {
+            "node": "Insert AI audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert AI audit": {
+      "main": [
+        [
+          {
+            "node": "AI verdict to remember?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI verdict to remember?": {
+      "main": [
+        [
+          {
+            "node": "Store verdict in vector memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Store verdict in vector memory",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini (store)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store verdict in vector memory",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send alert?": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Build alert e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build alert e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "a4bd16c9-127c-4279-8a6e-4c05cfafe711",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "aed28d93e614c1f9c79956d31115fcf659cd9c9baf99a258b26c19ae63a4116a"
+  },
+  "nodeGroups": [],
+  "id": "ILhKRbyvF5NaIRYL",
+  "tags": []
+}

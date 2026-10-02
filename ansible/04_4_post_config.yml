@@ -267,13 +267,44 @@
     # with admin privileges by default.
     # ============================================================
 
-    # KNOWN ISSUE: filename has spaces; relative path "../config/..."
-    # is computed relative to this playbook file. Verify the path
-    # resolves correctly. Likely needs to change for the v1.0.2-rc1
-    # workflow (different filename, dynamic 1-5 scale).
+    # KNOWN ISSUE: filename has spaces; browser downloads also drop "&"
+    # from it, so the default name below has no "&". Override with
+    # n8n_workflow_file_name (group_vars) if your copy is named differently.
+    #
+    # The JSON keeps the id of the original workflow (ILhKRbyvF5NaIRYL), so
+    # a re-import updates it in place instead of adding a second copy.
+    # The CLI import leaves it INACTIVE — publish it in the n8n UI.
+    # Requires config/postgres/db_ai_pipeline.sql (playbook 04.3b [04.3b.2.3]).
+    #
+    # Pre-check on the control host: fails with the list of files that DO
+    # exist, instead of the lookup plugin's bare "File not found". Path is
+    # built from main_repo_source_dir (same base 04.1 / 04.3b use) rather
+    # than "../config", so it does not depend on the working directory.
+    - name: "[04.4.4.0] Verify workflow JSON exists on control host"
+      ansible.builtin.find:
+        paths: "{{ main_repo_source_dir }}/config/n8n/workflows"
+        patterns: "*.json"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: n8n_workflow_files
+
+    - name: "[04.4.4.0b] Fail with the list of available workflow files if the expected one is missing"
+      ansible.builtin.assert:
+        that:
+          - n8n_workflow_file in (n8n_workflow_files.files | map(attribute='path') | map('basename') | list)
+        fail_msg: >-
+          '{{ n8n_workflow_file }}' not found in {{ main_repo_source_dir }}/config/n8n/workflows.
+          Files present: {{ n8n_workflow_files.files | map(attribute='path') | map('basename') | list }}.
+          Copy the workflow JSON there under exactly this name, or set n8n_workflow_file_name.
+        quiet: true
+      run_once: true
+      vars:
+        n8n_workflow_file: "{{ n8n_workflow_file_name | default('Automated AI Domain & IP Reputation Guard.json') }}"
+
     - name: "[04.4.4.1] Read workflow JSON from repo into memory"
       set_fact:
-        workflow_content: "{{ lookup('file', '../config/n8n/workflows/Automated Domain & IP Reputation Guard with HashiCorp Vault.json') | from_json }}"
+        workflow_content: "{{ lookup('file', main_repo_source_dir ~ '/config/n8n/workflows/' ~ (n8n_workflow_file_name | default('Automated AI Domain & IP Reputation Guard.json'))) | from_json }}"
 
     # Re-serializes the parsed JSON. This normalizes formatting and
     # validates that the source file is parseable JSON before we

@@ -1,0 +1,168 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 04.3c — Tranco Domain Allow-list
+# ============================================================
+# Purpose:    Keeps cyber_sentinel_ai.domain_allowlist filled with the
+#             Tranco top N popular domains, so the n8n workflow never
+#             spends VirusTotal quota on them (v_pending_observables
+#             skips allow-listed domains, see db_ai_pipeline.sql Section 7b).
+#
+#             - deploys the host sync script (templates/tranco_allowlist_sync.sh.j2)
+#             - schedules it weekly on Saturday via root's crontab
+#             - runs it once now when the allow-list is empty (fresh
+#               deployment / dev VM restore) or when tranco_force_sync=true
+#
+# Why a host script and not pg_cron: the list has to be downloaded from
+# the internet; the Postgres container has no curl and should not get
+# outbound HTTP. The script runs on the host and only talks to Postgres
+# through `docker exec`, exactly like playbook 04.3b.
+#
+# Depends on: - 04.2  (postgres_db container running)
+#             - 04.3b (db_ai_pipeline.sql v2.1+ applied: domain_allowlist,
+#                      staging table, sp_sync_domain_allowlist())
+#             - outbound HTTPS from the host to tranco-list.eu
+#
+# Outputs:    - /usr/local/bin/cyber-sentinel-tranco-sync.sh (0750, root)
+#             - root cron entry "Cyber Sentinel Tranco allow-list sync"
+#             - {{ tranco_log_file }}, rotated weekly by logrotate
+#
+# Useful overrides (-e):
+#   tranco_force_sync=true   run the sync now even if the list is loaded
+#   tranco_top_n=50000       allow-list size (default 20000)
+# ============================================================
+
+- name: 04.3c - Tranco domain allow-list (weekly delta sync)
+  hosts: all_servers
+  become: yes
+
+  vars:
+    tranco_top_n: 20000
+    # Sanity guard used twice: by the script (downloaded rows) and by
+    # sp_sync_domain_allowlist() (valid rows after filtering). 90% of N
+    # tolerates junk rows and the exclusion list, but stops a truncated
+    # download from deactivating most of the allow-list.
+    tranco_min_rows: "{{ (tranco_top_n | int * 0.9) | int }}"
+    tranco_pg_container: "postgres_db"
+    tranco_script_path: "/usr/local/bin/cyber-sentinel-tranco-sync.sh"
+    tranco_log_file: "/var/log/cyber-sentinel/tranco-sync.log"
+    # Saturday 04:17 host time — after the 02:00/03:00 partition jobs
+    # (1st of the month) and off the full hour.
+    tranco_cron_weekday: "6"
+    tranco_cron_hour: "4"
+    tranco_cron_minute: "17"
+    tranco_force_sync: false
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — Prerequisites
+    # ============================================================
+
+    # curl is installed by playbook 03; unzip is only needed by the
+    # fallback path (full top-1m ZIP) of the sync script.
+    - name: "[04.3c.1.1] Ensure curl and unzip are installed"
+      ansible.builtin.apt:
+        name:
+          - curl
+          - unzip
+        state: present
+
+    - name: "[04.3c.1.2] Create log directory"
+      ansible.builtin.file:
+        path: "{{ tranco_log_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    # The allow-list objects are created by 04.3b; fail here with a clear
+    # message instead of a psql error deep inside the sync script.
+    - name: "[04.3c.1.3] Verify allow-list schema is deployed (db_ai_pipeline.sql v2.1+)"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec {{ tranco_pg_container }} psql -U postgres -d {{ postgres_database }} -At -c
+          "SELECT to_regprocedure('cyber_sentinel_ai.sp_sync_domain_allowlist(text,text,integer,integer)') IS NOT NULL
+              AND to_regclass('cyber_sentinel_ai.domain_allowlist_staging') IS NOT NULL;"
+      register: tranco_schema_check
+      changed_when: false
+      failed_when: tranco_schema_check.rc != 0 or tranco_schema_check.stdout | trim != 't'
+
+    # ============================================================
+    # SECTION 2 — Sync script
+    # ============================================================
+
+    - name: "[04.3c.2.1] Deploy Tranco sync script"
+      ansible.builtin.template:
+        src: templates/tranco_allowlist_sync.sh.j2
+        dest: "{{ tranco_script_path }}"
+        owner: root
+        group: root
+        mode: '0750'
+
+    # ============================================================
+    # SECTION 3 — Weekly schedule + log rotation
+    # ============================================================
+
+    - name: "[04.3c.3.1] Schedule weekly sync (Saturday)"
+      ansible.builtin.cron:
+        name: "Cyber Sentinel Tranco allow-list sync"
+        user: root
+        weekday: "{{ tranco_cron_weekday }}"
+        hour: "{{ tranco_cron_hour }}"
+        minute: "{{ tranco_cron_minute }}"
+        job: "{{ tranco_script_path }} >> {{ tranco_log_file }} 2>&1"
+
+    - name: "[04.3c.3.2] Rotate sync log"
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/cyber-sentinel-tranco
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          {{ tranco_log_file }} {
+              monthly
+              rotate 6
+              compress
+              missingok
+              notifempty
+          }
+
+    # ============================================================
+    # SECTION 4 — Initial load
+    # ------------------------------------------------------------
+    # A fresh deployment (and every dev VM restore) starts with an
+    # empty allow-list; without this the first week would send every
+    # popular domain to VirusTotal.
+    # ============================================================
+
+    - name: "[04.3c.4.1] Count active Tranco allow-list entries"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec {{ tranco_pg_container }} psql -U postgres -d {{ postgres_database }} -At -c
+          "SELECT count(*) FROM cyber_sentinel_ai.domain_allowlist WHERE source = 'tranco' AND is_active;"
+      register: tranco_active_count
+      changed_when: false
+
+    - name: "[04.3c.4.2] Run initial sync (allow-list empty or tranco_force_sync)"
+      ansible.builtin.shell:
+        # pipefail: report the script's exit code, not tee's.
+        cmd: "set -o pipefail; {{ tranco_script_path }} 2>&1 | tee -a {{ tranco_log_file }}"
+        executable: /bin/bash
+      register: tranco_initial_sync
+      when: (tranco_active_count.stdout | int == 0) or (tranco_force_sync | bool)
+
+    - name: "[04.3c.4.3] Show sync result"
+      ansible.builtin.debug:
+        msg: "{{ tranco_initial_sync.stdout_lines | select('search', 'result:|ERROR') | list }}"
+      when: tranco_initial_sync is not skipped
+
+    - name: "[04.3c.4.4] Show allow-list status"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec {{ tranco_pg_container }} psql -U postgres -d {{ postgres_database }} -At -F ' | ' -c
+          "SELECT source, is_active, count(*) FROM cyber_sentinel_ai.domain_allowlist GROUP BY 1, 2 ORDER BY 1, 2;"
+      register: tranco_status
+      changed_when: false
+
+    - name: "[04.3c.4.5] Display allow-list status (source | active | count)"
+      ansible.builtin.debug:
+        msg: "{{ tranco_status.stdout_lines }}"

@@ -9,7 +9,9 @@
 #       * Initializes Vault, captures root_token + unseal_keys
 #       * Auto-unseals using freshly generated keys
 #       * Provisions all secrets, certs, credentials
-#       * Mints a scoped, read-only Vault token for n8n (Stage 7)
+#       * Mints a scoped, read-only Vault token for n8n (Stage 7);
+#         playbook 06.2 imports it into n8n automatically in the
+#         same run (registered var n8n_token_create)
 #       * Displays root_token + unseal_keys, and the n8n token,
 #         ONCE at the end (operator must save them manually —
 #         never written anywhere)
@@ -305,10 +307,11 @@
     #   - First run (no vault_n8n_token_accessor in group_vars):
     #       mints a new orphan, periodic token and displays it ONCE
     #       — same "shown once" convention as root_token/unseal_keys
-    #       above. Paste it into n8n's "HashiCorp Vault account"
-    #       credential (Token auth), then save the printed accessor
-    #       as vault_n8n_token_accessor in group_vars (ansible-vault
-    #       encrypted) so future runs renew instead of recreating.
+    #       above. Playbook 06.2 loads it into n8n's "HashiCorp Vault
+    #       account" credential in the same run. Save the printed
+    #       token and accessor as vault_n8n_vault_token and
+    #       vault_n8n_token_accessor (ansible-vault, per host) so
+    #       future runs renew instead of recreating.
     #   - Re-run (accessor present): RENEWS the existing token via
     #       its accessor instead of minting a new one. Vault only
     #       ever reveals a token's raw value at creation time, so
@@ -320,15 +323,13 @@
     #       of problem this stage exists to get away from.
     #   - If renewal fails (accessor stale/revoked, or Vault was
     #       reset), falls back to minting a fresh orphan token and
-    #       displays it again — update n8n and group_vars once more.
+    #       displays it again — 06.2 picks it up automatically;
+    #       update ansible-vault once more.
     #
-    # NOT AUTOMATED HERE: swapping n8n's own "HashiCorp Vault
-    # account" credential to the new token. n8n's credential values
-    # live inside n8n_data (its internal DB), not in this repo, and
-    # there is no reliable non-interactive n8n CLI path to set a
-    # single credential's value (unlike workflow import in 04.4,
-    # which the CLI does support). Pasting the printed token into
-    # n8n's UI remains a manual step after this playbook completes.
+    # n8n CREDENTIAL: handled by playbook 06.2 (06_2_n8n_bootstrap.yml)
+    # via `n8n import:credentials` with a fixed credential ID. It uses
+    # the token minted here when one was minted in this run, otherwise
+    # vault_n8n_vault_token from ansible-vault.
     # ============================================================
 
     - name: "[N8N-TOKEN] Set effective renewal period"
@@ -372,6 +373,13 @@
             }
 
             path "secret/data/cyber-sentinel/credentials/gmail/*" {
+              capabilities = ["read"]
+            }
+
+            # Exact path written by Stage 6 ({ path: "gmail" }) and read by
+            # the "Vault - SMTP sender" node in workflow v3. The glob above
+            # only matches paths BELOW gmail/, never gmail itself.
+            path "secret/data/cyber-sentinel/credentials/gmail" {
               capabilities = ["read"]
             }
         status_code: [200, 204]
@@ -434,13 +442,16 @@
           - "            Put a reminder outside Vault for that date —"
           - "            Vault will not warn you before it expires."
           - ""
-          - "  ACTION REQUIRED:"
-          - "    1. In n8n: Credentials -> 'HashiCorp Vault account' ->"
-          - "       replace its token with the value above."
-          - "    2. Add to group_vars (ansible-vault encrypted):"
+          - "  n8n: nothing to do — playbook 06.2 imports this token"
+          - "       into the 'HashiCorp Vault account' credential"
+          - "       automatically in this run."
+          - ""
+          - "  ACTION REQUIRED (for future renew-only runs):"
+          - "    Add to host_vars/{{ inventory_hostname }}/vault.yml (ansible-vault):"
+          - "         vault_n8n_vault_token: \"<Token above>\""
           - "         vault_n8n_token_accessor: \"{{ n8n_token_create.json.auth.accessor }}\""
-          - "       Without this, every future run mints ANOTHER token"
-          - "       and this one is left valid but orphaned in Vault."
+          - "       Without the accessor, every future run mints ANOTHER"
+          - "       token and this one is left valid but orphaned in Vault."
           - "  This token value will NEVER be displayed again."
           - "============================================================"
       when: n8n_token_needs_creation
