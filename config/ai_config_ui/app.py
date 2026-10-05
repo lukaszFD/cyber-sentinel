@@ -40,6 +40,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from functools import wraps
+from urllib.parse import urlparse
 
 import psycopg
 from psycopg.rows import dict_row
@@ -409,6 +410,18 @@ def healthz():
     return "ok", 200
 
 
+def _is_safe_next_url(target: str) -> bool:
+    if not target:
+        return False
+    normalized = target.replace("\\", "/")
+    parsed = urlparse(normalized)
+    if parsed.scheme or parsed.netloc:
+        return False
+    if not normalized.startswith("/") or normalized.startswith("//"):
+        return False
+    return True
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -424,8 +437,7 @@ def login():
             csrf_token()
             log.info("Login ok user=%r ip=%s", username, request.remote_addr)
             nxt = request.args.get("next", "")
-            # Only local absolute paths — no open redirect.
-            if not nxt.startswith("/") or nxt.startswith("//"):
+            if not _is_safe_next_url(nxt):
                 nxt = url_for("dashboard")
             return redirect(nxt)
         else:
