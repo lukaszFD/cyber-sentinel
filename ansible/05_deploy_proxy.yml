@@ -4,17 +4,18 @@
 # ============================================================
 # Purpose:    Deploys an Nginx reverse proxy in front of all web-facing
 #             services (Pi-hole, n8n, Portainer, Firefox, Grafana,
-#             HashiCorp Vault). Provisions per-service TLS certs from
-#             Ansible Vault and renders Nginx server blocks from a
-#             Jinja2 template.
+#             HashiCorp Vault, AI config editor). Provisions per-service
+#             TLS certs from Ansible Vault and renders Nginx server
+#             blocks from a Jinja2 template.
 #
 # Depends on: - Playbook 04.2 (cyber-sentinel_internal_network exists)
 #             - All upstream services running with their expected
 #               container names (see services list below)
 #             - vault_<service>_cert and vault_<service>_key defined
-#               in group_vars for every entry in the services list,
-#               including vault_open_webui_cert / vault_open_webui_key
+#               in group_vars for every entry in the services list
+#               (e.g. vault_ai_config_cert / vault_ai_config_key)
 #             - templates/nginx_service.conf.j2 exists locally
+#             - cs_images.nginx defined in group_vars/all/images.yml
 #
 # NOTE: service `name` values must use underscores, not hyphens —
 # lookup('vars', 'vault_' + item.name + '_cert') resolves item.name
@@ -24,8 +25,9 @@
 # server_name, though — DNS hostnames/TLS SNI don't permit
 # underscores (RFC 1123). Any service whose `name` differs from its
 # desired public hostname sets an explicit `hostname` field (see
-# open_webui below); nginx_service_conf.j2 falls back to `name` when
-# `hostname` is omitted, so single-word services are unaffected.
+# ai_config below); templates/nginx_service.conf.j2 falls back to
+# `name` when `hostname` is omitted, so existing services keep their
+# current server_name.
 #
 # Outputs:    - Per-service TLS certs at:
 #                 {{ remote_deploy_base }}/config/nginx/certs/<svc>.crt
@@ -51,25 +53,18 @@
     # Service catalog. Each entry produces:
     #   - <name>.crt  +  <name>.key   in /config/nginx/certs/
     #   - <name>.conf                 in /config/nginx/conf.d/
+    #   - server_name <hostname|name>.<domain_suffix>
     # The internal_host is the Docker DNS name Nginx uses to reach
     # the upstream container; port is the container-internal port.
     # Present on every host in the inventory.
-    base_services:
+    services:
       - { name: "pihole",          port: 80,   internal_host: "pihole" }
       - { name: "n8n",             port: 5678, internal_host: "n8n-server" }
       - { name: "portainer",       port: 9000, internal_host: "portainer" }
       - { name: "firefox",         port: 3000, internal_host: "firefox" }
       - { name: "grafana",         port: 3000, internal_host: "grafana" }
       - { name: "hashicorp_vault", port: 8200, internal_host: "hashicorp_vault" }
-
-    # Only ever deployed on rpi5-prod (see docker-compose-cyber-sentinel.yml,
-    # which renders the open-webui service itself only for this group).
-    # Without this guard, vm-prox-dev / local-vm would get a dangling
-    # Nginx vhost pointing at a container that will never exist there.
-    rpi5_only_services:
-      - { name: "open_webui", port: 8080, internal_host: "open-webui", hostname: "open-webui" }
-
-    services: "{{ base_services + (rpi5_only_services if inventory_hostname in groups['rpi5-prod'] else []) }}"
+      - { name: "ai_config",       port: 8000, internal_host: "ai-config-ui", hostname: "ai-config" }
 
   tasks:
     # ============================================================
@@ -96,7 +91,7 @@
     # Writes one cert + one key per service from Ansible Vault to
     # the certs directory. Uses lookup('vars', ...) for dynamic
     # variable name resolution: vault_pihole_cert, vault_n8n_cert,
-    # etc. — without this pattern we'd need 6 hardcoded copy tasks.
+    # etc. — without this pattern we'd need one copy task per service.
     # Mode 0600 because keys must not be world-readable.
     # ============================================================
 
@@ -122,8 +117,9 @@
     # SECTION 3 — Render Nginx server blocks
     # ------------------------------------------------------------
     # Renders one server block per service from the shared template.
-    # The template receives `item` (with name, port, internal_host)
-    # and the play-level `domain_suffix` to assemble server_name.
+    # The template receives `item` (name, port, internal_host and the
+    # optional hostname) and the play-level `domain_suffix` to
+    # assemble server_name.
     # ============================================================
 
     - name: "[05.3.1] Render Nginx server block for each service"
@@ -143,13 +139,13 @@
     # ============================================================
 
     # Static IP 10.10.10.100 is conventional in this stack; other
-    # configs (e.g. Portainer init in 04.4 uses 10.10.10.10) reference
+    # configs (e.g. Portainer init in 04.6 uses 10.10.10.10) reference
     # the same network. recreate: yes is intentional — without it,
     # changes to conf.d after first run would not be picked up.
     - name: "[05.4.1] Run Nginx reverse proxy container"
       community.docker.docker_container:
         name: nginx-proxy
-        image: nginx:latest
+        image: "{{ cs_images.nginx }}"
         state: started
         recreate: yes
         restart_policy: always

@@ -1,6 +1,6 @@
 ---
 # ============================================================
-# Cyber Sentinel — Playbook 00.PRE.RESTORE — Proxmox VM Restore
+# Cyber Sentinel — Playbook 00.1 — Proxmox VM Restore (DEV only)
 # ============================================================
 # Purpose:    Restores the dev VM (vm-prox-dev / VMID 100,
 #             dev-network-guardian) from the latest Proxmox backup
@@ -37,11 +37,11 @@
 # Outputs:    - vm-prox-dev VM stopped, restored from latest backup,
 #               and started again
 #             - SSH on dev_vm becomes responsive within ~30-90s
-#               (handled by the wait_for in [00.PRE.RESTORE.4.2])
+#               (handled by the wait_for in [00.1.4.2])
 #
 # ============================================================
 
-- name: 00.PRE.RESTORE - Proxmox Snapshot Restore (DEV VM only)
+- name: 00.1 - Proxmox Snapshot Restore (DEV VM only)
   hosts: all_servers
   gather_facts: yes
 
@@ -57,9 +57,9 @@
     proxmox_node: "local"
 
     # Backup storage name (Datacenter → Storage in Proxmox UI).
-    backup_storage: "backups-seagate"
+    backup_storage: "backups-hdd"
 
-    # Computed at runtime by [00.PRE.RESTORE.0.1].
+    # Computed at runtime by [00.1.0.1].
     should_restore: false
 
   tasks:
@@ -68,7 +68,7 @@
     # SECTION 0 — Gate: skip play unless targeting vm-prox-dev
     # ============================================================
 
-    - name: "[00.PRE.RESTORE.0.1] Determine if restore should run"
+    - name: "[00.1.0.1] Determine if restore should run"
       ansible.builtin.set_fact:
         should_restore: >-
           {{ (ansible_limit is not defined)
@@ -78,11 +78,11 @@
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.0.2] Skip rest of play if not targeting vm-prox-dev"
+    - name: "[00.1.0.2] Skip rest of play if not targeting vm-prox-dev"
       ansible.builtin.meta: end_play
       when: not should_restore
 
-    - name: "[00.PRE.RESTORE.0.3] Announce restore intent"
+    - name: "[00.1.0.3] Announce restore intent"
       ansible.builtin.debug:
         msg:
           - "==========================================================="
@@ -100,7 +100,7 @@
     # SECTION 1 — Discover latest backup
     # ============================================================
 
-    - name: "[00.PRE.RESTORE.1.1] Get list of backups from Proxmox storage"
+    - name: "[00.1.1.1] Get list of backups from Proxmox storage"
       ansible.builtin.uri:
         url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}/storage/{{ backup_storage }}/content"
         method: GET
@@ -111,7 +111,7 @@
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.1.2] Filter backups for VMID {{ dev_hng_vm_id }}"
+    - name: "[00.1.1.2] Filter backups for VMID {{ dev_hng_vm_id }}"
       ansible.builtin.set_fact:
         vm_backups: >-
           {{ backup_list.json.data
@@ -121,20 +121,20 @@
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.1.3] Fail fast if no backups found"
+    - name: "[00.1.1.3] Fail fast if no backups found"
       ansible.builtin.fail:
         msg: "No backups found for VMID {{ dev_hng_vm_id }} in storage {{ backup_storage }}. Check Proxmox UI."
       when: vm_backups | length == 0
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.1.4] Pick latest backup by creation time"
+    - name: "[00.1.1.4] Pick latest backup by creation time"
       ansible.builtin.set_fact:
         latest_backup: "{{ vm_backups | sort(attribute='ctime', reverse=true) | first }}"
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.1.5] Display selected backup details"
+    - name: "[00.1.1.5] Display selected backup details"
       ansible.builtin.debug:
         msg:
           - "Found {{ vm_backups | length }} backup(s) for VMID {{ dev_hng_vm_id }}"
@@ -148,7 +148,7 @@
     # SECTION 2 — Stop the VM before restore
     # ============================================================
 
-    - name: "[00.PRE.RESTORE.2.1] Stop VM {{ dev_hng_vm_id }} before restore"
+    - name: "[00.1.2.1] Stop VM {{ dev_hng_vm_id }} before restore"
       community.general.proxmox_kvm:
         api_host: "{{ proxmox_host }}"
         api_user: "{{ proxmox_user_token.split('!')[0] }}"
@@ -169,7 +169,7 @@
     # CREATING backups, NOT restoring.
     # ============================================================
 
-    - name: "[00.PRE.RESTORE.3.1] Trigger restore from {{ latest_backup.volid }}"
+    - name: "[00.1.3.1] Trigger restore from {{ latest_backup.volid }}"
       ansible.builtin.uri:
         url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}/qemu"
         method: POST
@@ -186,7 +186,7 @@
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.3.2] Wait for restore task to complete"
+    - name: "[00.1.3.2] Wait for restore task to complete"
       ansible.builtin.uri:
         url: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}/tasks/{{ restore_result.json.data }}/status"
         method: GET
@@ -202,7 +202,7 @@
 
     # Verify exitstatus — Proxmox returns "stopped" for both
     # successful and failed tasks. exitstatus tells us which.
-    - name: "[00.PRE.RESTORE.3.3] Verify restore exitstatus is OK"
+    - name: "[00.1.3.3] Verify restore exitstatus is OK"
       ansible.builtin.fail:
         msg: "Restore task ended with non-OK status: {{ task_status.json.data.exitstatus }}"
       when: task_status.json.data.exitstatus != 'OK'
@@ -213,7 +213,7 @@
     # SECTION 4 — Boot the restored VM
     # ============================================================
 
-    - name: "[00.PRE.RESTORE.4.1] Start VM after restore"
+    - name: "[00.1.4.1] Start VM after restore"
       community.general.proxmox_kvm:
         api_host: "{{ proxmox_host }}"
         api_user: "{{ proxmox_user_token.split('!')[0] }}"
@@ -225,7 +225,7 @@
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.4.2] Wait for SSH to become available on dev_vm"
+    - name: "[00.1.4.2] Wait for SSH to become available on dev_vm"
       ansible.builtin.wait_for:
         host: "{{ hostvars[groups['vm-prox-dev'][0]]['ansible_host'] }}"
         port: 22
@@ -234,7 +234,7 @@
       run_once: true
       delegate_to: localhost
 
-    - name: "[00.PRE.RESTORE.4.3] Restore complete — confirm and continue"
+    - name: "[00.1.4.3] Restore complete — confirm and continue"
       ansible.builtin.debug:
         msg:
           - "==========================================================="

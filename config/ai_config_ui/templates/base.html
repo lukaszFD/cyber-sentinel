@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AI Config{% endblock %} · Cyber Sentinel</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+{% if session.get('user') %}
+<header class="topbar">
+  <a class="brand" href="{{ url_for('dashboard') }}"><span class="dot"></span>Cyber Sentinel <em>AI config</em></a>
+  <nav>
+    {% set nav = [
+      ('dashboard', 'Overview'),
+      ('settings_page', 'Settings'),
+      ('prompts_page', 'Prompt'),
+      ('trusted_page', 'Trusted infra'),
+      ('threat_levels_page', 'Threat scale'),
+      ('allowlist_page', 'Allow-list'),
+      ('simulator_page', 'Simulator'),
+      ('audit_page', 'Change log'),
+    ] %}
+    {% for ep, label in nav %}
+      <a href="{{ url_for(ep) }}" class="{{ 'active' if request.endpoint == ep or (ep == 'prompts_page' and request.endpoint and request.endpoint.startswith('prompt')) }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="{{ url_for('logout') }}" class="logout">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <span class="muted">{{ session['user'] }}</span>
+    <button class="btn ghost small" type="submit">Log out</button>
+  </form>
+</header>
+{% endif %}
+<main class="{% block main_class %}page{% endblock %}">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flashes">
+        {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

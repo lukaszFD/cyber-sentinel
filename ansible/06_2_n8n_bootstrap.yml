@@ -8,12 +8,12 @@
 #                  with the SAME IDs the workflow JSON expects
 #
 # Depends on: - 04.2 (n8n-server running)
-#             - 04.4 (owner account exists, workflow imported)
+#             - 04.6 (owner account exists, workflow imported)
 #             - 06.1 (Vault provisioned; n8n read-only token either
 #                     minted in THIS run or saved in ansible-vault)
 #
 # Vault token for n8n — resolution order:
-#   1. Token minted by 06.1 Stage 7 earlier in the SAME run
+#   1. Token minted by 06.1 Section 7 earlier in the SAME run
 #      (registered var n8n_token_create survives across plays).
 #      Takes priority because it is guaranteed to be valid for the
 #      Vault instance that is running right now — a fresh dev deploy
@@ -94,7 +94,7 @@
           - lookup('vars', item, default='') | string | length > 0
         fail_msg: >-
           '{{ item }}' is empty. For the Vault token: either run this playbook
-          in the same 00_main.yml run as 06.1 on a fresh Vault (Stage 7 mints
+          in the same 00_main.yml run as 06.1 on a fresh Vault (Section 7 mints
           a new token), or set vault_n8n_vault_token in ansible-vault.
           A renewal in 06.1 does not return the token value.
         quiet: true

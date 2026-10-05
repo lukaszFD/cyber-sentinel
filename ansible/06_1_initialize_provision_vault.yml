@@ -1,33 +1,31 @@
 ---
 # ============================================================
-# Cyber Sentinel — Vault Full Lifecycle Playbook
+# Cyber Sentinel — Playbook 06.1 — Vault Init, Unseal & Provision
 # ============================================================
-# Combines: 06_initialize_provision_vault.yml + 06_2_provision_vault.yml
+# Purpose:    Single idempotent lifecycle playbook for HashiCorp Vault:
+#               - first run (uninitialized Vault): initializes it,
+#                 unseals with the freshly generated keys, provisions all
+#                 secrets, and displays root_token + unseal_keys ONCE
+#               - re-run: unseals from group_vars if sealed, re-provisions
+#                 secrets with vault_root_token, never re-displays keys
+#             In both cases Section 7 maintains a scoped, read-only Vault
+#             token for n8n (minted on first run / renewed on re-run);
+#             playbook 06.2 imports it into n8n in the same run.
 #
-# Behaviour:
-#   - First run (uninitialized Vault):
-#       * Initializes Vault, captures root_token + unseal_keys
-#       * Auto-unseals using freshly generated keys
-#       * Provisions all secrets, certs, credentials
-#       * Mints a scoped, read-only Vault token for n8n (Stage 7);
-#         playbook 06.2 imports it into n8n automatically in the
-#         same run (registered var n8n_token_create)
-#       * Displays root_token + unseal_keys, and the n8n token,
-#         ONCE at the end (operator must save them manually —
-#         never written anywhere)
+# Depends on: - 04.2 (hashicorp_vault container running, port 8200 bound
+#               to 127.0.0.1 on the host)
+#             - group_vars: every variable in required_vars_always;
+#               vault_root_token + vault_unseal_keys on re-runs
 #
-#   - Re-run (initialized Vault):
-#       * Skips init
-#       * Auto-unseals from group_vars (vault_unseal_keys) if sealed
-#       * Provisions / updates secrets using vault_root_token from group_vars
-#       * Renews the existing n8n token (via its accessor) instead of
-#         minting a new one, if vault_n8n_token_accessor is set —
-#         see Stage 7 header for why this matters
-#       * Final message confirms success without exposing keys
+# Outputs:    - KV v2 engine at secret/, populated under cyber-sentinel/
+#               (api-keys/*, certs/*, credentials/*)
+#             - ACL policy n8n-readonly + periodic n8n token
 #
+# Sections:   0 pre-flight · 1 init · 2 unseal · 3 KV engine · 4 API keys
+#             5 certificates · 6 credentials · 7 n8n token · 8 summary
 # ============================================================
 
-- name: Cyber Sentinel — Vault Full Lifecycle (Init + Unseal + Provision)
+- name: 06.1 - Vault lifecycle (init + unseal + provision)
   hosts: all_servers
   gather_facts: false
 
@@ -45,7 +43,6 @@
     required_vars_always:
       - vault_virus_total_token
       - vault_gemini_api_key
-      - vault_kali_gemini_api_key
       - vault_abuse_api_key
       - vault_grafana_api_key
       - vault_urlscanio_api_key
@@ -59,9 +56,8 @@
       - portainer_admin_user
       - n8n_admin_user
       - postgres_user
-      - vault_webui_secret_key
-      - webui_admin_email
-      - vault_webui_admin_password
+      - ai_config_db_user
+      - vault_ai_config_db_password
 
     # Cert/key pairs — checked dynamically via lookup
     required_cert_services:
@@ -72,29 +68,29 @@
   tasks:
 
     # ============================================================
-    # STAGE 0 — PRE-FLIGHT CHECKS
+    # SECTION 0 — PRE-FLIGHT CHECKS
     # ============================================================
 
-    - name: "[PRE] Check Vault initialization status"
+    - name: "[06.1.0.1] Check Vault initialization status"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/init"
         method: GET
       register: vault_init_check
 
-    - name: "[PRE] Set fact — is Vault already initialized"
+    - name: "[06.1.0.2] Set fact — is Vault already initialized"
       ansible.builtin.set_fact:
         vault_already_initialized: "{{ vault_init_check.json.initialized }}"
 
-    - name: "[PRE] Verify always-required variables are defined"
+    - name: "[06.1.0.3] Verify always-required variables are defined"
       ansible.builtin.assert:
         that:
           - vars[item] is defined
           - vars[item] | string | length > 0
-        fail_msg: "Required variable '{{ item }}' (referenced by templates/env.j2) is missing or empty."
+        fail_msg: "Required variable '{{ item }}' is missing or empty."
         quiet: true
       loop: "{{ required_vars_always }}"
 
-    - name: "[PRE] Verify re-run variables are defined (only if Vault already initialized)"
+    - name: "[06.1.0.4] Verify re-run variables are defined (only if Vault already initialized)"
       ansible.builtin.assert:
         that:
           - vars[item] is defined
@@ -104,7 +100,7 @@
       loop: "{{ required_vars_rerun }}"
       when: vault_already_initialized
 
-    - name: "[PRE] Verify cert/key pairs exist for each service"
+    - name: "[06.1.0.5] Verify cert/key pairs exist for each service"
       ansible.builtin.assert:
         that:
           - lookup('vars', 'vault_' + item + '_cert', default='') | length > 0
@@ -113,7 +109,7 @@
         quiet: true
       loop: "{{ required_cert_services }}"
 
-    - name: "[PRE] Pre-flight summary"
+    - name: "[06.1.0.6] Pre-flight summary"
       ansible.builtin.debug:
         msg:
           - "Vault host: {{ vault_url }}"
@@ -121,17 +117,17 @@
           - "Mode: {{ 'RE-RUN (using existing creds)' if vault_already_initialized else 'FIRST INIT (generating new creds)' }}"
 
     # ============================================================
-    # STAGE 1 — INITIALIZE (only if Vault is fresh)
+    # SECTION 1 — INITIALIZE (only if Vault is fresh)
     # ============================================================
 
-    - name: "[INIT] Initialize Vault (generates root_token + unseal_keys)"
+    - name: "[06.1.1.1] Initialize Vault (generates root_token + unseal_keys)"
       ansible.builtin.shell:
         cmd: "docker exec hashicorp_vault vault operator init -format=json"
       register: vault_init_raw
       when: not vault_already_initialized
       changed_when: vault_init_raw.rc == 0
 
-    - name: "[INIT] Parse newly generated credentials"
+    - name: "[06.1.1.2] Parse newly generated credentials"
       ansible.builtin.set_fact:
         vault_creds: "{{ vault_init_raw.stdout | from_json }}"
       when: not vault_already_initialized
@@ -139,7 +135,7 @@
 
     # Unified token used by all subsequent tasks: either freshly generated
     # (first run) or pulled from group_vars (re-run).
-    - name: "[INIT] Set effective root token for this play"
+    - name: "[06.1.1.3] Set effective root token for this play"
       ansible.builtin.set_fact:
         effective_root_token: >-
           {{ vault_creds.root_token if not vault_already_initialized
@@ -147,16 +143,16 @@
       no_log: true
 
     # ============================================================
-    # STAGE 2 — UNSEAL
+    # SECTION 2 — UNSEAL
     # ============================================================
 
-    - name: "[UNSEAL] Re-check Vault health (after potential init)"
+    - name: "[06.1.2.1] Re-check Vault health (after potential init)"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/health"
         status_code: [200, 429, 501, 503]
       register: vault_health
 
-    - name: "[UNSEAL] Auto-unseal using freshly generated keys (first run)"
+    - name: "[06.1.2.2] Auto-unseal using freshly generated keys (first run)"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/unseal"
         method: POST
@@ -168,7 +164,7 @@
         - vault_health.status == 503
       no_log: true
 
-    - name: "[UNSEAL] Auto-unseal using group_vars keys (re-run, if sealed)"
+    - name: "[06.1.2.3] Auto-unseal using group_vars keys (re-run, if sealed)"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/unseal"
         method: POST
@@ -181,10 +177,10 @@
       no_log: true
 
     # ============================================================
-    # STAGE 3 — ENABLE KV ENGINE
+    # SECTION 3 — ENABLE KV ENGINE
     # ============================================================
 
-    - name: "[KV] Ensure KV v2 secrets engine is enabled at /secret"
+    - name: "[06.1.3.1] Ensure KV v2 secrets engine is enabled at /secret"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/mounts/secret"
         method: POST
@@ -195,10 +191,10 @@
       no_log: true
 
     # ============================================================
-    # STAGE 4 — API KEYS
+    # SECTION 4 — API KEYS
     # ============================================================
 
-    - name: "[API] Provision external API tokens"
+    - name: "[06.1.4.1] Provision external API tokens"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/api-keys/{{ item.path }}"
         method: POST
@@ -210,17 +206,15 @@
       loop:
         - { path: "virustotal",                     value: "{{ vault_virus_total_token }}" }
         - { path: "gemini/home-network-guardian",   value: "{{ vault_gemini_api_key }}" }
-        - { path: "gemini/kali-linux",              value: "{{ vault_kali_gemini_api_key }}" }
         - { path: "abuse/api-key",                  value: "{{ vault_abuse_api_key }}" }
         - { path: "grafana/api-key",                value: "{{ vault_grafana_api_key }}" }
         - { path: "urlscanio/api-key",              value: "{{ vault_urlscanio_api_key }}" }
-        - { path: "open-webui/secret-key",          value: "{{ vault_webui_secret_key }}" }
 
     # ============================================================
-    # STAGE 5 — CERTIFICATES
+    # SECTION 5 — CERTIFICATES
     # ============================================================
 
-    - name: "[CERTS] Provision TLS certs/keys for services"
+    - name: "[06.1.5.1] Provision TLS certs/keys for services"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/certs/{{ item }}"
         method: POST
@@ -235,10 +229,10 @@
       no_log: true
 
     # ============================================================
-    # STAGE 6 — APP & DATABASE CREDENTIALS
+    # SECTION 6 — APP & DATABASE CREDENTIALS
     # ============================================================
 
-    - name: "[CREDS] Provision application and database credentials"
+    - name: "[06.1.6.1] Provision application and database credentials"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/credentials/{{ item.path }}"
         method: POST
@@ -256,15 +250,15 @@
         - { path: "grafana",           value: "{{ vault_grafana_password }}" }
         - { path: "portainer",         value: "{{ vault_portainer_password }}", user: "{{ portainer_admin_user }}" }
         - { path: "n8n",               value: "{{ vault_n8n_password }}",       user: "{{ n8n_admin_user }}" }
-        - { path: "open_webui",        value: "{{ vault_webui_admin_password }}", user: "{{ webui_admin_email }}" }
         # Database roots
         - { path: "postgres/root",        value: "{{ vault_postgres_root_password }}", user: "postgres" }
         - { path: "postgres/app_manager", value: "{{ vault_postgres_password }}",       user: "{{ postgres_user }}" }
+        - { path: "postgres/ai_config_editor", value: "{{ vault_ai_config_db_password }}", user: "{{ ai_config_db_user }}" }
         # Email
         - { path: "gmail",   value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}" }
 
     # ============================================================
-    # STAGE 7 — N8N READ-ONLY TOKEN (LEAST PRIVILEGE)
+    # SECTION 7 — N8N READ-ONLY TOKEN (LEAST PRIVILEGE)
     # ------------------------------------------------------------
     # n8n previously authenticated to Vault using vault_root_token —
     # full admin access to every secret, cert, and Vault's own
@@ -278,11 +272,12 @@
     #
     # Deliberately NOT included (n8n never reads these at runtime):
     #   - certs/*                      (Nginx-only, staged by playbook 05)
-    #   - credentials/postgres/root    (Ansible-only, playbook 04.3b)
+    #   - credentials/postgres/root    (Ansible-only, playbook 04.3)
+    #   - credentials/postgres/ai_config_editor (AI config editor only)
     #   - credentials/pihole|grafana|portainer|n8n
-    #     (admin UI passwords, consumed by Ansible in 04.4, not n8n)
-    #   - api-keys/grafana/*, api-keys/open-webui/*
-    #     (consumed by Ansible/Grafana provisioning, not n8n)
+    #     (admin UI passwords, consumed by Ansible in 04.6, not n8n)
+    #   - api-keys/grafana/*
+    #     (consumed by Grafana provisioning, not n8n)
     #
     # api-keys/* is granted as a whole subtree rather than one leaf
     # path per provider — CTI API keys are exactly the class of
@@ -332,7 +327,7 @@
     # vault_n8n_vault_token from ansible-vault.
     # ============================================================
 
-    - name: "[N8N-TOKEN] Set effective renewal period"
+    - name: "[06.1.7.1] Set effective renewal period"
       ansible.builtin.set_fact:
         n8n_token_period: "{{ vault_n8n_token_period | default('8760h') }}"
 
@@ -346,7 +341,7 @@
     # Scoped to the token auth mount only (auth/token/tune), not the
     # server-wide default_lease_ttl/max_lease_ttl — leaves lease
     # durations for KV secrets and everything else untouched.
-    - name: "[N8N-TOKEN] Raise token auth backend's max lease TTL to allow the configured period"
+    - name: "[06.1.7.2] Raise token auth backend's max lease TTL to allow the configured period"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/auth/token/tune"
         method: POST
@@ -356,7 +351,7 @@
           max_lease_ttl: "{{ n8n_token_period }}"
         status_code: [200, 204]
 
-    - name: "[N8N-TOKEN] Create/update the n8n read-only ACL policy"
+    - name: "[06.1.7.3] Create/update the n8n read-only ACL policy"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/sys/policies/acl/n8n-readonly"
         method: PUT
@@ -376,7 +371,7 @@
               capabilities = ["read"]
             }
 
-            # Exact path written by Stage 6 ({ path: "gmail" }) and read by
+            # Exact path written by Section 6 ({ path: "gmail" }) and read by
             # the "Vault - SMTP sender" node in workflow v3. The glob above
             # only matches paths BELOW gmail/, never gmail itself.
             path "secret/data/cyber-sentinel/credentials/gmail" {
@@ -384,7 +379,7 @@
             }
         status_code: [200, 204]
 
-    - name: "[N8N-TOKEN] Attempt to renew existing n8n token (re-run path)"
+    - name: "[06.1.7.4] Attempt to renew existing n8n token (re-run path)"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/auth/token/renew-accessor"
         method: POST
@@ -397,14 +392,14 @@
       when: vault_n8n_token_accessor is defined and vault_n8n_token_accessor | length > 0
       no_log: true
 
-    - name: "[N8N-TOKEN] Determine whether a new token must be minted"
+    - name: "[06.1.7.5] Determine whether a new token must be minted"
       ansible.builtin.set_fact:
         n8n_token_needs_creation: >-
           {{ (vault_n8n_token_accessor is not defined) or
              (vault_n8n_token_accessor | length == 0) or
              (n8n_token_renew is defined and n8n_token_renew.status != 200) }}
 
-    - name: "[N8N-TOKEN] Mint a new orphan, periodic, read-only token for n8n"
+    - name: "[06.1.7.6] Mint a new orphan, periodic, read-only token for n8n"
       ansible.builtin.uri:
         url: "{{ vault_url }}/v1/auth/token/create-orphan"
         method: POST
@@ -421,7 +416,7 @@
       when: n8n_token_needs_creation
       no_log: true
 
-    - name: "[N8N-TOKEN] Display newly minted token (SAVE THIS NOW — shown only once)"
+    - name: "[06.1.7.7] Display newly minted token (SAVE THIS NOW — shown only once)"
       ansible.builtin.debug:
         msg:
           - "============================================================"
@@ -433,11 +428,11 @@
           - "  Policy:   n8n-readonly (read-only — api-keys/*, "
           - "            credentials/postgres/app_manager, "
           - "            credentials/gmail/* — see this playbook's"
-          - "            Stage 7 header for the full rationale)"
+          - "            Section 7 header for the full rationale)"
           - "  Period:   {{ n8n_token_period }} (~1 year). Renewal is NOT"
           - "            automatic — nothing in this stack runs on a"
           - "            schedule. This token expires unless someone"
-          - "            re-runs this playbook (Stage 7 renews it via"
+          - "            re-runs this playbook (Section 7 renews it via"
           - "            the accessor below) before the period elapses."
           - "            Put a reminder outside Vault for that date —"
           - "            Vault will not warn you before it expires."
@@ -456,18 +451,18 @@
           - "============================================================"
       when: n8n_token_needs_creation
 
-    - name: "[N8N-TOKEN] Confirm renewal (re-run path, nothing new to display)"
+    - name: "[06.1.7.8] Confirm renewal (re-run path, nothing new to display)"
       ansible.builtin.debug:
         msg: "n8n Vault token renewed via accessor {{ vault_n8n_token_accessor }} — still valid, no changes needed in n8n."
       when: not n8n_token_needs_creation
 
     # ============================================================
-    # STAGE 8 — FINAL MESSAGE
+    # SECTION 8 — FINAL MESSAGE
     # ============================================================
     # On first init: display creds ONCE so operator can save them manually.
     # On re-run: just confirm success, never re-display anything sensitive.
 
-    - name: "[DONE] First-init credential display (SAVE THESE NOW — shown only once)"
+    - name: "[06.1.8.1] First-init credential display (SAVE THESE NOW — shown only once)"
       ansible.builtin.debug:
         msg:
           - "============================================================"
@@ -492,7 +487,7 @@
           - "============================================================"
       when: not vault_already_initialized
 
-    - name: "[DONE] Re-run completion message"
+    - name: "[06.1.8.2] Re-run completion message"
       ansible.builtin.debug:
         msg:
           - "============================================================"

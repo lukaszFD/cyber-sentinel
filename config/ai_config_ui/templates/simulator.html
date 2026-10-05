@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Scoring simulator{% endblock %}
+{% block content %}
+<h1>Scoring simulator</h1>
+<div class="help-box">
+  Two ways to run it:
+  <ul>
+    <li><strong>Calculate</strong> — a "what-if" calculator. You type in what VirusTotal, ThreatFox and URLhaus
+      <em>would</em> return and the simulator runs the same rule engine (<code>compute_threat_score()</code>) the n8n
+      workflow uses, with the current <a href="{{ url_for('settings_page') }}">settings</a> and
+      <a href="{{ url_for('trusted_page') }}">trusted infrastructure</a>. No external request is made.</li>
+    <li><strong>Fetch live data &amp; calculate</strong> — asks the real APIs first, exactly like the workflow:
+      VirusTotal by IP, then ThreatFox (by IP) and URLhaus (by domain) <em>only if</em> VirusTotal passes the gate.
+      The results fill the form, so you can tweak them afterwards and press Calculate.
+      Without an IP the domain is resolved directly against Unbound — not through Pi-hole — so the lookup never
+      enters the real n8n work queue.</li>
+  </ul>
+  Nothing is written to the database. The domain name matters for the allow-list check, <code>domain_suffix</code>
+  trusted entries and the URLhaus lookup.
+</div>
+
+<div class="presets">
+  <span class="muted small">Start from a scenario:</span>
+  {% for key, p in presets.items() %}
+    <a class="btn small {{ 'primary' if key == preset and not result else 'ghost' }}" href="{{ url_for('simulator_page', preset=key) }}" title="{{ p.hint }}">{{ p.label }}</a>
+  {% endfor %}
+</div>
+
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <div class="sim-grid">
+    <fieldset><legend>Observable</legend>
+      <label>FQDN<input name="fqdn" value="{{ form.fqdn }}" class="mono"></label>
+      <p class="muted small">Checked against the allow-list (step 1) and <code>domain_suffix</code> trusted entries.</p>
+      <label>Observable IP <span class="muted small">live lookup only · empty = resolve the FQDN</span><input name="observable_ip" value="{{ form.observable_ip }}" class="mono" placeholder="auto" inputmode="decimal"></label>
+      <input type="hidden" name="ip_auto" value="{{ form.ip_auto }}">
+      <p class="muted small">The workflow queries VirusTotal and ThreatFox by the IP the domain resolved to in your DNS traffic.</p>
+    </fieldset>
+    <fieldset><legend>VirusTotal (primary source)</legend>
+      <label>vt_status<select name="vt_status">{% for s in ['ok', 'no_data'] %}<option {{ 'selected' if form.vt_status == s }}>{{ s }}</option>{% endfor %}</select></label>
+      <label>vt_malicious <span class="muted small">engines that flag it as malicious</span><input name="vt_malicious" type="number" min="0" max="200" value="{{ form.vt_malicious }}"></label>
+      <label>vt_as_owner <span class="muted small">matched against as_owner trusted entries</span><input name="vt_as_owner" value="{{ form.vt_as_owner }}"></label>
+    </fieldset>
+    <fieldset><legend>ThreatFox (only above the gate)</legend>
+      <label>tf_status<select name="tf_status">{% for s in statuses %}<option {{ 'selected' if form.tf_status == s }}>{{ s }}</option>{% endfor %}</select></label>
+      <label>tf_ioc_count <span class="muted small">matching IOCs</span><input name="tf_ioc_count" type="number" min="0" value="{{ form.tf_ioc_count }}"></label>
+      <label class="check"><input type="checkbox" name="tf_active" {{ 'checked' if form.tf_active == 'on' }}> tf_active <span class="muted small">seen within tf_active_days</span></label>
+      <label>tf_malware_families <span class="muted small">comma-separated</span><input name="tf_malware_families" value="{{ form.tf_malware_families }}"></label>
+    </fieldset>
+    <fieldset><legend>URLhaus (only above the gate)</legend>
+      <label>uh_status<select name="uh_status">{% for s in statuses %}<option {{ 'selected' if form.uh_status == s }}>{{ s }}</option>{% endfor %}</select></label>
+      <label>uh_urls_online <span class="muted small">malicious URLs still online</span><input name="uh_urls_online" type="number" min="0" value="{{ form.uh_urls_online }}"></label>
+    </fieldset>
+  </div>
+  <div class="actions">
+    <button class="btn primary" type="submit" name="action" value="calc">Calculate</button>
+    {% if live_vt %}
+      <button class="btn" type="submit" name="action" value="live">Fetch live data &amp; calculate</button>
+      <span class="muted small">VirusTotal budget today: {{ vt_budget.used }}/{{ vt_budget.limit }} · min {{ vt_budget.interval }} s apart · quota shared with n8n{% if not live_abuse %} · <span class="tag warn">no abuse.ch key — ThreatFox / URLhaus will show "error"</span>{% endif %}</span>
+    {% else %}
+      <span class="muted small">Live lookups are off — set <code>AI_UI_VT_API_KEY</code> (see INTEGRATION.md).</span>
+    {% endif %}
+  </div>
+</form>
+
+{% if live %}
+<section class="card">
+  <h2>Live evidence <span class="muted small">for {{ form.fqdn }} → <span class="mono">{{ live.ip }}</span>{% if live.resolved %} · resolved via Unbound {{ live.resolver }}{% if live.resolved|length > 1 %} (first of {{ live.resolved|join(', ') }}){% endif %}{% else %} · IP entered manually{% endif %}</span></h2>
+  <div class="live-grid">
+    <div>
+      <h3>VirusTotal {% if live.vt.cached %}<span class="tag">cached</span>{% endif %}</h3>
+      {% if live.vt.status == 'no_data' %}
+        <p>VirusTotal has never seen this IP (HTTP 404) → <code>vt_status = no_data</code>.</p>
+      {% else %}
+        <p><strong class="{{ 'bad-text' if live.vt.malicious else '' }}">{{ live.vt.malicious }}</strong> malicious ·
+           {{ live.vt.suspicious }} suspicious · {{ live.vt.harmless }} harmless · {{ live.vt.undetected }} undetected
+           <span class="muted">(of {{ live.vt.engines_total }} engines)</span></p>
+        <dl class="kv">
+          <dt>AS owner</dt><dd>{{ live.vt.as_owner or '—' }}{% if live.vt.asn %} <span class="muted">AS{{ live.vt.asn }}</span>{% endif %}</dd>
+          <dt>Network</dt><dd class="mono">{{ live.vt.network or '—' }}</dd>
+          <dt>Country</dt><dd>{{ live.vt.country or '—' }}</dd>
+          <dt>Reputation</dt><dd>{{ live.vt.reputation if live.vt.reputation is not none else '—' }} <span class="muted small">community votes, not used for scoring</span></dd>
+          <dt>Tags</dt><dd>{{ live.vt.tags|join(', ') or '—' }}</dd>
+          <dt>Last analysis</dt><dd>{{ live.vt.last_analysis_date or '—' }}</dd>
+        </dl>
+        {% if live.vt.flagged_by %}
+          <p class="small"><strong>Flagged by:</strong>
+          {% for f in live.vt.flagged_by %}<span class="tag {{ 'bad' if f.category == 'malicious' else 'warn' }}" title="{{ f.result or '' }}">{{ f.engine }}</span> {% endfor %}</p>
+        {% endif %}
+        <p class="small"><a href="https://www.virustotal.com/gui/ip-address/{{ live.ip }}" target="_blank" rel="noopener noreferrer">Open the full report on VirusTotal ↗</a></p>
+      {% endif %}
+    </div>
+    <div>
+      <h3>ThreatFox {% if live.tf.cached %}<span class="tag">cached</span>{% endif %}</h3>
+      {% if live.tf.status == 'not_checked' %}<p class="muted">Not queried — VirusTotal is below the gate.</p>
+      {% elif live.tf.status == 'no_data' %}<p>No IOC whose host is this IP.</p>
+      {% elif live.tf.status == 'error' %}<p><span class="tag warn">error</span> {{ live.tf.error }}</p>
+      {% else %}
+        <p><strong>{{ live.tf.ioc_count }}</strong> IOC(s) · {{ 'active' if live.tf.active else 'not active' }} · max confidence {{ live.tf.max_confidence }}%</p>
+        <dl class="kv">
+          <dt>Families</dt><dd>{{ live.tf.malware_families|join(', ') or '—' }}</dd>
+          <dt>Threat types</dt><dd>{{ live.tf.threat_types|join(', ') or '—' }}</dd>
+          <dt>Last seen</dt><dd>{{ live.tf.last_seen or '—' }}</dd>
+        </dl>
+        <ul class="small mono">{% for i in live.tf.iocs %}<li>{{ i.ioc }} — {{ i.malware or '?' }} ({{ i.threat_type or '?' }})</li>{% endfor %}</ul>
+      {% endif %}
+      <h3>URLhaus {% if live.uh.cached %}<span class="tag">cached</span>{% endif %}</h3>
+      {% if live.uh.status == 'not_checked' %}<p class="muted">Not queried — VirusTotal is below the gate.</p>
+      {% elif live.uh.status == 'no_data' %}<p>The domain hosts no known malicious URL.</p>
+      {% elif live.uh.status == 'error' %}<p><span class="tag warn">error</span> {{ live.uh.error }}</p>
+      {% else %}
+        <p><strong>{{ live.uh.urls_online }}</strong> online of {{ live.uh.url_count }} malicious URL(s)</p>
+        <ul class="small mono">{% for u in live.uh.online_samples %}<li>{{ u.url }} — {{ u.threat or '?' }}</li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  </div>
+  <p class="muted small">This is what the workflow would store as evidence and hand to the AI Agent. A ThreatFox / URLhaus "error" is scored as missing evidence, as in the workflow.</p>
+</section>
+{% endif %}
+
+{% if result %}
+<section class="card">
+  <h2>What the workflow would do</h2>
+  <ol class="path">
+    <li class="{{ 'path-stop' if result.skipped else 'path-ok' }}">
+      <strong>1 · Work queue</strong> —
+      {% if result.skipped %}
+        <strong>{{ result.payload.fqdn }} is allow-listed</strong>
+        {% if result.allow_match %}(via <span class="mono">{{ result.allow_match.domain }}</span>, {{ result.allow_match.source }}{% if result.allow_match.rank %} #{{ result.allow_match.rank }}{% endif %}){% endif %}.
+        The workflow never sees it: <strong>no VirusTotal request, no score, no e-mail</strong>.
+        Everything below is hypothetical.
+      {% elif result.allowlisted %}
+        allow-listed, but the allow-list is switched off (<code>allowlist_enabled = 0</code>) — queued normally.
+      {% else %}
+        not on the allow-list — queued and sent to VirusTotal.
+      {% endif %}
+    </li>
+    <li class="{{ 'path-ok' if result.gate_open else 'path-muted' }}">
+      <strong>2 · VirusTotal gate</strong> (<code>vt_gate_min_malicious</code> = {{ result.gate|num }}) —
+      {% if result.gate_open %}
+        open: ThreatFox + URLhaus are queried and the AI Agent analyses the observable.
+      {% else %}
+        closed: ThreatFox and URLhaus are <strong>not queried</strong>, no AI analysis, no e-mail.
+        {% if result.ignored_enrichment %}<span class="tag warn">your ThreatFox / URLhaus input was ignored, as the workflow would</span>{% endif %}
+      {% endif %}
+    </li>
+    <li class="path-ok">
+      <strong>3 · Rule engine</strong> — score <strong>{{ result.score.rule_score }}</strong>
+      (base {{ result.score.base_score }} · VirusTotal {{ result.score.vt_level }} · ThreatFox {{ result.score.tf_level }}{% if result.score.trusted_cap_applied %} · capped by trusted infrastructure{% endif %}{% if result.score.urlhaus_bonus_applied %} · +1 URLhaus{% endif %})
+    </li>
+    <li class="{{ 'path-ok' if result.gate_open else 'path-muted' }}">
+      <strong>4 · AI Agent</strong> —
+      {% if result.gate_open %}
+        {% if result.max_dev == 0 %}explains the score, cannot change it (<code>ai_max_deviation</code> = 0).
+        {% else %}may move the score within {{ result.ai_range[0] }}–{{ result.ai_range[1] }} (<code>ai_max_deviation</code> = {{ result.max_dev }}).{% endif %}
+      {% else %}skipped (below the gate) — final score = rule score.{% endif %}
+    </li>
+    <li class="{{ 'path-warn' if result.would_email else 'path-muted' }}">
+      <strong>5 · E-mail</strong> (<code>email_min_score</code> = {{ result.email_min|num }}) —
+      {% if result.would_email %}sent (rule score {{ result.score.rule_score }} ≥ {{ result.email_min|num }}; the AI adjustment can still change this).
+      {% elif not result.gate_open %}not sent — only AI-analysed verdicts above the gate are e-mailed.
+      {% else %}not sent at the rule score (the AI adjustment could still push it over the threshold).{% endif %}
+    </li>
+  </ol>
+</section>
+
+<section class="card">
+  <div class="result-head">
+    <div class="score s{{ result.score.rule_score }}">{{ result.score.rule_score }}</div>
+    <div>
+      <div class="stat-sm">{{ result.level.description if result.level else '' }}</div>
+      <div class="muted">Recommended action: {{ result.level.action_recommended if result.level else '—' }}{% if result.level and result.level.is_malicious_flag %} · counted as malicious in Grafana{% endif %}</div>
+    </div>
+  </div>
+  <h2>Rule trace</h2>
+  <ol class="trace">{% for t in result.score.trace %}<li>{{ t }}</li>{% endfor %}</ol>
+</section>
+{% endif %}
+{% endblock %}

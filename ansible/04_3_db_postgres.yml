@@ -1,0 +1,135 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 04.3 — Postgres Schema Initialization
+# ============================================================
+# Purpose:    Renders the three Postgres scripts through Jinja2
+#             ({{ postgres_user }} / {{ vault_postgres_password }} for the
+#             n8n app role), pushes them into the running postgres_db
+#             container and executes them IN ORDER:
+#               1. db_deployment.sql            — CTI schema `cyber_sentinel`,
+#                                                 app role, views
+#               2. db_partitioning_retention.sql — monthly partitions +
+#                                                 pg_cron retention (the
+#                                                 partitioned parents reject
+#                                                 every INSERT until it runs)
+#               3. db_ai_pipeline.sql           — AI schema `cyber_sentinel_ai`
+#                                                 (settings, prompt, trusted
+#                                                 infra, verdict audit, vector
+#                                                 memory, scoring, allow-list,
+#                                                 work queue). Reads CTI tables,
+#                                                 never modifies `cyber_sentinel`.
+#
+# Depends on: - Playbook 04.2 (postgres_db container running, built from
+#               Dockerfile.postgres with pg_cron preloaded)
+#             - postgres_user / vault_postgres_password (group_vars)
+#             - Source SQL under {{ main_repo_source_dir }}/config/postgres/
+#
+# Outputs:    - cyber_intelligence database fully provisioned
+#             - {{ remote_deploy_base }}/postgres_init.log with execution
+#               timestamps and any psql output (success or errors)
+#             - Rendered SQL files removed after execution (they contain
+#               the app role's password in cleartext)
+#
+# Schema versioning: plain SQL files under config/postgres/, written to
+# be idempotent and re-run on every deployment by this playbook.
+# ============================================================
+
+- name: 04.3 - Postgres schema initialization
+  hosts: all_servers
+  become: yes
+
+  vars:
+    postgres_sql_dir: "{{ main_repo_source_dir }}/config/postgres"
+    postgres_init_log: "{{ remote_deploy_base }}/postgres_init.log"
+    # Execution order matters — see header.
+    postgres_scripts:
+      - { name: "schema",       src: "db_deployment.sql" }
+      - { name: "partitioning", src: "db_partitioning_retention.sql" }
+      - { name: "ai_pipeline",  src: "db_ai_pipeline.sql" }
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — Render and execute, in order
+    # ------------------------------------------------------------
+    # template: the scripts reference {{ postgres_user }}. The AI
+    # prompt in db_ai_pipeline.sql uses [[NAME]] placeholders on
+    # purpose, so Jinja2 leaves the prompt text untouched.
+    #
+    # -v ON_ERROR_STOP=1 makes psql return non-zero on the first real
+    # SQL error instead of continuing past it. The retry loop covers
+    # cold start (Postgres + pg_cron not yet accepting connections);
+    # a genuine SQL error also retries for ~100 s before failing.
+    # The always: block removes the rendered files even on failure.
+    # ============================================================
+
+    - name: "[04.3.1.X] Render and execute Postgres scripts"
+      block:
+        - name: "[04.3.1.1] Render SQL scripts with credentials"
+          ansible.builtin.template:
+            src: "{{ postgres_sql_dir }}/{{ item.src }}"
+            dest: "{{ remote_deploy_base }}/init_postgres_{{ item.name }}_rendered.sql"
+            owner: "{{ deployment_user }}"
+            mode: '0600'
+          loop: "{{ postgres_scripts }}"
+          loop_control:
+            label: "{{ item.src }}"
+
+        - name: "[04.3.1.2] Execute schema script (db_deployment.sql)"
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- Schema Execution Date: $(date) ---" >> {{ postgres_init_log }}
+              docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_schema_rendered.sql >> {{ postgres_init_log }} 2>&1
+          register: pg_schema_result
+          until: (pg_schema_result.rc | default(-1)) == 0
+          retries: 10
+          delay: 10
+
+        - name: "[04.3.1.3] Execute partitioning/retention script (db_partitioning_retention.sql)"
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- Partitioning Execution Date: $(date) ---" >> {{ postgres_init_log }}
+              docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_partitioning_rendered.sql >> {{ postgres_init_log }} 2>&1
+          register: pg_partition_result
+          until: (pg_partition_result.rc | default(-1)) == 0
+          retries: 10
+          delay: 10
+
+        # Fully idempotent: ai_settings values tuned in production (e.g.
+        # through the AI config editor) are never overwritten
+        # (ON CONFLICT DO NOTHING); prompt versions are insert-only.
+        - name: "[04.3.1.4] Execute AI pipeline script (db_ai_pipeline.sql)"
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- AI Pipeline Execution Date: $(date) ---" >> {{ postgres_init_log }}
+              docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_ai_pipeline_rendered.sql >> {{ postgres_init_log }} 2>&1
+          register: pg_ai_result
+          until: (pg_ai_result.rc | default(-1)) == 0
+          retries: 10
+          delay: 10
+
+      always:
+        - name: "[04.3.1.5] Remove rendered SQL scripts (contain cleartext password)"
+          ansible.builtin.file:
+            path: "{{ remote_deploy_base }}/init_postgres_{{ item.name }}_rendered.sql"
+            state: absent
+          loop: "{{ postgres_scripts }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+    # ============================================================
+    # SECTION 2 — Verification
+    # ------------------------------------------------------------
+    # The n8n workflow needs exactly one active AI Agent prompt and
+    # the PGVector table; fail the deployment here rather than at the
+    # workflow's first run.
+    # ============================================================
+
+    - name: "[04.3.2.1] Verify AI schema (one active prompt + vector memory table)"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec postgres_db psql -U postgres -d cyber_intelligence -At -c
+          "SELECT (SELECT count(*) FROM cyber_sentinel_ai.prompt_templates WHERE is_active) = 1
+              AND to_regclass('cyber_sentinel_ai.verdict_vectors') IS NOT NULL;"
+      register: pg_ai_verify
+      changed_when: false
+      failed_when: pg_ai_verify.rc != 0 or pg_ai_verify.stdout | trim != 't'

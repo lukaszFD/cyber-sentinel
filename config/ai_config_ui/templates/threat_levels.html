@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Threat scale{% endblock %}
+{% block content %}
+<h1>Threat scale (1–5)</h1>
+<p class="muted">Table <code>cyber_sentinel.dic_threat_levels</code>.</p>
+<div class="help-box">
+  <ul>
+    <li><strong>Description</strong> and <strong>Recommended action</strong> are inserted into the AI prompt as <code>[[THREAT_SCALE]]</code>. The AI uses them to word its verdict and the recommended action in <code>analysis_pl</code>, so keep them short and unambiguous. The description is also the <code>threat_label</code> shown in the Grafana threat explorer and alert views.</li>
+    <li><strong>Malicious</strong> decides which scores every Grafana view counts as malicious (malicious statistics, daily trends, threat explorer, threat alerts). The views read this table at query time, so a change is <strong>retroactive</strong> — historical verdicts are re-counted immediately. Malicious levels must be a contiguous top range (e.g. 4–5 or 3–5).</li>
+    <li>The scores themselves are produced by the rule engine (see <a href="{{ url_for('simulator_page') }}">Simulator</a>); editing this page never changes a score.</li>
+    <li>The number of levels is fixed at five: the rule engine, the prompt (<code>proposed_score: integer 1-5</code>) and the foreign key on stored verdicts all assume 1–5. Adding or removing a level is a code change, not something this page can do safely.</li>
+  </ul>
+</div>
+
+<form method="post" class="card" id="levels-form" data-confirm-malicious="Changing which levels are malicious re-counts every historical verdict in Grafana. Continue?">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <table class="list">
+    <thead><tr><th>Score</th><th>Description</th><th>Recommended action</th><th>Malicious</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono stat-sm">{{ r.score }}</td>
+      <td><input name="desc_{{ r.score }}" value="{{ r.description }}" maxlength="100" required class="wide"></td>
+      <td><input name="action_{{ r.score }}" value="{{ r.action_recommended or '' }}" maxlength="50"></td>
+      <td>
+        <label class="check">
+          <input type="checkbox" name="mal_{{ r.score }}" data-initial="{{ 'on' if r.is_malicious_flag else '' }}" {{ 'checked' if r.is_malicious_flag }}>
+          <span class="tag {{ 'bad' if r.is_malicious_flag else '' }}">{{ 'yes' if r.is_malicious_flag else 'no' }}</span>
+        </label>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="actions">
+    <button class="btn primary" type="submit">Save scale</button>
+    <a class="btn ghost" href="{{ url_for('threat_levels_page') }}">Discard</a>
+  </div>
+</form>
+
+<section class="card">
+  <h2>What <code>[[THREAT_SCALE]]</code> looks like in the prompt</h2>
+  <pre class="preview">{{ scale }}</pre>
+</section>
+{% endblock %}

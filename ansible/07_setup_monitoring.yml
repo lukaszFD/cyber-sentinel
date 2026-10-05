@@ -9,9 +9,6 @@
 #               - NVMe SMART health for the external SSD (Samsung 980
 #                 500GB behind a JMicron USB-NVMe bridge, /dev/sda,
 #                 requires `-d sntjmicron` for correct translation)
-#               - Hailo-10H module liveness (hailortcli fw-control
-#                 identify — confirms the NPU still responds, not just
-#                 that /dev/hailo0 exists)
 #
 #             NOT duplicated here (already covered by node_exporter's
 #             default collectors, confirmed present in the current
@@ -20,9 +17,9 @@
 #               - Raspberry Pi 5 SoC temperature (`--collector.thermal_zone`
 #                 reads /sys/class/thermal via --path.sysfs=/host/sys)
 #
-# Status:     ACTIVE. Restricted to rpi5-prod — the external SSD, USB
-#             bridge, and Hailo-10H are specific to this host and do
-#             not exist on the Dev environment (Dell Optiplex 7050).
+# Status:     ACTIVE. Restricted to rpi5-prod — the external SSD and USB
+#             bridge are specific to this host and do not exist on the
+#             Dev environment (Dell Optiplex 7050).
 #
 # Run order:  Run manually after 00_main.yml has completed at least
 #             once. Not imported into 00_main.yml — this is host
@@ -32,13 +29,9 @@
 # Depends on: - Playbook 03 (smartmontools, jq already installed)
 #             - Playbook 04.2 (node_exporter container running)
 #             - docker-compose-cyber-sentinel.yml node_exporter block
-#               updated with the textfile collector volume + flag
-#               (see accompanying compose diff — this playbook does
-#               NOT edit docker-compose itself, consistent with the
-#               rule that container definitions live in compose, not
-#               in ad-hoc Ansible docker_container tasks)
-#             - hailortcli available on the host (confirmed present,
-#               used earlier for `hailortcli fw-control identify`)
+#               with the textfile collector volume + flag (already in
+#               place — this playbook does NOT edit docker-compose,
+#               container definitions live in compose only)
 #
 # Outputs:    - /opt/cyber-sentinel/monitoring/collect_hardware_metrics.sh
 #             - Cron job running the script every 5 minutes
@@ -181,17 +174,6 @@
             echo "# TYPE cybersentinel_nvme_unsafe_shutdowns_total counter"
             echo "cybersentinel_nvme_unsafe_shutdowns_total{device=\"${NVME_DEV}\"} ${NVME_UNSAFE_SHUTDOWNS}"
 
-            # --- Hailo-10H module liveness ---
-            if hailortcli fw-control identify >/dev/null 2>&1; then
-              HAILO_RESPONSIVE=1
-            else
-              HAILO_RESPONSIVE=0
-            fi
-
-            echo "# HELP cybersentinel_hailo_device_responsive Whether hailortcli fw-control identify succeeded (1=responsive, 0=not responding)"
-            echo "# TYPE cybersentinel_hailo_device_responsive gauge"
-            echo "cybersentinel_hailo_device_responsive{device=\"/dev/hailo0\"} ${HAILO_RESPONSIVE}"
-
           } > "${TMP_FILE}"
 
           mv "${TMP_FILE}" "${OUT_FILE}"
@@ -228,7 +210,6 @@
       ansible.builtin.assert:
         that:
           - "'cybersentinel_nvme_smart_passed' in (metrics_file.content | b64decode)"
-          - "'cybersentinel_hailo_device_responsive' in (metrics_file.content | b64decode)"
         fail_msg: "hardware.prom was generated but is missing expected metric names — check collect_hardware_metrics.sh output manually."
 
     # ============================================================

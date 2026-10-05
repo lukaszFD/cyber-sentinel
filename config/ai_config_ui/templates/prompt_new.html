@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}New prompt version{% endblock %}
+{% block content %}
+<h1>New prompt version {% if source %}<span class="muted">(copy of {{ source }})</span>{% endif %}</h1>
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="source" value="{{ source }}">
+  <div class="form-row">
+    <label>Version<input name="version" value="{{ version }}" maxlength="20" pattern="[A-Za-z0-9._\-]{1,20}" required class="mono"></label>
+    <label class="grow">Note<input name="notes" value="{{ notes }}" maxlength="500" placeholder="what changed and why"></label>
+  </div>
+  <label>Text (system prompt)
+    <textarea name="system_prompt" class="prompt" spellcheck="false" data-counter required>{{ text }}</textarea>
+  </label>
+  <div class="counter muted small"></div>
+  <div class="actions">
+    <button class="btn primary" type="submit">Create draft</button>
+    <a class="btn ghost" href="{{ url_for('prompts_page') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Prompt {{ row.version }}{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Prompt <span class="mono">{{ row.version }}</span>
+    {% if row.is_active %}<span class="tag ok">ACTIVE</span>{% else %}<span class="tag">draft</span>{% endif %}</h1>
+  <div class="row-actions">
+    <a class="btn ghost" href="{{ url_for('prompt_diff', version=row.version) }}">Compare</a>
+    <a class="btn ghost" href="{{ url_for('prompt_new', **{'from': row.version}) }}">Copy to new version</a>
+  </div>
+</div>
+
+{% if report.missing %}<div class="flash warn">Placeholders required by the workflow are missing: {{ report.missing|join(', ') }} — this version cannot be activated.</div>{% endif %}
+{% if report.unknown %}<div class="flash warn">Unknown placeholders (n8n will not replace them): {% for p in report.unknown %}[[{{ p }}]] {% endfor %}</div>{% endif %}
+
+<form method="post" class="card">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
+  <label>Note<input name="notes" value="{{ row.notes or '' }}" maxlength="500"></label>
+  <label>Text (system prompt)
+    {% if row.is_active %}<span class="muted small"> — read-only, n8n is using this version right now. Copy it to make changes.</span>{% endif %}
+    <textarea name="system_prompt" class="prompt" spellcheck="false" data-counter {{ 'readonly' if row.is_active }}>{{ row.system_prompt }}</textarea>
+  </label>
+  <div class="counter muted small"></div>
+  <div class="help-box small">
+    <strong>Placeholders</strong> — replaced by the n8n "Build AI prompt" node on every run:
+    <ul>
+      <li><code>[[THREAT_SCALE]]</code> → the five lines of the <a href="{{ url_for('threat_levels_page') }}">threat scale</a> (score | description | action).</li>
+      <li><code>[[MAX_DEVIATION]]</code> → the <a href="{{ url_for('settings_page') }}#stage-4"><code>ai_max_deviation</code></a> setting — the same value the workflow uses as the limit for how far the AI may move the rule score.</li>
+    </ul>
+    The output field names in the prompt (verdict_label, summary_en, analysis_pl, proposed_score, deviation_reason, historical_match_ids, ...) must match the workflow's structured-output schema — renaming them breaks verdict parsing.
+  </div>
+  <div class="actions">
+    <button class="btn primary" type="submit" name="action" value="save">{{ 'Save note' if row.is_active else 'Save draft' }}</button>
+    <button class="btn ghost" type="submit" name="action" value="preview">Preview with values filled in</button>
+    <a class="btn ghost" href="{{ url_for('prompts_page') }}">← All versions</a>
+  </div>
+</form>
+
+{% if not row.is_active %}
+<form method="post" action="{{ url_for('prompt_activate', version=row.version) }}" class="inline-right" data-confirm="Activate version {{ row.version }}? Unsaved edits in the editor will be lost.">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <button class="btn primary" type="submit">Activate this version (saved text)</button>
+</form>
+{% endif %}
+
+{% if preview is not none %}
+<section class="card">
+  <h2>Preview (approximation of what the "Build AI prompt" node sends)</h2>
+  <pre class="preview">{{ preview }}</pre>
+</section>
+{% endif %}
+{% endblock %}

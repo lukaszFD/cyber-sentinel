@@ -399,7 +399,7 @@ $$;
 -- SECTION 7b: DOMAIN ALLOW-LIST (skip VirusTotal for popular domains)
 -- ============================================
 -- Source: Tranco top N (research ranking of popular registrable domains),
--- refreshed weekly by the host script deployed in playbook 04.3c, plus
+-- refreshed weekly by the host script deployed in playbook 04.4, plus
 -- optional manual entries (source = 'manual'), which the sync never touches.
 --
 -- Matching: an observable is allow-listed when its fqdn, or any parent

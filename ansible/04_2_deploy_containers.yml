@@ -4,20 +4,22 @@
 # ============================================================
 # Purpose:    Builds custom images and starts the entire Cyber Sentinel
 #             container stack via `docker compose up --build -d`.
-#             This is intentionally a thin playbook — all configuration
-#             happens in playbook 04.1, all post-deployment tweaks in
-#             playbook 04.4.
+#             This is intentionally a thin playbook — all staging
+#             happens in playbook 04.1, database provisioning in 04.3,
+#             post-deployment tweaks in 04.6.
 #
-# Depends on: - Playbook 04.1 completed (compose file + Dockerfiles +
-#               configs all present at remote_deploy_base)
+# Depends on: - Playbook 04.1 completed (compose file, Dockerfiles,
+#               build contexts and configs present at remote_deploy_base)
 #             - Playbook 03 (Docker Engine + Compose plugin installed,
 #               deployment_user in docker group)
-#             - .env file present (created in 01, augmented in 04.1)
+#             - Playbook 01 (.env present — compose resolves ${VAR}
+#               placeholders from it)
 #
 # Outputs:    All containers from docker-compose-cyber-sentinel.yml
-#             running in detached mode. The `--build` flag forces
-#             rebuild of custom images (pdns, log_processor, unsealer)
-#             on every run, picking up Dockerfile or script changes.
+#             running in detached mode. The `--build` flag rebuilds the
+#             custom images (postgres_db, passive_dns, dns_log_processor,
+#             ai-config-ui) on every run, picking up Dockerfile or
+#             source changes.
 #
 # ============================================================
 
@@ -29,16 +31,13 @@
     project_name: "cyber-sentinel"
     docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
 
-    # Previous (rpi5-prod-conditional) value, for reference:
-    #   "{{ '-f docker-compose-hailo.yml' if inventory_hostname in groups['rpi5-prod'] else '' }}"
-    hailo_compose_flag: ""
-
   tasks:
     # ============================================================
     # SECTION 1 — Build and start the stack
-    # ------------------------------------------------------------
+    # ============================================================
+
     - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:
-        cmd: "docker compose -f {{ docker_compose_file_name }} {{ hailo_compose_flag }} -p {{ project_name }} up --build -d"
+        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up --build -d"
         chdir: "{{ remote_deploy_base }}"
       register: deploy_output

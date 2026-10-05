@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Diff {{ row.version }}{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Compare <span class="mono">{{ against or '—' }}</span> → <span class="mono">{{ row.version }}</span></h1>
+  <a class="btn ghost" href="{{ url_for('prompt_edit', version=row.version) }}">← {{ row.version }}</a>
+</div>
+{% if others %}
+<form method="get" class="card form-row">
+  <label>Compare with
+    <select name="against">
+      {% for v in others %}<option value="{{ v }}" {{ 'selected' if v == against }}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="btn ghost" type="submit">Show</button>
+</form>
+<section class="card">
+  {% if lines %}
+  <pre class="diff">{% for kind, line in lines %}<span class="d-{{ kind }}">{{ line }}</span>
+{% endfor %}</pre>
+  {% else %}<p class="muted">No differences.</p>{% endif %}
+</section>
+{% else %}
+<p class="muted">This is the only version — nothing to compare with.</p>
+{% endif %}
+{% endblock %}
