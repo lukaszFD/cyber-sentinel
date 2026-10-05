@@ -7,7 +7,7 @@
 #             automatically by Ansible from group_vars/all_servers/
 #             whenever any playbook runs against this group.
 #
-# Loaded by:  All playbooks (00–06). Variables here are referenced
+# Loaded by:  All playbooks (00–07). Variables here are referenced
 #             inside playbooks as {{ variable_name }}.
 #
 # Pairs with: group_vars/all_servers/vault.yml — encrypted file
@@ -21,8 +21,8 @@
 # ------------------------------------------------------------
 
 # Local source directory where the Ansible playbook is run from
-# (on the controller host — Linux Mint). Used by playbook 04.1 to
-# locate config files, Dockerfiles, and SQL scripts to copy.
+# (on the controller host — Linux Mint). Used by playbooks 04.1–04.6
+# to locate config files, Dockerfiles, SQL scripts and app sources.
 main_repo_source_dir: "/home/hunter/IdeaProjects/cyber-sentinel"
 
 # Base directory on the remote host (VM/RPi) for deployment.
@@ -42,6 +42,8 @@ deployment_user: "{{ ansible_user }}"
 # ------------------------------------------------------------
 # [VARS.DATABASES] Postgres connection identity
 # ------------------------------------------------------------
+# App role used by n8n and dns_log_processor (created by 04.3,
+# password: vault_postgres_password).
 postgres_user: "hunter"
 
 # Postgres database name.
@@ -65,8 +67,16 @@ n8n_admin_email: "hunter@cyber-sentinel.local"
 # ------------------------------------------------------------
 # [VARS.VAULT_REFS]
 # ------------------------------------------------------------
-# Vault server's IP on the Docker internal_network. Used by any
-# component that talks to Vault from inside the container network.
-# KNOWN ISSUE — playbook 06 uses {{ ansible_host }}:8200 instead;
-# verify this variable is actually consumed before depending on it.
+# Vault server's IP on the Docker internal_network. Consumed by
+# playbook 06.2 (URL of n8n's "HashiCorp Vault account" credential).
+# Playbook 06.1 talks to Vault from the host via 127.0.0.1:8200.
 vault_address: "10.10.10.12"
+
+# ------------------------------------------------------------
+# [VARS.AI_CONFIG] AI config editor (ai-config-ui, playbook 04.5)
+# ------------------------------------------------------------
+# Dedicated least-privilege Postgres role for the web UI — must differ
+# from postgres_user and from "postgres" (asserted in [04.5.0.2]).
+# Secrets in vault.yml: vault_ai_config_db_password,
+# vault_ai_ui_secret_key, vault_ai_ui_users, vault_ai_config_cert/key.
+ai_config_db_user: "ai_config_editor"

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>AI pipeline settings</h1>
+<p class="muted">Table <code>cyber_sentinel_ai.ai_settings</code>. The n8n workflow and the rule engine read these values on every run — a saved change applies from the next run, nothing has to be restarted. Keys can only be added or removed by <code>db_ai_pipeline.sql</code> (a missing key stops the workflow). Use the <a href="{{ url_for('simulator_page') }}">Simulator</a> to see the effect of a threshold before real traffic hits it.</p>
+
+<section class="card pipeline">
+  <h2>How an observable flows through the workflow</h2>
+  <ol class="pipeline-steps">
+    {% for n, st in stages.items() %}
+      <li><a href="#stage-{{ n }}"><strong>{{ st.title }}</strong></a><span class="muted small">{{ st.intro }}</span></li>
+    {% endfor %}
+  </ol>
+</section>
+
+<form method="post">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  {% for n, st in stages.items() if st.rows %}
+  <section class="card" id="stage-{{ n }}">
+    <h2>Step {{ n }} · {{ st.title }}</h2>
+    <p class="muted small">{{ st.intro }}</p>
+    {% for r in st.rows %}
+      <div class="setting">
+        <div class="setting-head">
+          <div>
+            <div class="mono setting-key">{{ r.key }}</div>
+            <div class="muted small">Used by: {{ r.help.used_by }}</div>
+          </div>
+          <div class="setting-input">
+            <input type="hidden" name="o__{{ r.key }}" value="{{ r.value|num }}">
+            {% if r.key == 'allowlist_enabled' %}
+              <select name="v__{{ r.key }}">
+                <option value="1" {{ 'selected' if r.value == 1 }}>1 — on</option>
+                <option value="0" {{ 'selected' if r.value == 0 }}>0 — off</option>
+              </select>
+            {% else %}
+              <input class="num" name="v__{{ r.key }}" value="{{ r.value|num }}" inputmode="numeric"
+                     type="number" min="{{ r.help.min }}" max="{{ r.help.max }}" step="{{ 1 if r.help.integer else 'any' }}">
+            {% endif %}
+            <div class="muted small">range {{ r.help.min }}–{{ r.help.max }} · changed {{ r.updated_at|dt }}</div>
+          </div>
+        </div>
+        <p>{{ r.help.what }}</p>
+        <div class="effects">
+          <div><span class="tag">{{ 'Set to 1' if r.key == 'allowlist_enabled' else 'Higher value' }}</span> {{ r.help['raise'] }}</div>
+          <div><span class="tag">{{ 'Set to 0' if r.key == 'allowlist_enabled' else 'Lower value' }}</span> {{ r.help['lower'] }}</div>
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+  {% if other %}
+  <section class="card">
+    <h2>Other settings</h2>
+    {% for r in other %}
+      <div class="setting">
+        <div class="setting-head">
+          <div><div class="mono setting-key">{{ r.key }}</div><div class="muted small">{{ r.category }}</div></div>
+          <div class="setting-input">
+            <input type="hidden" name="o__{{ r.key }}" value="{{ r.value|num }}">
+            <input class="num" name="v__{{ r.key }}" value="{{ r.value|num }}" inputmode="decimal">
+            <div class="muted small">changed {{ r.updated_at|dt }}</div>
+          </div>
+        </div>
+        <p>{{ r.description }}</p>
+      </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <div class="actions sticky">
+    <button class="btn primary" type="submit">Save changes</button>
+    <a class="btn ghost" href="{{ url_for('settings_page') }}">Discard</a>
+    <a class="btn ghost" href="{{ url_for('simulator_page') }}">Test in the simulator →</a>
+  </div>
+</form>
+{% endblock %}

@@ -17,8 +17,8 @@
 #             - python3-docker and python3-hvac available for Ansible
 #             - htop, smartmontools, fail2ban, jq, sqlite3 installed
 #             - On RPi 5: argononed service active with custom thermal
-#               curve (50% fan @ 55°C, 100% fan @ 65°C) tuned for AI
-#               workloads.
+#               curve (50% fan @ 55°C, 100% fan @ 65°C) tuned for
+#               sustained container load.
 #
 # ============================================================
 
@@ -55,12 +55,12 @@
           - lsb-release             # Reports Debian release codename
           - python3-pip             # Required by some Ansible collections
           - python3-docker          # Backend for community.docker.* modules
-          - python3-hvac            # HashiCorp Vault client (playbook 06)
+          - python3-hvac            # HashiCorp Vault client (playbook 06.1)
           - htop                    # Interactive process viewer
           - smartmontools           # Storage health monitoring (smartctl)
-          - fail2ban                # Brute-force protection (config in 04.4)
+          - fail2ban                # Brute-force protection (config in 04.6)
           - jq                      # JSON processor for n8n/API tasks
-          - sqlite3                 # Pi-hole gravity.db manipulation (04.4)
+          - sqlite3                 # Pi-hole gravity.db manipulation (04.6)
         state: present
         update_cache: yes
 
@@ -139,10 +139,11 @@
     # SECTION 3 — Argon NEO 5 fan control (Raspberry Pi 5 only)
     # ------------------------------------------------------------
     # The default fan curve on the Argon NEO 5 case is too conservative
-    # for sustained AI workloads — the SoC throttles before the fan
-    # ramps up. This section installs the vendor script and overrides
-    # /etc/argononed.conf to start cooling at 55°C and reach 100% by
-    # 65°C, which keeps Ollama/n8n responsive under load.
+    # for the full container stack under sustained load — the SoC
+    # throttles before the fan ramps up. This section installs the
+    # vendor script and overrides /etc/argononed.conf to start cooling
+    # at 55°C and reach 100% by 65°C, which keeps Postgres/n8n
+    # responsive under load.
     #
     # The whole block is gated on aarch64 to skip cleanly on x86 hosts.
     # ============================================================
@@ -164,9 +165,9 @@
             executable: /bin/bash
             creates: /usr/bin/argonone-config
 
-        # Custom thermal curve tuned for sustained AI inference workloads.
+        # Custom thermal curve tuned for sustained load.
         # Format: <temperature_celsius>=<fan_speed_percent>
-        - name: "[03.3.3] Configure custom fan thresholds for AI workloads"
+        - name: "[03.3.3] Configure custom fan thresholds for sustained load"
           ansible.builtin.copy:
             dest: /etc/argononed.conf
             content: |

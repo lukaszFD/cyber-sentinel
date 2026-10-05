@@ -1,0 +1,81 @@
+---
+# ============================================================
+# Cyber Sentinel — Pinned container images (single source of truth)
+# ============================================================
+# Purpose:    Every registry image used by the stack, pinned as
+#             `repo:tag@sha256:digest`. The digest is authoritative
+#             (Docker pulls by digest); the tag is informational only.
+#
+# Consumed by:
+#             - templates/docker-compose-cyber-sentinel.yml
+#               (rendered by playbook 04.1 → `image: "{{ cs_images.<svc> }}"`)
+#             - 05_deploy_proxy.yml [05.4.1] → nginx-proxy
+#
+# Provenance: Digests taken from the dev host (x86_64) on 2026-10-04
+#             after a successful end-to-end test. Double-checked
+#             2026-10-05 on dev: (A) every running container uses
+#             exactly this digest, (B) the tag still resolves to the
+#             same index in the registry (except nginx, see below),
+#             and every index includes linux/arm64 (prod = RPi 5).
+#
+# Updating:   1. Test the new version on dev.
+#             2. Read the digest of the multi-arch index (NOT a
+#                platform-specific manifest):
+#                  docker buildx imagetools inspect <repo>:<tag> | awk '/^Digest:/{print $2; exit}'
+#             3. Confirm arm64 is present:
+#                  docker buildx imagetools inspect <repo>@<digest> | grep linux/arm64
+#             4. Replace the line below and commit.
+#
+# Not secret — kept out of vault.yml on purpose.
+# ============================================================
+
+cs_images:
+  # DNS layer
+  unbound:        "klutchell/unbound:1.26.1@sha256:9a3939ca33d6d3b42b81a70391bb8e43f0a08d2bd7a3fdffb43d427493345c36"
+  pihole:         "pihole/pihole:2026.09.0@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be"
+
+  # Automation
+  n8n:            "n8nio/n8n:2.41.6@sha256:87e0bab2c93192e8dd885ff7b0697c22a1bd97489568a8c67cc140fd7dbb342d"
+
+  # Secrets
+  vault:          "hashicorp/vault:1.21.3@sha256:5f244d447c6f90107149c9565da5ffedf847cec673ba0062a82fc3dd83c89e65"
+
+  # Observability
+  grafana:        "grafana/grafana:13.2.3@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572"
+  prometheus:     "prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e"
+  node_exporter:  "quay.io/prometheus/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0"
+
+  # Admin UIs
+  portainer:      "portainer/portainer-ce:2.45.1@sha256:4d616db18cfeb5dd41a69c0958bc825c84483ea9cde1106eb82a5d26f3bd8b0e"
+  # Digest only — LinuxServer version label is not a reliable registry tag
+  firefox:        "lscr.io/linuxserver/firefox@sha256:2637935d2bb9d5e4f474c92942d8ade7fa4df823cc4cfbcb57564217ebc6c0d6"
+
+  # Reverse proxy (outside compose — playbook 05)
+  # Note (2026-10-05): the 1.31.6 tag on Docker Hub now points to a newer
+  # rebuild; this digest is the one tested on dev (nginx -v = 1.31.6).
+  nginx:          "nginx:1.31.6@sha256:abe47724e466aeab9a345d8e46a221c2fa8953c7848bb4a3bd9976a7199f8cf2"
+
+# ------------------------------------------------------------
+# Base images for locally built services (FROM lines)
+# ------------------------------------------------------------
+# NOT WIRED YET — reference only. Wiring requires
+# `ARG BASE_IMAGE` + `FROM ${BASE_IMAGE}` in each Dockerfile and
+# `build.args.BASE_IMAGE` in compose.
+#
+# Double-checked 2026-10-05: (A) each digest is exactly what dev's
+# BuildKit resolved in the `FROM` step (`compose build --progress=plain`),
+# (B) the tag still resolves to the same index in the registry, and
+# every index includes linux/arm64.
+#
+#   Service             Dockerfile                  Note
+#   ai-config-ui        ai_config_ui/Dockerfile
+#   postgres_db         Dockerfile.postgres
+#   dns_log_processor   Dockerfile.log_processor    python 3.9 is EOL
+#   passive_dns         Dockerfile.pdns             alpine 3.18 is EOL
+# ------------------------------------------------------------
+
+cs_base_images:
+  ai_config_ui:       "python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+  postgres_db:        "pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a"
+  dns_log_processor:  "python:3.9-slim@sha256:2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b"
+  passive_dns:        "alpine:3.18@sha256:de0eb0b3f2a47ba1eb89389859a9bd88b28e82f5826b6969ad604979713c2d4f"

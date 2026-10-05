@@ -3,15 +3,17 @@
 # ============================================================
 # Purpose:    Defines all services that make up the Cyber Sentinel
 #             stack: DNS layer (Unbound, Pi-hole, passive DNS),
-#             automation (n8n), data store (Postgres),
-#             observability (Grafana, Prometheus, node_exporter),
-#             secret management (HashiCorp Vault), and admin UIs
-#             (Portainer, Firefox).
+#             automation (n8n), data store (Postgres — the only
+#             database), observability (Grafana, Prometheus,
+#             node_exporter), secret management (HashiCorp Vault),
+#             and admin UIs (Portainer, Firefox, AI config editor).
 #
-# Started by: Playbook 04.2 with `docker compose up --build -d`.
+# Started by: Playbook 04.2 with `docker compose up --build -d`
+#             (rendered by 04.1 with `template` — {{ domain_suffix }}
+#             is Jinja2, ${VAR} is left for docker compose).
 #             Project name pinned to "cyber-sentinel" so container
 #             names are predictable (referenced as bare names by
-#             playbooks 04.3b, 04.4, and 06).
+#             playbooks 04.3 – 04.6 and 06.1).
 #
 # Network:    All services attach to a single bridge network
 #             `internal_network` (10.10.10.0/24) with static IPs.
@@ -19,27 +21,27 @@
 #             instead of DNS names where convenient.
 #
 #             IP allocation:
-#               .2  unbound          .9  postgres_db (moved here from .16 —
-#               .3  passive_dns          formerly mysqldb's address, free
-#               .4  pihole (DNS)         since the MySQL decommission; see
-#               .5  firefox              future-roadmap.md Section 8)
-#               .6  dns_log_processor .10 portainer
-#               .7  n8n              .11 grafana
-#               .8  (freed — MongoDB    .12 vault
-#                    decommissioned)    .13 prometheus
-#                                       .14 node_exporter
-#               .15 vault_unsealer (disabled)
-#               .16 (freed — postgres_db moved to .9; this file is now the
-#                    single compose definition, docker-compose-postgres.yml
-#                    is retired)
-#               .17 open-webui (docker-compose-hailo.yml) — NOT deployed;
-#                    Hailo-10H is powered down, see note near [SVC.AI.HAILO]
-#                    below.
+#               .2  unbound              .9  postgres_db
+#               .3  passive_dns          .10 portainer
+#               .4  pihole (DNS)         .11 grafana
+#               .5  firefox              .12 vault
+#               .6  dns_log_processor    .13 prometheus
+#               .7  n8n                  .14 node_exporter
+#               .8  ai-config-ui         .15 vault_unsealer (disabled)
 #               .100 nginx-proxy (created by playbook 05)
 #
 # Env vars:   ${VAR} placeholders are resolved from the .env file
-#             at {{ remote_deploy_base }}/.env (created by 01,
-#             augmented by 04.1).
+#             at {{ remote_deploy_base }}/.env (rendered by playbook 01
+#             from templates/env.j2).
+#
+# Image pinning:
+#             Registry images come from `cs_images` in
+#             group_vars/all/images.yml (single source of truth,
+#             shared with playbook 05 for nginx-proxy). Each entry is
+#             `repo:tag@sha256:digest`; the digest is authoritative.
+#             Locally built services (passive_dns, dns_log_processor,
+#             postgres_db, ai-config-ui) are pinned via the FROM line
+#             in their Dockerfiles, not here.
 #
 # KNOWN ISSUES (deferred — do not silently fix during this pass):
 #
@@ -48,12 +50,7 @@
 #     under remote_deploy_base. These paths are inconsistent — one
 #     of the two layouts is wrong. Verify by checking where
 #     /etc/pihole/gravity.db actually lives on a deployed host.
-#
-#   * (RESOLVED) n8n and Vault previously published their ports as
-#     5678:5678 / 8200:8200 (0.0.0.0), bypassing the Nginx HTTPS
-#     proxy from playbook 05 — Docker's published-port DNAT bypasses
-#     UFW's INPUT rules regardless of allow_ports. Both now bind
-#     127.0.0.1 only; see the port mapping comments on each service.
+
 # ============================================================
 
 services:
@@ -67,7 +64,7 @@ services:
   # queries here on port 53 internal.
   # ------------------------------------------------------------
   unbound:
-    image: klutchell/unbound:latest
+    image: "{{ cs_images.unbound }}"
     container_name: unbound
     hostname: unbound
     networks:
@@ -81,7 +78,7 @@ services:
   # [SVC.DNS.PASSIVE] passive_dns — sniffer for IoC harvesting
   # ------------------------------------------------------------
   # Custom dnsmasq build that logs every query/response to a file
-  # which dns_log_processor then parses and feeds into MySQL. This
+  # which dns_log_processor then parses and feeds into Postgres. This
   # is the data source for the threat intelligence pipeline — every
   # IoC analyzed by the AI agent originates here.
   #
@@ -112,14 +109,14 @@ services:
   # [SVC.DNS.AD_BLOCK] Pi-hole — DNS-level ad/threat blocking
   # ------------------------------------------------------------
   # Public DNS server (53/tcp + 53/udp on the host). Adlists are
-  # populated by playbook 04.4 [04.4.2.3]. Forwards uncached
-  # queries to Unbound for recursive resolution.
+  # populated by playbook 04.6 [04.6.2.4]. Upstream is set to
+  # passive_dns by [04.6.2.3] (pihole -> passive_dns -> unbound).
   # ------------------------------------------------------------
   # KNOWN ISSUE: volume paths './pihole' and './dnsmasq.d' lack
   # the "config/" prefix used elsewhere in the layout — see file
   # header for details.
   pihole:
-    image: pihole/pihole:latest
+    image: "{{ cs_images.pihole }}"
     container_name: pihole
     networks:
       internal_network:
@@ -146,7 +143,7 @@ services:
   # tmpfs:/config makes the browser stateless — no profile lingers.
   # ------------------------------------------------------------
   firefox:
-    image: lscr.io/linuxserver/firefox:latest
+    image: "{{ cs_images.firefox }}"
     container_name: firefox
     hostname: firefox
     tmpfs:
@@ -166,10 +163,10 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------
-  # [SVC.DNS.PROCESSOR] dns_log_processor — log → MySQL pipeline
+  # [SVC.DNS.PROCESSOR] dns_log_processor — log → Postgres pipeline
   # ------------------------------------------------------------
   # Tails the dnsmasq log file and inserts parsed records into
-  # cyber_intelligence.dns_queries. This is the bridge between
+  # cyber_sentinel.dns_queries. This is the bridge between
   # passive_dns (which writes flat logs) and the schema that the
   # AI agent and Grafana consume. Read-only mount on the log
   # file because this container should never write to it.
@@ -195,7 +192,7 @@ services:
   # [SVC.AUTOMATION] n8n — workflow automation engine
   # ------------------------------------------------------------
   n8n:
-    image: n8nio/n8n:latest
+    image: "{{ cs_images.n8n }}"
     container_name: n8n-server
     networks:
       internal_network:
@@ -210,7 +207,7 @@ services:
       # rather than relying on a firewall rule that doesn't actually
       # apply to Docker-published ports. Also closes the window where
       # n8n's /rest/owner/setup (unauthenticated on a fresh instance)
-      # was reachable from the network before playbook 04.4 claims it.
+      # was reachable from the network before playbook 04.6 claims it.
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
@@ -257,28 +254,73 @@ services:
       retries: 10
 
   # ------------------------------------------------------------
-  # [SVC.DB.MYSQL] MySQL — REMOVED (decommissioned)
+  # [SVC.UI.AI_CONFIG] ai-config-ui — AI pipeline config editor
   # ------------------------------------------------------------
-  # Fully replaced by postgres_db (see docker-compose-postgres.yml).
-  # Removed rather than kept-but-unused: the mysql_data volume and this
-  # service definition are gone; config/mysql/*.sql are dead files, not
-  # deleted from the repo but no longer executed by any playbook (see
-  # 00_main.yml — 04_3_db_create.yml and 04_6_setup_partitioning.yml are
-  # no longer imported). See future-roadmap.md Section 8 for what still
-  # depends on this cutover being finished (n8n workflow, Grafana
-  # datasource) before it's a complete decommission.
+  # Web UI for the data the n8n AI workflow reads on every run
+  # (cyber_sentinel_ai settings, prompt versions, trusted infra,
+  # manual allow-list, threat-scale wording). Connects as the
+  # dedicated least-privilege role from db_ai_config_editor.sql —
+  # never as postgres or the n8n role. Build context is staged by
+  # playbook 04.1 [04.1.2.8]; DB role created by playbook 04.5.
+  #
+  # No `ports:` at all — reachable only through nginx-proxy
+  # (playbook 05, `ai_config` entry), so there is no published-port
+  # DNAT to bypass UFW (see n8n note above).
+  #
+  # Only the six AI_UI_* variables are passed in (not env_file:
+  # .env) — this container never sees any other stack secret. The
+  # VirusTotal / abuse.ch keys power the simulator's live lookups
+  # (the same keys n8n uses; the UI keeps its own quota guard).
+  #
+  # dns: Pi-hole is used for the UI's own outbound lookups (API
+  # hosts). Simulated domains are resolved straight against Unbound
+  # (AI_UI_RESOLVER) so they never reach passive_dns / dns_queries.
   # ------------------------------------------------------------
+  ai-config-ui:
+    build:
+      context: ./ai_config_ui
+      dockerfile: Dockerfile
+    image: cyber-sentinel/ai-config-ui:local
+    container_name: ai-config-ui
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.8
+    dns: 10.10.10.4
+    environment:
+      AI_UI_DB_HOST: postgres_db
+      AI_UI_DB_PORT: "5432"
+      AI_UI_DB_NAME: cyber_intelligence
+      AI_UI_DB_USER: ${AI_UI_DB_USER}
+      AI_UI_DB_PASSWORD: ${AI_UI_DB_PASSWORD}
+      AI_UI_SECRET_KEY: ${AI_UI_SECRET_KEY}
+      AI_UI_USERS: ${AI_UI_USERS}
+      AI_UI_VT_API_KEY: ${AI_UI_VT_API_KEY}
+      AI_UI_ABUSE_API_KEY: ${AI_UI_ABUSE_API_KEY}
+      AI_UI_RESOLVER: 10.10.10.2
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
 
   # ------------------------------------------------------------
   # [SVC.UI.PORTAINER] Portainer — Docker management UI
   # ------------------------------------------------------------
   # Web UI for inspecting containers, logs, networks, and volumes.
   # Mounting docker.sock gives Portainer full control over the
-  # Docker daemon. Owner account is initialized by playbook 04.4
-  # [04.4.3.1] via the REST API.
+  # Docker daemon. Owner account is initialized by playbook 04.6
+  # [04.6.3.4] via the REST API.
   # ------------------------------------------------------------
   portainer:
-    image: portainer/portainer-ce:latest
+    image: "{{ cs_images.portainer }}"
     container_name: portainer
     hostname: portainer
     networks:
@@ -293,13 +335,13 @@ services:
   # ------------------------------------------------------------
   # [SVC.OBSERVE.GRAFANA] Grafana — dashboards and alerts
   # ------------------------------------------------------------
-  # Renders the threat intelligence dashboards backed by
-  # cyber_intelligence views (v_grafana_*). Provisioning files
+  # Renders the threat intelligence dashboards backed by the
+  # cyber_sentinel.v_grafana_* views. Provisioning files
   # (datasources, dashboards) are copied by playbook 04.1
-  # [04.1.4.4] and [04.1.4.5].
+  # [04.1.3.3] and [04.1.3.4].
   # ------------------------------------------------------------
   grafana:
-    image: grafana/grafana:latest
+    image: "{{ cs_images.grafana }}"
     container_name: grafana
     networks:
       internal_network:
@@ -319,21 +361,21 @@ services:
   # ------------------------------------------------------------
   # File-backend Vault used by n8n workflows to fetch CTI API
   # tokens at runtime. Initialized, unsealed, and provisioned by
-  # playbook 06. IPC_LOCK capability prevents Vault's secrets
+  # playbook 06.1. IPC_LOCK capability prevents Vault's secrets
   # from being swapped to disk.
   #
   # Why VAULT_LOCAL_CONFIG inline JSON (not a config file): keeps
   # bootstrap simple — no separate vault.hcl to mount. The actual
   # data lives at /vault/file (mounted from ./config/vault/data,
-  # owned by UID 100 — see playbook 04.1 [04.1.5.2]).
+  # owned by UID 100 — see playbook 04.1 [04.1.4.2]).
   # ------------------------------------------------------------
   vault:
-    image: hashicorp/vault:1.21.3
+    image: "{{ cs_images.vault }}"
     container_name: hashicorp_vault
     ports:
       # Loopback-only — same rationale as n8n above. Vault is also
       # reverse-proxied externally via Nginx (playbook 05,
-      # hashicorp_vault service entry). Playbook 06 calls this port
+      # hashicorp_vault service entry). Playbook 06.1 calls this port
       # directly over HTTP as http://127.0.0.1:8200 from tasks that
       # run ON this host (no delegate_to), so loopback-only doesn't
       # break provisioning — it just stops 8200 from being reachable
@@ -360,10 +402,10 @@ services:
   # ------------------------------------------------------------
   # Scrapes node_exporter (system metrics) and any other
   # configured targets (see config/prometheus/prometheus.yml).
-  # Used by Grafana as a datasource alongside MySQL.
+  # Used by Grafana as a datasource alongside Postgres.
   # ------------------------------------------------------------
   prometheus:
-    image: prom/prometheus:latest
+    image: "{{ cs_images.prometheus }}"
     container_name: prometheus
     volumes:
       - ./config/prometheus:/etc/prometheus
@@ -386,14 +428,14 @@ services:
   # without privileged mode.
   # ------------------------------------------------------------
   node_exporter:
-    image: quay.io/prometheus/node-exporter:latest
+    image: "{{ cs_images.node_exporter }}"
     container_name: node_exporter
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
-      # Textfile collector — feeds NVMe SMART and Hailo liveness
-      # metrics generated on the host by playbook 07 (cron, every
+      # Textfile collector — feeds NVMe SMART metrics generated
+      # on the host by playbook 07 (cron, every
       # 5 min). Read-only from the container's side; the host-side
       # script is the only writer.
       - /opt/cyber-sentinel/monitoring/textfile_collector:/textfile_collector:ro
@@ -415,12 +457,11 @@ services:
   # DISABLED — kept commented out for reference. When enabled,
   # this container reads three unseal keys baked into the image
   # at build time and unseals Vault on every restart. Currently
-  # unsealing is handled by playbook 06.
+  # unsealing is handled by playbook 06.1.
   #
-  # KNOWN ISSUE: playbook 04.1 [04.1.2.5] and [04.1.2.6] still
-  # copy Dockerfile.unsealer and unsealer.py to the remote host
-  # even though this service is disabled. Either remove those
-  # tasks or re-enable the service below.
+  # Playbook 04.1 [04.1.2.6] / [04.1.2.7] still stage
+  # Dockerfile.unsealer and unsealer.py, so re-enabling this
+  # block needs no playbook change.
   # ------------------------------------------------------------
   #  vault_unsealer:
   #    build:
@@ -438,38 +479,12 @@ services:
   #    depends_on:
   #      - vault
 
-  # ------------------------------------------------------------
-  # [SVC.AI.HAILO] hailo-ollama — REMOVED, runs natively on the host
-  # ------------------------------------------------------------
-  # hailo-ollama is NOT containerized. It's an official Hailo binary
-  # (hailo-ai/hailo_model_zoo_genai, C++ on top of HailoRT) confirmed
-  # installed at /usr/bin/hailo-ollama on rpi5-prod, managed as a
-  # systemd service by playbook 04.7 (config/hailo/hailo-ollama.service).
-  # Its default and confirmed-actual port is 8000, not 11434 — earlier
-  # revisions of this file assumed an Ollama-style container on 11434
-  # and a config.yaml controlling listen address; neither is real.
-  # The PCIe kernel driver and the inference process both stay on the
-  # host — there was never a good reason to containerize this given
-  # HailoRT's device access model, and it's also the pattern Hailo's
-  # own documentation recommends.
-  #
-  # open-webui (the chat UI for hailo-ollama) is NOT defined in this
-  # file either — see docker-compose-hailo.yml. It's an rpi5-prod-only
-  # addon file, staged and included only on that host (playbooks 04.1
-  # / 04.2), rather than an inline Jinja2 conditional block in this
-  # file. An earlier revision tried the inline-conditional approach; Jinja2's
-  # whitespace handling around block tags silently corrupted the YAML
-  # indentation on render (duplicate "image" key errors from docker
-  # compose) — fragile enough to not be worth the alternative of a
-  # second file.
-  # ------------------------------------------------------------
-
 # ============================================================
 # Networks
 # ============================================================
 # Single bridge network for all services. The fixed /24 subnet
-# lets us assign predictable IPs (.2 – .15 reserved for stack
-# services, .100 reserved for Nginx proxy from playbook 05).
+# lets us assign predictable IPs (.2 – .15 stack services, see the
+# allocation table in the header; .100 Nginx proxy, playbook 05).
 # ============================================================
 networks:
   internal_network:
@@ -487,8 +502,6 @@ networks:
 #   grafana_data    — dashboards (non-provisioned), users, prefs
 #   prometheus_data — TSDB metrics history
 #   postgres_data   — cyber_intelligence database files
-#   (open_webui_data — declared in docker-compose-hailo.yml — NOT
-#    currently deployed, Hailo-10H is powered down)
 # ============================================================
 volumes:
   n8n_data:

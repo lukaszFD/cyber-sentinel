@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Trusted infrastructure{% endblock %}
+{% block content %}
+<h1>Trusted infrastructure ("big players")</h1>
+<p class="muted">Table <code>cyber_sentinel_ai.trusted_infrastructure</code>, read by <code>compute_threat_score()</code> on every observable.</p>
+<div class="help-box">
+  <strong>What a match does in the rule engine</strong>
+  <ul>
+    <li><strong>Step 1</strong> — up to <a href="{{ url_for('settings_page') }}#stage-3"><code>vt_big_player_noise_max</code></a> VirusTotal detections are treated as noise (level CLEAN).</li>
+    <li><strong>Step 5</strong> — the final rule score is capped at <strong>2 (Monitor)</strong> unless ThreatFox names a malware family. A match therefore prevents "Malicious" verdicts and e-mails for that host.</li>
+  </ul>
+  <strong>Match types</strong>
+  <ul>
+    <li><code>as_owner</code> — case-insensitive <em>substring</em> of the VirusTotal AS owner ("google" matches "Google LLC"). Minimum 4 characters.</li>
+    <li><code>domain_suffix</code> — the domain itself and every subdomain ("microsoft.com" matches "update.microsoft.com").</li>
+  </ul>
+  <strong>Do not add hosting anyone can rent</strong> (AWS, Azure VMs, OVH, Hetzner, DigitalOcean, GitHub) — attackers run C2 servers there and the cap would hide them. Disable an entry instead of deleting it if you are unsure; the change log keeps the history.
+</div>
+
+<form method="post" class="card form-row">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="add">
+  <label>Type
+    <select name="match_type">
+      <option value="as_owner">as_owner — AS owner substring</option>
+      <option value="domain_suffix">domain_suffix — domain + subdomains</option>
+    </select>
+  </label>
+  <label class="grow">Pattern<input name="pattern" required maxlength="200" placeholder="e.g. microsoft or windowsupdate.com"></label>
+  <label class="grow">Note<input name="note" maxlength="200"></label>
+  <button class="btn primary" type="submit">Add</button>
+</form>
+
+<section class="card">
+<table class="list">
+  <thead><tr><th>Type</th><th>Pattern</th><th>Note</th><th>Status</th><th>Added</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr class="{{ 'row-off' if not r.is_active }}">
+    <td class="mono small">{{ r.match_type }}</td>
+    <td class="mono">{{ r.pattern }}</td>
+    <td>
+      <form method="post" class="inline">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="note"><input type="hidden" name="id" value="{{ r.id }}">
+        <input name="note" value="{{ r.note or '' }}" maxlength="200" class="inline-input">
+        <button class="btn small ghost" type="submit">Save</button>
+      </form>
+    </td>
+    <td>{% if r.is_active %}<span class="tag ok">active</span>{% else %}<span class="tag">disabled</span>{% endif %}</td>
+    <td class="muted small nowrap">{{ r.created_at|dt }}</td>
+    <td class="row-actions">
+      <form method="post">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="{{ r.id }}">
+        <button class="btn small ghost" type="submit">{{ 'Disable' if r.is_active else 'Enable' }}</button>
+      </form>
+      <form method="post" data-confirm="Delete {{ r.match_type }} = {{ r.pattern }}?">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ r.id }}">
+        <button class="btn small danger" type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="muted">No entries.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Prompt{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>AI Agent prompt versions</h1>
+  <a class="btn primary" href="{{ url_for('prompt_new') }}">+ New version from active</a>
+</div>
+<p class="muted">The system prompt the n8n AI Agent (Gemini) receives for every observable above the VirusTotal gate. The <strong>active</strong> version is read-only because n8n uses it on every run. Workflow: copy → edit the draft → compare → activate. Rolling back = activating an older version again. Every verdict stores the prompt version it was produced with (<code>verdict_audit.prompt_version</code>).</p>
+<section class="card">
+<table class="list">
+  <thead><tr><th>Version</th><th>Status</th><th>Note</th><th>Size</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'row-active' if r.is_active }}">
+      <td class="mono"><a href="{{ url_for('prompt_edit', version=r.version) }}">{{ r.version }}</a></td>
+      <td>{% if r.is_active %}<span class="tag ok">ACTIVE</span>{% else %}<span class="tag">draft</span>{% endif %}</td>
+      <td>{{ r.notes or '' }}</td>
+      <td class="muted small nowrap">{{ r.lines or 0 }} lines · {{ r.chars }} chars</td>
+      <td class="nowrap muted small">{{ r.created_at|dt }}</td>
+      <td class="row-actions">
+        <a class="btn small ghost" href="{{ url_for('prompt_diff', version=r.version) }}">Diff</a>
+        <a class="btn small ghost" href="{{ url_for('prompt_new', **{'from': r.version}) }}">Copy</a>
+        {% if not r.is_active %}
+        <form method="post" action="{{ url_for('prompt_activate', version=r.version) }}" data-confirm="Activate version {{ r.version }}? n8n uses it from the next workflow run.">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn small primary" type="submit">Activate</button>
+        </form>
+        <form method="post" action="{{ url_for('prompt_delete', version=r.version) }}" data-confirm="Delete version {{ r.version }}? This cannot be undone (the text stays in the change log).">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn small danger" type="submit">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

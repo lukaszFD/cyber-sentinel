@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Change log{% endblock %}
+{% block content %}
+<h1>Change log</h1>
+<p class="muted">Table <code>cyber_sentinel_ai.config_change_log</code> — written by a database trigger, so changes made outside this UI (psql, n8n) are recorded too. Append-only; this UI can only read it. Shows the latest 200 entries.</p>
+<form method="get" class="card form-row">
+  <label>Table
+    <select name="table"><option value="">— all —</option>
+      {% for t in tables %}<option value="{{ t }}" {{ 'selected' if t == table }}>{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="btn ghost" type="submit">Filter</button>
+</form>
+<section class="card">
+<table class="list audit">
+  <thead><tr><th>When</th><th>Who</th><th>Table</th><th>Op.</th><th>Key</th><th>Change</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="nowrap small">{{ r.changed_at|dt }}</td>
+    <td>{{ r.actor }}{% if r.actor != r.db_user %}<div class="muted small">{{ r.db_user }}</div>{% endif %}</td>
+    <td class="mono small">{{ r.table_name.split('.')[-1] }}</td>
+    <td><span class="tag op-{{ r.operation|lower }}">{{ r.operation }}</span></td>
+    <td class="mono">{{ r.row_key }}</td>
+    <td>
+      {% if r.operation == 'UPDATE' %}
+        {% for c in r.changes %}
+          {% if c.diff %}
+            <details><summary><span class="mono">{{ c.field }}</span> — text changed</summary>
+              <pre class="diff">{% for kind, line in c.diff %}<span class="d-{{ kind }}">{{ line }}</span>
+{% endfor %}</pre></details>
+          {% else %}
+            <div><span class="mono">{{ c.field }}</span>: <span class="old">{{ c.old if c.old is not none else 'NULL' }}</span> → <span class="new">{{ c.new if c.new is not none else 'NULL' }}</span></div>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <details><summary>row</summary><pre class="json">{{ (r.new_data or r.old_data)|tojson(indent=2) }}</pre></details>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="muted">No entries.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

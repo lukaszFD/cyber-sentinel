@@ -3,7 +3,7 @@
 # Cyber Sentinel — Playbook 04.1 — Prepare Sentinel Stack
 # ============================================================
 # Purpose:    Stages all configuration files, Dockerfiles, scripts,
-#             and provisioning data on the remote host BEFORE the
+#             and build contexts on the remote host BEFORE the
 #             docker compose run in playbook 04.2. This is purely
 #             a file-copy / directory-creation playbook — no
 #             services are started here.
@@ -14,8 +14,10 @@
 #               the Ansible control host (config/*, docker/*).
 #
 # Outputs:    Fully populated {{ remote_deploy_base }} tree containing:
-#               - docker-compose YAML
-#               - Dockerfiles for custom images (pdns, log_processor, vault unsealer)
+#               - docker-compose YAML (rendered — contains Jinja2)
+#               - Dockerfiles for custom images (postgres, pdns,
+#                 log_processor, vault unsealer)
+#               - ai_config_ui/ build context (AI config editor)
 #               - Service configs (unbound, prometheus, grafana)
 #               - Pre-created log file with permissive ownership for DNS container
 #               - Vault data directory with correct UID:GID
@@ -27,12 +29,10 @@
   become: yes
 
   vars:
-    project_name: "cyber-sentinel"
     docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
 
     # Required by docker-compose-cyber-sentinel.yml's Jinja2
-    # ({{ domain_suffix }} in the n8n service block), now that
-    # [04.1.2.1] renders the file via `template`. Must stay
+    # ({{ domain_suffix }} in the n8n service block). Must stay
     # identical to the definition in 05_deploy_proxy.yml — both
     # need the same value for the same host, since 05 sets Nginx's
     # server_name using this and 04.1 sets n8n's own idea of its
@@ -41,12 +41,6 @@
 
     source_docker_compose_file: "{{ main_repo_source_dir }}/docker/{{ docker_compose_file_name }}"
     remote_docker_compose_file: "{{ remote_deploy_base }}/{{ docker_compose_file_name }}"
-
-    # NOTE: The two vars below are unused in this playbook. They are
-    # re-declared and used in 04_3_db_create.yml. Kept here for now
-    # to avoid breaking any external references; review for removal.
-    source_mysql_script: "{{ main_repo_source_dir }}/config/mysql/db_deployment.sql"
-    mysql_init_log: "{{ remote_deploy_base }}/mysql_init.log"
 
   tasks:
     # ============================================================
@@ -70,12 +64,10 @@
         - "config/nginx/conf.d"                        # Nginx server blocks (populated in 05)
         - "config/nginx/certs"                         # TLS certs (populated in 05)
         - "config/nginx/html"                          # Static error pages
-        - "config/mysql"                               # MySQL init scripts (dead — MySQL decommissioned, kept for reference only)
-        - "config/postgres"                            # Postgres init scripts (populated in 04.3b)
+        - "config/postgres"                            # Postgres init scripts (rendered in 04.3)
         - "config/unbound"                             # Recursive DNS resolver config
         - "config/dns/dnsmasq.d"                       # Pi-hole local DNS overrides
         - "config/dns/var-log"                         # Passive DNS log volume
-        - "config/kali"                                # Kali container shared dir
         - "portainer_data"                             # Portainer state volume
         - "n8n_data"                                   # n8n workflows + credentials volume
         - "config/vault/data"                          # Vault file-backend storage (UID 100)
@@ -83,20 +75,23 @@
         - "config/grafana/provisioning/datasources"    # Auto-provisioned datasources
         - "config/grafana/provisioning/dashboards"     # Dashboard provisioning manifest
         - "config/grafana/dashboards"                  # Actual dashboard JSON files
+        - "ai_config_ui"                               # AI config editor build context
 
     # ============================================================
-    # SECTION 2 — Stack manifests (docker-compose + Dockerfiles)
+    # SECTION 2 — Stack manifests (docker-compose + build inputs)
     # ------------------------------------------------------------
-    # Copies the orchestration manifest and all custom Dockerfiles
-    # used by `docker compose up --build` in playbook 04.2.
+    # Copies the orchestration manifest and everything that
+    # `docker compose up --build` in playbook 04.2 needs to build
+    # the custom images. A missing build context here makes 04.2
+    # fail for the WHOLE stack, not only for that one service.
     # ============================================================
 
     # docker-compose-cyber-sentinel.yml contains live Jinja2
     # ({{ domain_suffix }} in the n8n service's N8N_HOST and
-    # WEBHOOK_URL, per the file's own header comment). `template`
-    # is required here, not `copy` — copy would ship the literal
-    # string "{{ domain_suffix }}" to the remote host and break
-    # n8n's webhook URL and host header validation.
+    # WEBHOOK_URL). `template` is required here, not `copy` — copy
+    # would ship the literal string "{{ domain_suffix }}" to the
+    # remote host and break n8n's webhook URL and host header
+    # validation. ${VAR} placeholders are left for docker compose.
     - name: "[04.1.2.1] Render docker-compose file (contains Jinja2 for domain_suffix)"
       ansible.builtin.template:
         src: "{{ source_docker_compose_file }}"
@@ -105,106 +100,80 @@
         group: "{{ deployment_user }}"
         mode: '0644'
 
-    # Plain copy, not template — docker-compose-hailo.yml has no
-    # Jinja2 in it.
-    #
-    # DISABLED: Hailo-10H is powered down to avoid drawing power while
-    # unused. `when: false` here is the staging-side twin of
-    # hailo_compose_flag being hardcoded to "" in 04_2_deploy_containers.yml
-    # — kept in sync deliberately so there's no dangling half-enabled
-    # state. Revert both together to re-enable.
-    - name: "[04.1.2.1b] Copy Hailo/open-webui compose addon (DISABLED — Hailo-10H powered down)"
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/docker/docker-compose-hailo.yml"
-        dest: "{{ remote_deploy_base }}/docker-compose-hailo.yml"
-        owner: "{{ deployment_user }}"
-        group: "{{ deployment_user }}"
-        mode: '0644'
-      when: false
-
-    - name: "[04.1.2.1d] Copy Dockerfile for Postgres + pgvector + pg_cron"
+    - name: "[04.1.2.2] Copy Dockerfile for Postgres + pgvector + pg_cron"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/postgres/Dockerfile.postgres"
         dest: "{{ remote_deploy_base }}/Dockerfile.postgres"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.2.2] Copy Dockerfile for Passive DNS sniffer"
+    - name: "[04.1.2.3] Copy Dockerfile for Passive DNS sniffer"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.pdns"
         dest: "{{ remote_deploy_base }}/Dockerfile.pdns"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.2.3] Copy Dockerfile for DNS log processor"
+    - name: "[04.1.2.4] Copy Dockerfile for DNS log processor"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.log_processor"
         dest: "{{ remote_deploy_base }}/Dockerfile.log_processor"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.2.4] Copy log processor Python script"
+    - name: "[04.1.2.5] Copy log processor Python script"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/dns/log_processor.py"
         dest: "{{ remote_deploy_base }}/log_processor.py"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.2.5] Copy Dockerfile for Vault auto-unsealer"
+    # vault_unsealer is disabled in docker-compose-cyber-sentinel.yml
+    # (commented out, [SVC.SECRETS.UNSEALER]); these two files are staged
+    # so re-enabling the service needs no change here.
+    - name: "[04.1.2.6] Copy Dockerfile for Vault auto-unsealer"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/hcv/Dockerfile.unsealer"
         dest: "{{ remote_deploy_base }}/Dockerfile.unsealer"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.2.6] Copy Vault auto-unsealer Python script"
+    - name: "[04.1.2.7] Copy Vault auto-unsealer Python script"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/hcv/unsealer.py"
         dest: "{{ remote_deploy_base }}/unsealer.py"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    # [04.1.2.7] Copy Dockerfile for hailo-ollama — REMOVED. hailo-ollama
-    # runs natively on the host (systemd service, playbook 04.7), not
-    # as a container. There is no Dockerfile.hailo-ollama.
+    # Build context of the ai-config-ui service (compose:
+    # build.context ./ai_config_ui). Source only, no secrets — those
+    # come from .env at container start. 04.5 re-stages the same tree
+    # so it can also be run on its own after a UI code change.
+    - name: "[04.1.2.8] Stage AI config editor (ai-config-ui) build context"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/ai_config_ui/"
+        dest: "{{ remote_deploy_base }}/ai_config_ui/"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+        directory_mode: '0755'
 
     # ============================================================
-    # SECTION 3 — removed
+    # SECTION 3 — Service configuration files
     # ------------------------------------------------------------
-    # Previously duplicated GRAFANA_PASSWORD, MONGODB_PASSWORD,
-    # MONGODB_USERNAME, MYSQL_ROOT_PASSWORD, and MYSQL_PASSWORD into
-    # .env via lineinfile. templates/env.j2 (rendered by playbook 01
-    # [01.1.2]) already writes all of these — confirmed by reading
-    # env.j2 directly. Keeping both was a dual-write path with no
-    # benefit and real drift risk: the MONGODB_USERNAME entry here
-    # referenced vault_mongodb_username, a variable that doesn't
-    # exist anywhere else in the project (env.j2 uses the correctly
-    # named mongodb_username). Removed rather than fixed, since
-    # env.j2 is the single correct source for these values.
+    # Copies static config for Unbound (recursive DNS), Prometheus
+    # scrape targets, and Grafana provisioning. Grafana dashboards
+    # land in two places intentionally — see [04.1.3.4].
     # ============================================================
 
-    # ============================================================
-    # SECTION 4 — Service configuration files
-    # ------------------------------------------------------------
-    # Copies static config for Unbound (recursive DNS), MongoDB init
-    # script, Prometheus scrape targets, and Grafana provisioning.
-    # Grafana dashboards land in two places intentionally — see
-    # comment on [04.1.4.5].
-    # ============================================================
-
-    - name: "[04.1.4.1] Copy Unbound DNS resolver configuration"
+    - name: "[04.1.3.1] Copy Unbound DNS resolver configuration"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/unbound/unbound.conf"
         dest: "{{ remote_deploy_base }}/config/unbound/unbound.conf"
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    # [04.1.4.2] Copy MongoDB initialization script — REMOVED. MongoDB is
-    # decommissioned (future-roadmap.md Section 8); init_mongo.js stays in
-    # the repo under config/mongo/ for reference but nothing stages or
-    # executes it anymore.
-
-    - name: "[04.1.4.3] Copy Prometheus scrape configuration"
+    - name: "[04.1.3.2] Copy Prometheus scrape configuration"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/prometheus/prometheus.yml"
         dest: "{{ remote_deploy_base }}/config/prometheus/prometheus.yml"
@@ -212,7 +181,7 @@
         group: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.4.4] Copy Grafana provisioning tree (datasources + manifests)"
+    - name: "[04.1.3.3] Copy Grafana provisioning tree (datasources + manifests)"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/grafana/provisioning/"
         dest: "{{ remote_deploy_base }}/config/grafana/provisioning/"
@@ -221,7 +190,7 @@
         mode: '0644'
         directory_mode: '0755'
 
-    - name: "[04.1.4.5] Copy dashboard JSONs to Grafana's runtime path"
+    - name: "[04.1.3.4] Copy dashboard JSONs to Grafana's runtime path"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/grafana/provisioning/dashboards/"
         dest: "{{ remote_deploy_base }}/config/grafana/dashboards/"
@@ -229,16 +198,8 @@
         group: "{{ deployment_user }}"
         mode: '0644'
 
-    # [04.1.4.6] Copy hailo-ollama configuration — REMOVED. No evidence
-    # hailo-ollama reads a config file at all (official docs show no
-    # such mechanism); this config/hailo/config.yaml was carried over
-    # from an earlier, unverified assumption. The systemd unit that
-    # actually matters (hailo-ollama.service) is deployed directly by
-    # playbook 04.7, not staged here — it's a host-level systemd file,
-    # not part of the Docker stack tree.
-
     # ============================================================
-    # SECTION 5 — Container UID/permission fixes
+    # SECTION 4 — Container UID/permission fixes
     # ------------------------------------------------------------
     # Two container images (pdns, vault) run as non-root UIDs that
     # don't match deployment_user on the host. Bind-mounted volumes
@@ -247,7 +208,7 @@
     # with "permission denied" or silently log nothing.
     # ============================================================
 
-    - name: "[04.1.5.1] Pre-create DNS log file with permissive ownership (UID 1000)"
+    - name: "[04.1.4.1] Pre-create DNS log file with permissive ownership (UID 1000)"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
         state: touch
@@ -255,7 +216,7 @@
         group: "1000"
         mode: '0666'
 
-    - name: "[04.1.5.2] Set ownership for Vault data directory (UID 100)"
+    - name: "[04.1.4.2] Set ownership for Vault data directory (UID 100)"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/config/vault/data"
         owner: "100"

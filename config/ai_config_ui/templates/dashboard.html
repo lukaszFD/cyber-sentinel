@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<p class="muted">Everything on these pages is data the n8n AI workflow reads on <strong>every run</strong>. A change is live from the next run — no restart, no redeploy. Every change is recorded in the <a href="{{ url_for('audit_page') }}">change log</a>.</p>
+<div class="grid">
+  <section class="card">
+    <h2>Active prompt</h2>
+    {% if active %}
+      <p class="stat">{{ active.version }}</p>
+      <p class="muted">{{ active.chars }} characters · created {{ active.created_at|dt }}</p>
+      {% if active.notes %}<p>{{ active.notes }}</p>{% endif %}
+      <p><a href="{{ url_for('prompt_edit', version=active.version) }}">Open</a> · {{ prompt_count }} version(s) in total</p>
+    {% else %}
+      <p class="flash error">No active prompt — the n8n workflow will fail.</p>
+    {% endif %}
+  </section>
+  <section class="card">
+    <h2>Pipeline settings</h2>
+    <table class="kv">
+      {% for s in settings %}<tr><th>{{ s.key }}</th><td class="mono">{{ s.value|num }}</td></tr>{% endfor %}
+    </table>
+    <p><a href="{{ url_for('settings_page') }}">Edit settings →</a></p>
+  </section>
+  <section class="card">
+    <h2>Domain allow-list</h2>
+    <table class="kv">
+      {% for r in allow_stats %}<tr><th>{{ r.source }} · {{ 'active' if r.is_active else 'inactive' }}</th><td class="mono">{{ r.n }}</td></tr>{% else %}<tr><td class="muted">empty</td></tr>{% endfor %}
+    </table>
+    {% if last_sync %}<p class="muted">Last Tranco sync: {{ last_sync.started_at|dt }} — <span class="tag {{ 'ok' if last_sync.status == 'ok' else 'bad' }}">{{ last_sync.status }}</span></p>{% endif %}
+    <p class="muted">Trusted infrastructure: {{ trusted.active }} active / {{ trusted.total }}</p>
+  </section>
+</div>
+<section class="card">
+  <h2>Recent changes</h2>
+  {% if changes %}
+  <table class="list">
+    <thead><tr><th>When</th><th>Who</th><th>Table</th><th>Operation</th><th>Key</th></tr></thead>
+    <tbody>
+    {% for c in changes %}
+      <tr><td class="nowrap">{{ c.changed_at|dt }}</td><td>{{ c.actor }}</td><td class="mono small">{{ c.table_name.split('.')[-1] }}</td><td><span class="tag op-{{ c.operation|lower }}">{{ c.operation }}</span></td><td class="mono">{{ c.row_key }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p><a href="{{ url_for('audit_page') }}">Full change log →</a></p>
+  {% else %}<p class="muted">No changes recorded yet.</p>{% endif %}
+</section>
+{% endblock %}

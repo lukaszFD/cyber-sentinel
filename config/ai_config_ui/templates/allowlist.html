@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Allow-list{% endblock %}
+{% block content %}
+<h1>Domain allow-list</h1>
+<div class="help-box">
+  Domains on the allow-list — and <strong>all their subdomains</strong> — are removed from the work queue (<code>v_pending_observables</code>) before n8n sees them: <strong>no VirusTotal request, no score, no e-mail</strong>. This is what keeps popular sites (google.com, wp.pl, ...) from using the VirusTotal free-tier quota (4 requests/min, 500/day).
+  <ul>
+    <li><strong>Tranco</strong> entries — the top popular domains, refreshed every Saturday by the host cron job (playbook 04.4). Read-only here; the sync owns them.</li>
+    <li><strong>Manual</strong> entries — your own additions (bank, employer, NAS vendor, ...). The weekly sync never touches them.</li>
+    <li><strong>Exclusions</strong> — platforms where anyone can publish under a subdomain (github.io, pages.dev, ...). An exclusion always wins: <code>evil.github.io</code> is analysed even though <code>github.io</code> is a top site.</li>
+    <li>The whole mechanism can be switched off with <a href="{{ url_for('settings_page') }}#stage-1"><code>allowlist_enabled</code></a>. Changes apply to the next workflow run.</li>
+  </ul>
+</div>
+
+<div class="grid">
+  <section class="card">
+    <h2>Check a domain</h2>
+    <form method="get" class="form-row">
+      <label class="grow">FQDN<input name="check" value="{{ check_domain }}" placeholder="e.g. cdn.example.com" class="mono"></label>
+      <button class="btn ghost" type="submit">Check</button>
+    </form>
+    {% if check %}
+      <p class="stat-sm">{{ check.domain }}:
+        {% if check.allowlisted %}<span class="tag ok">skipped (allow-listed)</span>{% else %}<span class="tag bad">analysed</span>{% endif %}
+        {% if not check.enabled %}<span class="tag warn">allow-list switched off (allowlist_enabled = 0)</span>{% endif %}
+      </p>
+      {% for m in check.matches %}<div class="muted small">match: <span class="mono">{{ m.domain }}</span> · {{ m.source }}{% if m.rank %} #{{ m.rank }}{% endif %} · {{ 'active' if m.is_active else 'inactive' }}</div>{% endfor %}
+      {% for e in check.exclusions %}<div class="muted small">exclusion: <span class="mono">{{ e.domain }}</span> {{ e.note or '' }}</div>{% endfor %}
+    {% endif %}
+  </section>
+  <section class="card">
+    <h2>Status</h2>
+    <table class="kv">{% for r in stats %}<tr><th>{{ r.source }} · {{ 'active' if r.is_active else 'inactive' }}</th><td class="mono">{{ r.n }}</td></tr>{% else %}<tr><td class="muted">empty</td></tr>{% endfor %}</table>
+    {% if syncs %}
+    <table class="list compact">
+      <thead><tr><th>Sync</th><th>Status</th><th>+</th><th>−</th></tr></thead>
+      {% for s in syncs %}<tr><td class="small nowrap">{{ s.started_at|dt }}</td><td><span class="tag {{ 'ok' if s.status == 'ok' else 'bad' }}" title="{{ s.message or '' }}">{{ s.status }}</span></td><td class="mono small">{{ s.inserted or 0 }}</td><td class="mono small">{{ s.deactivated or 0 }}</td></tr>{% endfor %}
+    </table>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>Manual entries</h2>
+  <form method="post" class="form-row">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <label class="grow">Domain<input name="domain" required maxlength="253" placeholder="e.g. mybank.pl" class="mono"></label>
+    <label class="grow">Note<input name="note" maxlength="200"></label>
+    <button class="btn primary" type="submit">Add</button>
+  </form>
+  <table class="list">
+    <thead><tr><th>Domain</th><th>Note</th><th>Status</th><th>Added</th><th></th></tr></thead>
+    <tbody>
+    {% for r in manual %}
+    <tr class="{{ 'row-off' if not r.is_active }}">
+      <td class="mono">{{ r.domain }}</td><td>{{ r.note or '' }}</td>
+      <td>{% if r.is_active %}<span class="tag ok">active</span>{% else %}<span class="tag">disabled</span>{% endif %}</td>
+      <td class="muted small nowrap">{{ r.first_added|dt }}</td>
+      <td class="row-actions">
+        <form method="post"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="toggle"><input type="hidden" name="domain" value="{{ r.domain }}"><button class="btn small ghost" type="submit">{{ 'Disable' if r.is_active else 'Enable' }}</button></form>
+        <form method="post" data-confirm="Remove {{ r.domain }} from the allow-list?"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="delete"><input type="hidden" name="domain" value="{{ r.domain }}"><button class="btn small danger" type="submit">Delete</button></form>
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="5" class="muted">No manual entries.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Exclusions (never skipped)</h2>
+  <form method="post" class="form-row">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add_exclusion">
+    <label class="grow">Domain<input name="domain" required maxlength="253" class="mono"></label>
+    <label class="grow">Note<input name="note" maxlength="200"></label>
+    <button class="btn primary" type="submit">Add exclusion</button>
+  </form>
+  <table class="list compact">
+    <tbody>
+    {% for e in exclusions %}
+    <tr><td class="mono">{{ e.domain }}</td><td class="muted">{{ e.note or '' }}</td>
+      <td class="row-actions"><form method="post" data-confirm="Delete exclusion {{ e.domain }}? Its subdomains may start being skipped."><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="delete_exclusion"><input type="hidden" name="domain" value="{{ e.domain }}"><button class="btn small danger" type="submit">Delete</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

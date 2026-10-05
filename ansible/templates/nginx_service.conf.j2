@@ -1,12 +1,15 @@
+{# server_name uses `hostname` when set (RFC 1123: no underscores),   #}
+{# otherwise `name`. Cert/key files are always named after `name`.     #}
+{% set public_host = item.hostname | default(item.name) %}
 server {
     listen 80;
-    server_name {{ item.name }}.{{ domain_suffix }};
+    server_name {{ public_host }}.{{ domain_suffix }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name {{ item.name }}.{{ domain_suffix }};
+    server_name {{ public_host }}.{{ domain_suffix }};
 
     ssl_certificate /etc/nginx/certs/{{ item.name }}.crt;
     ssl_certificate_key /etc/nginx/certs/{{ item.name }}.key;

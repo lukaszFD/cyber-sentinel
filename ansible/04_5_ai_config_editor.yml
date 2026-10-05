@@ -1,0 +1,192 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 04.5 — AI Config Editor (web UI)
+# ============================================================
+# Purpose:    Provisions the AI config web UI (ai-config-ui container)
+#             and its dedicated least-privilege Postgres role:
+#               1. renders + runs config/postgres/db_ai_config_editor.sql
+#                  as the postgres superuser (role, grants, audit log,
+#                  prompt guards, manual allow-list view)
+#               2. re-stages the app source (same task as 04.1 [04.1.2.8],
+#                  so this playbook also works on its own after a UI change)
+#               3. rebuilds and (re)starts ONLY the ai-config-ui service
+#
+#             The UI edits the data the n8n workflow reads on every run
+#             (cyber_sentinel_ai.ai_settings, prompt_templates,
+#             trusted_infrastructure, manual allow-list + exclusions,
+#             threat-scale wording). No n8n restart is ever needed.
+#
+# Depends on: - 01   (.env contains AI_UI_DB_USER, AI_UI_DB_PASSWORD,
+#                     AI_UI_SECRET_KEY, AI_UI_USERS, AI_UI_VT_API_KEY,
+#                     AI_UI_ABUSE_API_KEY — templates/env.j2)
+#             - 04.1 (build context staged — 04.2 builds the whole compose
+#                     file, ai-config-ui included, before this playbook)
+#             - 04.3 (db_ai_pipeline.sql applied). MUST run AFTER 04.3 on
+#                     every deployment: 04.3 re-grants ALL TABLES in
+#                     cyber_sentinel_ai to the n8n role, this playbook
+#                     narrows the audit log again (the log is also guarded
+#                     by a trigger, so the order is defence in depth).
+#             - ai_config_db_user (group_vars), vault_ai_config_db_password
+#               (ansible-vault)
+#
+# Outputs:    - Postgres role {{ ai_config_db_user }} (LOGIN, no superuser,
+#               no CREATE anywhere, grants listed in the SQL header)
+#             - ai-config-ui container running on 10.10.10.8, reachable
+#               only through nginx-proxy (no published host port)
+#             - {{ remote_deploy_base }}/postgres_init.log appended
+#
+# Before 04.5 runs on a fresh host, the UI is already up (04.2) but has
+# no DB role yet — its login page reports "no database connection"
+# until this playbook finishes. The container healthcheck only checks
+# the process, so Docker does not restart-loop it meanwhile.
+#
+# Idempotent: SQL is fully re-runnable; the container is only rebuilt /
+#             recreated when the staged source changed.
+# ============================================================
+
+- name: 04.5 - AI config editor (web UI + least-privilege DB role)
+  hosts: all_servers
+  become: yes
+
+  vars:
+    project_name: "cyber-sentinel"
+    docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
+    ai_ui_service: "ai-config-ui"
+    ai_ui_source_dir: "{{ main_repo_source_dir }}/config/ai_config_ui/"
+    ai_ui_remote_dir: "{{ remote_deploy_base }}/ai_config_ui"
+    source_ai_config_sql: "{{ main_repo_source_dir }}/config/postgres/db_ai_config_editor.sql"
+    rendered_ai_config_sql: "{{ remote_deploy_base }}/init_postgres_ai_config_editor_rendered.sql"
+    postgres_init_log: "{{ remote_deploy_base }}/postgres_init.log"
+
+  tasks:
+    # ============================================================
+    # SECTION 0 — Pre-flight
+    # ============================================================
+
+    - name: "[04.5.0.1] Assert required variables are defined"
+      ansible.builtin.assert:
+        that:
+          - lookup('vars', item, default='') | string | length > 0
+        fail_msg: "Required variable '{{ item }}' is missing or empty."
+        quiet: true
+      loop:
+        - ai_config_db_user
+        - vault_ai_config_db_password
+        - postgres_user
+
+    # The password is embedded in a single-quoted SQL literal and in .env.
+    # Hex-only (openssl rand -hex 24) avoids every quoting problem.
+    - name: "[04.5.0.2] Assert editor DB password is long and quote-safe"
+      ansible.builtin.assert:
+        that:
+          - vault_ai_config_db_password | length >= 20
+          - vault_ai_config_db_password is regex('^[A-Za-z0-9_-]+$')
+          - ai_config_db_user != postgres_user
+          - ai_config_db_user != 'postgres'
+        fail_msg: >-
+          vault_ai_config_db_password must be >= 20 chars of [A-Za-z0-9_-]
+          (generate: openssl rand -hex 24), and ai_config_db_user must be a
+          dedicated role — not postgres and not the n8n role.
+        quiet: true
+      no_log: true
+
+    - name: "[04.5.0.3] Verify AI pipeline schema exists (04.3 ran)"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec postgres_db psql -U postgres -d cyber_intelligence -At -c
+          "SELECT to_regclass('cyber_sentinel_ai.prompt_templates') IS NOT NULL
+              AND to_regclass('cyber_sentinel_ai.domain_allowlist') IS NOT NULL;"
+      register: ai_ui_schema_check
+      changed_when: false
+      failed_when: ai_ui_schema_check.rc != 0 or ai_ui_schema_check.stdout | trim != 't'
+
+    # ============================================================
+    # SECTION 1 — Database role, grants, audit log
+    # ============================================================
+
+    - name: "[04.5.1.X] Apply db_ai_config_editor.sql"
+      block:
+        - name: "[04.5.1.1] Render editor SQL with credentials"
+          ansible.builtin.template:
+            src: "{{ source_ai_config_sql }}"
+            dest: "{{ rendered_ai_config_sql }}"
+            owner: "{{ deployment_user }}"
+            mode: '0600'
+          no_log: true
+
+        - name: "[04.5.1.2] Execute editor SQL against Postgres container"
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- AI Config Editor Execution Date: $(date) ---" >> {{ postgres_init_log }}
+              docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ rendered_ai_config_sql }} >> {{ postgres_init_log }} 2>&1
+          register: ai_ui_sql_result
+          until: (ai_ui_sql_result.rc | default(-1)) == 0
+          retries: 5
+          delay: 10
+
+      always:
+        - name: "[04.5.1.3] Remove rendered SQL (contains cleartext password)"
+          ansible.builtin.file:
+            path: "{{ rendered_ai_config_sql }}"
+            state: absent
+
+    # Proves least privilege, not just existence: the role must be able to
+    # read settings and must NOT be able to read DNS telemetry or delete a
+    # setting key.
+    - name: "[04.5.1.4] Verify editor role privileges"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec postgres_db psql -U postgres -d cyber_intelligence -At -c
+          "SELECT has_table_privilege('{{ ai_config_db_user }}', 'cyber_sentinel_ai.ai_settings', 'SELECT')
+              AND has_column_privilege('{{ ai_config_db_user }}', 'cyber_sentinel_ai.ai_settings', 'value', 'UPDATE')
+              AND NOT has_table_privilege('{{ ai_config_db_user }}', 'cyber_sentinel_ai.ai_settings', 'DELETE')
+              AND NOT has_table_privilege('{{ ai_config_db_user }}', 'cyber_sentinel.dns_queries', 'SELECT')
+              AND NOT has_schema_privilege('{{ ai_config_db_user }}', 'cyber_sentinel_ai', 'CREATE')
+              AND NOT (SELECT rolsuper FROM pg_roles WHERE rolname = '{{ ai_config_db_user }}');"
+      register: ai_ui_priv_check
+      changed_when: false
+      failed_when: ai_ui_priv_check.rc != 0 or ai_ui_priv_check.stdout | trim != 't'
+
+    # ============================================================
+    # SECTION 2 — Stage app source
+    # ============================================================
+
+    - name: "[04.5.2.1] Stage ai-config-ui build context"
+      ansible.builtin.copy:
+        src: "{{ ai_ui_source_dir }}"
+        dest: "{{ ai_ui_remote_dir }}/"
+        owner: "{{ deployment_user }}"
+        group: "{{ deployment_user }}"
+        mode: '0644'
+        directory_mode: '0755'
+
+    - name: "[04.5.2.2] Verify .env contains the AI_UI_* variables (playbook 01)"
+      ansible.builtin.command:
+        cmd: "grep -c '^AI_UI_' {{ remote_deploy_base }}/.env"
+      register: ai_ui_env_check
+      changed_when: false
+      failed_when: (ai_ui_env_check.stdout | int) < 6
+
+    # ============================================================
+    # SECTION 3 — Build and start only this service
+    # ============================================================
+
+    - name: "[04.5.3.1] Build and start ai-config-ui (other services untouched)"
+      ansible.builtin.shell:
+        cmd: >-
+          docker compose -f {{ docker_compose_file_name }} -p {{ project_name }}
+          up -d --build --no-deps {{ ai_ui_service }}
+        chdir: "{{ remote_deploy_base }}"
+      register: ai_ui_up
+      changed_when: "'Started' in ai_ui_up.stderr or 'Recreated' in ai_ui_up.stderr or 'Created' in ai_ui_up.stderr"
+
+    - name: "[04.5.3.2] Wait for ai-config-ui to reach the database"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec {{ ai_ui_service }} python -c
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz?deep=1', timeout=5).status == 200 else 1)"
+      register: ai_ui_health
+      until: ai_ui_health.rc == 0
+      retries: 12
+      delay: 5
+      changed_when: false
