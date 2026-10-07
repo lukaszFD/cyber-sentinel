@@ -22,7 +22,8 @@
 #             - ACL policy n8n-readonly + periodic n8n token
 #
 # Sections:   0 pre-flight · 1 init · 2 unseal · 3 KV engine · 4 API keys
-#             5 certificates · 6 credentials · 7 n8n token · 8 summary
+#             5 certificates · 6 credentials · 7 n8n token
+#             7b Pi-hole API password · 8 summary
 # ============================================================
 
 - name: 06.1 - Vault lifecycle (init + unseal + provision)
@@ -275,7 +276,9 @@
     #   - credentials/postgres/root    (Ansible-only, playbook 04.3)
     #   - credentials/postgres/ai_config_editor (AI config editor only)
     #   - credentials/pihole|grafana|portainer|n8n
-    #     (admin UI passwords, consumed by Ansible in 04.6, not n8n)
+    #     (admin UI passwords, consumed by Ansible in 04.6, not n8n).
+    #     n8n reads credentials/pihole-api instead — a separate Pi-hole
+    #     application password (Section 7b), revocable on its own.
     #   - api-keys/grafana/*
     #     (consumed by Grafana provisioning, not n8n)
     #
@@ -377,6 +380,12 @@
             path "secret/data/cyber-sentinel/credentials/gmail" {
               capabilities = ["read"]
             }
+
+            # Pi-hole APPLICATION password (Section 7b), used by the
+            # workflow's auto-block step. Not the admin password.
+            path "secret/data/cyber-sentinel/credentials/pihole-api" {
+              capabilities = ["read"]
+            }
         status_code: [200, 204]
 
     - name: "[06.1.7.4] Attempt to renew existing n8n token (re-run path)"
@@ -427,7 +436,8 @@
           - "  Accessor: {{ n8n_token_create.json.auth.accessor }}"
           - "  Policy:   n8n-readonly (read-only — api-keys/*, "
           - "            credentials/postgres/app_manager, "
-          - "            credentials/gmail/* — see this playbook's"
+          - "            credentials/gmail/*, credentials/pihole-api"
+          - "            — see this playbook's"
           - "            Section 7 header for the full rationale)"
           - "  Period:   {{ n8n_token_period }} (~1 year). Renewal is NOT"
           - "            automatic — nothing in this stack runs on a"
@@ -455,6 +465,131 @@
       ansible.builtin.debug:
         msg: "n8n Vault token renewed via accessor {{ vault_n8n_token_accessor }} — still valid, no changes needed in n8n."
       when: not n8n_token_needs_creation
+
+    # ============================================================
+    # SECTION 7b — PI-HOLE API APPLICATION PASSWORD (n8n auto-block)
+    # ------------------------------------------------------------
+    # The workflow's auto-block step adds malicious domains to Pi-hole's
+    # denylist through the Pi-hole v6 API. It must not use the admin
+    # password (that stays out of n8n — see Section 7). Pi-hole v6 has
+    # exactly one "application password": an API credential that is
+    # separate from the admin password and can be replaced at any time
+    # without touching the admin login.
+    #
+    #   1. log in with the admin password            POST /api/auth
+    #   2. let Pi-hole generate password + hash      GET  /api/auth/app
+    #      (this also ends every active session, including ours)
+    #   3. activate the hash                         pihole-FTL --config
+    #      webserver.api.app_pwhash <hash>   (same CLI pattern as 04.6)
+    #   4. store the plain password in Vault         credentials/pihole-api
+    #   5. prove it works: log in with it, log out
+    #
+    # Idempotent: runs only when credentials/pihole-api is missing in
+    # Vault, or when forced with -e pihole_api_rotate=true. A rotation
+    # needs nothing in n8n — the workflow reads Vault on every run.
+    # Pi-hole must be reachable from the host on its bridge IP.
+    # ============================================================
+
+    - name: "[06.1.7.9] Check whether the Pi-hole API password is already in Vault"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/credentials/pihole-api"
+        method: GET
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        status_code: [200, 404]
+      register: pihole_api_secret
+      no_log: true
+
+    - name: "[06.1.7.10] Decide whether to (re)create the Pi-hole API password"
+      ansible.builtin.set_fact:
+        pihole_api_needs_creation: "{{ pihole_api_secret.status == 404 or (pihole_api_rotate | default(false) | bool) }}"
+        pihole_api_url: "{{ pihole_api_base_url | default('http://10.10.10.4') }}"
+
+    - name: "[06.1.7.11] Log in to the Pi-hole API with the admin password"
+      ansible.builtin.uri:
+        url: "{{ pihole_api_url }}/api/auth"
+        method: POST
+        body_format: json
+        body:
+          password: "{{ vault_pihole_admin_password }}"
+        status_code: [200]
+      register: pihole_admin_session
+      until: pihole_admin_session.status == 200
+      retries: 10
+      delay: 5
+      no_log: true
+      when: pihole_api_needs_creation
+
+    - name: "[06.1.7.12] Generate a new Pi-hole application password"
+      ansible.builtin.uri:
+        url: "{{ pihole_api_url }}/api/auth/app"
+        method: GET
+        headers:
+          X-FTL-SID: "{{ pihole_admin_session.json.session.sid }}"
+        status_code: [200]
+      register: pihole_app_password
+      no_log: true
+      when: pihole_api_needs_creation
+
+    # argv (no shell): the BALLOON hash contains '$' characters.
+    # become: this play runs unprivileged; only the docker socket needs root.
+    - name: "[06.1.7.13] Activate the application password in Pi-hole"
+      become: true
+      community.docker.docker_container_exec:
+        container: pihole
+        argv:
+          - pihole-FTL
+          - --config
+          - webserver.api.app_pwhash
+          - "{{ pihole_app_password.json.app.hash }}"
+      no_log: true
+      when: pihole_api_needs_creation
+
+    - name: "[06.1.7.14] Store the Pi-hole application password in Vault"
+      ansible.builtin.uri:
+        url: "{{ vault_url }}/v1/secret/data/cyber-sentinel/credentials/pihole-api"
+        method: POST
+        headers: { X-Vault-Token: "{{ effective_root_token }}" }
+        body_format: json
+        body:
+          data:
+            user: "n8n-autoblock"
+            password: "{{ pihole_app_password.json.app.password }}"
+        status_code: [200, 204]
+      no_log: true
+      when: pihole_api_needs_creation
+
+    - name: "[06.1.7.15] Verify the application password can log in"
+      ansible.builtin.uri:
+        url: "{{ pihole_api_url }}/api/auth"
+        method: POST
+        body_format: json
+        body:
+          password: "{{ pihole_app_password.json.app.password }}"
+        status_code: [200]
+      register: pihole_app_session
+      until: pihole_app_session.status == 200
+      retries: 5
+      delay: 3
+      no_log: true
+      when: pihole_api_needs_creation
+
+    # Pi-hole allows only a few concurrent sessions — never leave one open.
+    - name: "[06.1.7.16] Log out the verification session"
+      ansible.builtin.uri:
+        url: "{{ pihole_api_url }}/api/auth"
+        method: DELETE
+        headers:
+          X-FTL-SID: "{{ pihole_app_session.json.session.sid }}"
+        status_code: [204, 401, 404]
+      no_log: true
+      when: pihole_api_needs_creation
+
+    - name: "[06.1.7.17] Report Pi-hole API password status"
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Pi-hole application password created and stored in Vault (credentials/pihole-api).'
+             if pihole_api_needs_creation else
+             'Pi-hole application password already in Vault — unchanged (rotate with -e pihole_api_rotate=true).' }}
 
     # ============================================================
     # SECTION 8 — FINAL MESSAGE

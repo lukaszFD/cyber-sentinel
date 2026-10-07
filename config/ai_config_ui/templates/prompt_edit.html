@@ -26,7 +26,7 @@
     <strong>Placeholders</strong> — replaced by the n8n "Build AI prompt" node on every run:
     <ul>
       <li><code>[[THREAT_SCALE]]</code> → the five lines of the <a href="{{ url_for('threat_levels_page') }}">threat scale</a> (score | description | action).</li>
-      <li><code>[[MAX_DEVIATION]]</code> → the <a href="{{ url_for('settings_page') }}#stage-4"><code>ai_max_deviation</code></a> setting — the same value the workflow uses as the limit for how far the AI may move the rule score.</li>
+      <li><code>[[MAX_DEVIATION]]</code> → the <a href="{{ url_for('settings_page') }}#stage-4">{{ setting_label('ai_max_deviation') }}</a> setting — the same value the workflow uses as the limit for how far the AI may move the rule score.</li>
     </ul>
     The output field names in the prompt (verdict_label, summary_en, analysis_pl, proposed_score, deviation_reason, historical_match_ids, ...) must match the workflow's structured-output schema — renaming them breaks verdict parsing.
   </div>

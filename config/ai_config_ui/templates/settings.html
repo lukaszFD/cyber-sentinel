@@ -2,10 +2,10 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 <h1>AI pipeline settings</h1>
-<p class="muted">Table <code>cyber_sentinel_ai.ai_settings</code>. The n8n workflow and the rule engine read these values on every run — a saved change applies from the next run, nothing has to be restarted. Keys can only be added or removed by <code>db_ai_pipeline.sql</code> (a missing key stops the workflow). Use the <a href="{{ url_for('simulator_page') }}">Simulator</a> to see the effect of a threshold before real traffic hits it.</p>
+<p class="muted">These values decide how strictly the system judges the domains your network visits and what it does about them. A saved change applies from the next check — nothing has to be restarted. Use the <a href="{{ url_for('simulator_page') }}">Simulator</a> to see the effect of a change before real traffic hits it.</p>
 
 <section class="card pipeline">
-  <h2>How an observable flows through the workflow</h2>
+  <h2>How a domain is checked</h2>
   <ol class="pipeline-steps">
     {% for n, st in stages.items() %}
       <li><a href="#stage-{{ n }}"><strong>{{ st.title }}</strong></a><span class="muted small">{{ st.intro }}</span></li>
@@ -23,30 +23,43 @@
       <div class="setting">
         <div class="setting-head">
           <div>
-            <div class="mono setting-key">{{ r.key }}</div>
-            <div class="muted small">Used by: {{ r.help.used_by }}</div>
+            <div class="setting-key">{{ r.help.label }}</div>
           </div>
           <div class="setting-input">
             <input type="hidden" name="o__{{ r.key }}" value="{{ r.value|num }}">
-            {% if r.key == 'allowlist_enabled' %}
+            {% if r.help.switch %}
               <select name="v__{{ r.key }}">
-                <option value="1" {{ 'selected' if r.value == 1 }}>1 — on</option>
-                <option value="0" {{ 'selected' if r.value == 0 }}>0 — off</option>
+                <option value="1" {{ 'selected' if r.value == 1 }}>On</option>
+                <option value="0" {{ 'selected' if r.value == 0 }}>Off</option>
               </select>
             {% else %}
               <input class="num" name="v__{{ r.key }}" value="{{ r.value|num }}" inputmode="numeric"
                      type="number" min="{{ r.help.min }}" max="{{ r.help.max }}" step="{{ 1 if r.help.integer else 'any' }}">
             {% endif %}
-            <div class="muted small">range {{ r.help.min }}–{{ r.help.max }} · changed {{ r.updated_at|dt }}</div>
+            <div class="muted small">{% if not r.help.switch %}range {{ r.help.min }}–{{ r.help.max }} · {% endif %}changed {{ r.updated_at|dt }}</div>
           </div>
         </div>
         <p>{{ r.help.what }}</p>
         <div class="effects">
-          <div><span class="tag">{{ 'Set to 1' if r.key == 'allowlist_enabled' else 'Higher value' }}</span> {{ r.help['raise'] }}</div>
-          <div><span class="tag">{{ 'Set to 0' if r.key == 'allowlist_enabled' else 'Lower value' }}</span> {{ r.help['lower'] }}</div>
+          <div><span class="tag">{{ 'On' if r.help.switch else 'Higher value' }}</span> {{ r.help['raise'] }}</div>
+          <div><span class="tag">{{ 'Off' if r.help.switch else 'Lower value' }}</span> {{ r.help['lower'] }}</div>
         </div>
       </div>
     {% endfor %}
+    {% if n == 6 %}
+      <h3>Recently blocked</h3>
+      {% if blocks %}
+      <table class="list compact">
+        <thead><tr><th>When</th><th>Domain</th><th>Detections</th><th>Result</th></tr></thead>
+        <tbody>
+        {% for b in blocks %}
+          <tr><td class="small nowrap">{{ b.created_at|dt }}</td><td class="mono">{{ b.fqdn }}</td><td class="mono small">{{ b.vt_malicious }}</td>
+            <td><span class="tag {{ 'ok' if b.status == 'blocked' else ('bad' if b.status == 'error' else '') }}" title="{{ b.message or '' }}">{{ {'blocked': 'blocked', 'already_blocked': 'already blocked', 'error': 'failed'}[b.status] }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="muted small">Nothing blocked yet.</p>{% endif %}
+    {% endif %}
   </section>
   {% endfor %}
 
@@ -56,14 +69,13 @@
     {% for r in other %}
       <div class="setting">
         <div class="setting-head">
-          <div><div class="mono setting-key">{{ r.key }}</div><div class="muted small">{{ r.category }}</div></div>
+          <div><div class="setting-key">{{ r.description }}</div></div>
           <div class="setting-input">
             <input type="hidden" name="o__{{ r.key }}" value="{{ r.value|num }}">
             <input class="num" name="v__{{ r.key }}" value="{{ r.value|num }}" inputmode="decimal">
             <div class="muted small">changed {{ r.updated_at|dt }}</div>
           </div>
         </div>
-        <p>{{ r.description }}</p>
       </div>
     {% endfor %}
   </section>

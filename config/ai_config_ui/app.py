@@ -125,115 +125,136 @@ VERSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,20}$")
 # Same pattern sp_sync_domain_allowlist() uses for staged Tranco rows.
 DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
-# Help text and validation for every ai_settings key, shown on the
-# Settings page. "stage" ties each key to a step of PIPELINE_STEPS.
+# Business description of every ai_settings key, shown on the Settings page.
+# The page shows "label" + "what" + the two effects only — no table, column
+# or function names. "stage" ties each key to a step of PIPELINE_STEPS.
 # Keys not listed here (added later in db_ai_pipeline.sql) only have to
 # be numeric. Every key currently in db_ai_pipeline.sql is cast to INT by
 # its consumers, so all known keys are integer-only.
+# "switch": True renders an On/Off selector instead of a number field.
 SETTING_HELP = {
     "allowlist_enabled": {
-        "min": 0, "max": 1, "integer": True, "stage": 1,
-        "used_by": "v_pending_observables (work queue read by n8n)",
-        "what": "Switches the domain allow-list on or off. When on, every domain on the allow-list "
-                "(Tranco top sites + your manual entries, minus exclusions) and all of its subdomains "
-                "are dropped from the work queue before n8n ever sees them.",
-        "raise": "1 — popular sites (google.com, wp.pl, ...) are never sent to VirusTotal. Saves the "
-                 "free-tier quota (4 requests/min, 500/day) for unknown domains.",
-        "lower": "0 — every resolved domain is queued, including the most popular sites. Quota runs out "
-                 "much faster and big sites with a few noisy VirusTotal detections produce false alerts.",
+        "min": 0, "max": 1, "integer": True, "stage": 1, "switch": True,
+        "label": "Skip popular and trusted domains",
+        "what": "Well-known websites (the most visited sites worldwide plus the domains you added on the "
+                "Allow-list page) are not checked at all. This keeps the free daily lookup budget for "
+                "domains nobody has vouched for.",
+        "raise": "On — popular sites such as google.com or wp.pl are never checked. The lookup budget lasts "
+                 "for unknown domains and big sites stop producing false alarms.",
+        "lower": "Off — every domain your network visits is checked. The daily budget runs out much sooner "
+                 "and large sites with a few unreliable detections can trigger alerts.",
     },
     "cache_ttl_days": {
         "min": 1, "max": 365, "integer": True, "stage": 1,
-        "used_by": "v_pending_observables (work queue read by n8n)",
-        "what": "How long a verdict stays valid. The same domain + IP pair is not analysed again within "
-                "N days. Also the look-back window: only DNS queries from the last N days are queued.",
-        "raise": "Fewer repeat lookups, less VirusTotal quota used — but a domain that turns malicious "
-                 "after its first (clean) verdict is noticed later.",
-        "lower": "Fresher verdicts, more VirusTotal requests. Very low values can exhaust the daily quota "
-                 "on a busy network.",
+        "label": "Re-check a domain after (days)",
+        "what": "How long a verdict stays valid. A domain already checked is not checked again during this "
+                "period. Only domains visited within the same period are picked up.",
+        "raise": "Fewer repeat checks and a smaller share of the daily lookup budget — but a site that turns "
+                 "malicious after a clean verdict is noticed later.",
+        "lower": "Verdicts stay fresher, at the cost of more lookups. Very short periods can use up the daily "
+                 "budget on a busy network.",
     },
     "vt_gate_min_malicious": {
         "min": 0, "max": 100, "integer": True, "stage": 2,
-        "used_by": "n8n workflow — branch after the VirusTotal lookup",
-        "what": "The enrichment gate. Only observables with at least N VirusTotal 'malicious' detections "
-                "are enriched with ThreatFox + URLhaus and sent to the AI Agent. Below the gate the verdict "
-                "comes from the rule engine on VirusTotal data alone (ThreatFox/URLhaus 'not checked', "
-                "no AI, no e-mail).",
-        "raise": "Fewer Gemini calls and abuse.ch requests; only strong VirusTotal signals get AI analysis. "
-                 "Threats that few engines detect yet are scored on VirusTotal alone (max score 4).",
-        "lower": "More observables get ThreatFox/URLhaus context and an AI verdict + e-mail. More Gemini "
-                 "cost and more noise from domains with 1–2 detections.",
+        "label": "Deep analysis from (antivirus detections)",
+        "what": "How many antivirus engines must flag a domain before it gets the full treatment: a check "
+                "against two additional threat databases, an AI-written explanation and an e-mail. Domains "
+                "below this number get a quick automatic verdict only.",
+        "raise": "Only clearly suspicious domains get deep analysis — lower AI cost, fewer e-mails. Threats that "
+                 "few engines recognise yet are judged on the quick check alone.",
+        "lower": "More domains get deep analysis and an e-mail. Higher AI cost and more noise from domains that "
+                 "only one or two engines flag.",
     },
     "vt_low_max": {
         "min": 0, "max": 100, "integer": True, "stage": 3,
-        "used_by": "compute_threat_score() — step 1 (VirusTotal level)",
-        "what": "VirusTotal malicious count 1..N is level LOW. LOW alone gives base score 2 (Monitor).",
-        "raise": "More observables stay LOW (score 2) instead of MEDIUM (score 3, manual review).",
-        "lower": "Fewer detections are needed to reach MEDIUM — more 'Review' verdicts.",
+        "label": "Low-risk ceiling (antivirus detections)",
+        "what": "Up to this many antivirus detections a domain is treated as low risk: it is only watched "
+                "(score 2, Monitor), nobody needs to act.",
+        "raise": "More domains are only watched instead of being sent for manual review.",
+        "lower": "Fewer detections are enough to ask for a manual review (score 3).",
     },
     "vt_medium_max": {
         "min": 0, "max": 100, "integer": True, "stage": 3,
-        "used_by": "compute_threat_score() — step 1 (VirusTotal level)",
-        "what": "VirusTotal malicious count (vt_low_max+1)..N is MEDIUM (base 3); above N is HIGH. "
-                "HIGH on its own gives base 4 — 'Malicious', counted as malicious in Grafana.",
-        "raise": "More detections are needed before an observable is called malicious (score 4).",
-        "lower": "Observables become 'Malicious' (4) with fewer engines agreeing.",
+        "label": "Malicious from (antivirus detections, above this number)",
+        "what": "Above this many antivirus detections a domain is considered malicious (score 4, Block) and is "
+                "counted as a threat in the Grafana dashboards. Between the low-risk ceiling and this number "
+                "it needs manual review (score 3).",
+        "raise": "More engines must agree before a domain is called malicious — fewer false alarms, later reaction.",
+        "lower": "A domain is called malicious with fewer engines agreeing — faster reaction, more false alarms.",
     },
     "vt_big_player_noise_max": {
         "min": 0, "max": 100, "integer": True, "stage": 3,
-        "used_by": "compute_threat_score() — step 1, only for trusted infrastructure",
-        "what": "For hosts matching Trusted infra (Google, Microsoft, Cloudflare, ...), up to N "
-                "VirusTotal detections are treated as noise (level CLEAN). Large shared platforms "
-                "always collect a few false positives.",
-        "raise": "Trusted providers tolerate more detections before they stop being 'clean'.",
-        "lower": "Even 1–2 detections on a trusted provider count. Step 5 still caps them at score 2 "
-                 "unless ThreatFox names a malware family.",
+        "label": "Tolerated detections for trusted providers",
+        "what": "Large providers listed on the Trusted infra page (Google, Microsoft, Cloudflare, ...) always "
+                "collect a few false detections because millions of sites share their servers. Up to this "
+                "many detections are ignored for them.",
+        "raise": "Trusted providers stay clean even with more detections.",
+        "lower": "Even one or two detections on a trusted provider count. Their score still stays at 2 "
+                 "(Monitor) unless a known malware family is identified.",
     },
     "tf_active_days": {
         "min": 1, "max": 3650, "integer": True, "stage": 3,
-        "used_by": "n8n workflow — normalising the ThreatFox response (sets tf_active)",
-        "what": "A ThreatFox IOC counts as active when its last_seen (or first_seen) is within N days. "
-                "Active ThreatFox = level HIGH and, together with step 3, the only way to reach score 5.",
-        "raise": "Older IOCs still count as active — more score-5 'Critical' verdicts.",
-        "lower": "Only very recent IOCs count as active; old listings drop to MEDIUM.",
+        "label": "Threat report counts as current for (days)",
+        "what": "A report in the malware-infrastructure database (ThreatFox) counts as an active threat when it "
+                "was seen within this many days. An active report is the strongest signal and the only way to "
+                "the highest score, 5 (Critical).",
+        "raise": "Older reports still count as active — more Critical verdicts.",
+        "lower": "Only very recent reports count; older ones only raise the score moderately.",
     },
     "tf_active_vt_min": {
         "min": 0, "max": 100, "integer": True, "stage": 3,
-        "used_by": "compute_threat_score() — step 3",
-        "what": "Score 5 (Critical, Block + Alert) requires an active ThreatFox IOC AND either at least "
-                "N VirusTotal detections or a named malware family.",
-        "raise": "Score 5 needs stronger VirusTotal confirmation (a named malware family still qualifies).",
-        "lower": "An active ThreatFox IOC reaches 5 with weaker VirusTotal support.",
+        "label": "Critical alert needs (antivirus detections)",
+        "what": "A Critical verdict (score 5, Block + Alert) needs an active threat report AND either at least "
+                "this many antivirus detections or a named malware family.",
+        "raise": "Critical needs stronger antivirus confirmation (a named malware family still qualifies).",
+        "lower": "An active threat report becomes Critical with weaker antivirus support.",
     },
     "ai_max_deviation": {
         "min": 0, "max": 4, "integer": True, "stage": 4,
-        "used_by": "n8n workflow — [[MAX_DEVIATION]] in the prompt + clamp on the AI's proposed score",
-        "what": "How far the AI Agent may move the rule-engine score, in points. The rule score is "
-                "authoritative; the AI only adjusts it when the evidence clearly justifies it "
-                "(sinkhole, adware/PUP only, weak engines, ...).",
-        "raise": "The AI can override the rules more (e.g. 2 → 4). More judgement, less predictability.",
-        "lower": "0 = the AI only explains; the final score always equals the rule score.",
+        "label": "How far the AI may change the score (points)",
+        "what": "The score comes from fixed rules. The AI explains it and may correct it by at most this many "
+                "points, only when the evidence clearly justifies it (for example: only adware, only "
+                "unreliable engines, a security researcher's sinkhole).",
+        "raise": "The AI can overrule the rules more — more judgement, less predictable results.",
+        "lower": "0 — the AI only explains; the final score always equals the rule score.",
     },
     "email_min_score": {
         "min": 1, "max": 5, "integer": True, "stage": 5,
-        "used_by": "n8n workflow — e-mail branch",
-        "what": "AI-analysed verdicts (above the VirusTotal gate) with a final score of at least N are "
-                "e-mailed. Verdicts below the gate are never e-mailed.",
-        "raise": "4 = only Malicious/Critical; 5 = only Critical. Fewer e-mails.",
-        "lower": "3 = also 'Suspicious - manual review'. More e-mails.",
+        "label": "E-mail alerts from score",
+        "what": "Domains that went through deep analysis and reached at least this score are reported by "
+                "e-mail. Domains with a quick verdict only are never e-mailed.",
+        "raise": "4 — only Malicious and Critical; 5 — only Critical. Fewer e-mails.",
+        "lower": "3 — also domains that need a manual review. More e-mails.",
+    },
+    "pihole_block_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 6, "switch": True,
+        "label": "Block malicious domains automatically",
+        "what": "Domains with enough antivirus detections are added to the Pi-hole block list right after "
+                "the check, so no device in the network can reach them any more. Domains of trusted "
+                "providers are never blocked. Every block is listed at the bottom of this section.",
+        "raise": "On — the network is protected within minutes of the first visit, without waiting for you.",
+        "lower": "Off — nothing is blocked automatically; you decide based on the e-mails and Grafana.",
+    },
+    "pihole_block_min_vt_malicious": {
+        "min": 1, "max": 100, "integer": True, "stage": 6,
+        "label": "Block from (antivirus detections)",
+        "what": "How many antivirus engines must flag a domain before it is blocked automatically. Blocking "
+                "works on the domain name; to unblock, remove it in Pi-hole (Domains → Denylist).",
+        "raise": "Only domains many engines agree on are blocked — fewer sites blocked by mistake.",
+        "lower": "Blocking starts earlier — more protection, but a legitimate site may be blocked now and then.",
     },
 }
 
-# The n8n AI workflow, in the order an observable goes through it.
+# The n8n AI workflow, in the order a domain goes through it.
 PIPELINE_STEPS = {
-    1: ("Work queue", "v_pending_observables picks distinct domain + IP pairs from DNS traffic, "
-                      "skipping private IPs, recent verdicts and allow-listed domains."),
-    2: ("VirusTotal + gate", "n8n queries VirusTotal (the primary source). Only observables at or above "
-                             "the gate are enriched with ThreatFox + URLhaus."),
-    3: ("Rule engine", "compute_threat_score() turns the evidence into a deterministic 1–5 score."),
-    4: ("AI Agent", "Gemini explains the score using the active prompt and may adjust it within the "
-                    "allowed deviation."),
-    5: ("Notify", "Verdicts are stored (Grafana) and high scores are e-mailed."),
+    1: ("Choosing what to check", "Domains your devices visited are picked up for checking, except local "
+                                  "addresses, domains checked recently and popular or trusted domains."),
+    2: ("Antivirus check", "Each domain's server is checked by about 90 antivirus engines (VirusTotal). "
+                           "Clearly suspicious domains go on to deep analysis."),
+    3: ("Scoring rules", "Fixed rules turn the evidence into a score from 1 (clean) to 5 (critical)."),
+    4: ("AI analyst", "An AI analyst explains the score in English and Polish and may correct it slightly."),
+    5: ("Alerts", "Every verdict is stored for the Grafana dashboards; serious ones are e-mailed."),
+    6: ("Automatic blocking", "Domains that are clearly malicious are blocked in Pi-hole for the whole network."),
 }
 
 TF_UH_STATUSES = ["ok", "no_data", "not_checked", "error"]
@@ -487,6 +508,14 @@ def dashboard():
 # Routes — settings
 # ============================================================
 
+def setting_label(key):
+    """Business name of a setting (falls back to the key for unknown ones)."""
+    return SETTING_HELP.get(key, {}).get("label", key)
+
+
+app.jinja_env.globals["setting_label"] = setting_label
+
+
 def _validate_settings(values):
     """values: {key: Decimal}. Returns list of error strings."""
     errors = []
@@ -495,14 +524,16 @@ def _validate_settings(values):
         if rule is None:
             continue
         if rule["integer"] and val != val.to_integral_value():
-            errors.append(f"{key}: must be a whole number")
+            errors.append(f"{setting_label(key)}: must be a whole number")
         if not (rule["min"] <= val <= rule["max"]):
-            errors.append(f"{key}: allowed range {rule['min']}–{rule['max']}")
+            errors.append(f"{setting_label(key)}: allowed range {rule['min']}–{rule['max']}")
     if {"vt_low_max", "vt_medium_max"} <= values.keys() and values["vt_low_max"] >= values["vt_medium_max"]:
-        errors.append("vt_low_max must be lower than vt_medium_max (thresholds LOW < MEDIUM < HIGH)")
+        errors.append(f"'{setting_label('vt_low_max')}' must be lower than "
+                      f"'{setting_label('vt_medium_max')}'")
     if {"vt_big_player_noise_max", "vt_medium_max"} <= values.keys() \
             and values["vt_big_player_noise_max"] > values["vt_medium_max"]:
-        errors.append("vt_big_player_noise_max must not exceed vt_medium_max")
+        errors.append(f"'{setting_label('vt_big_player_noise_max')}' must not exceed "
+                      f"'{setting_label('vt_medium_max')}'")
     return errors
 
 
@@ -524,15 +555,15 @@ def settings_page():
                     try:
                         new_val = Decimal(raw)
                     except InvalidOperation:
-                        errors.append(f"{key}: '{raw}' is not a number")
+                        errors.append(f"{setting_label(key)}: '{raw}' is not a number")
                         continue
                     if not new_val.is_finite():
-                        errors.append(f"{key}: invalid value")
+                        errors.append(f"{setting_label(key)}: invalid value")
                         continue
                     if new_val != cur_val:
                         original = request.form.get(f"o__{key}", "")
                         if original != fmt_num(cur_val):
-                            errors.append(f"{key}: changed by someone else in the meantime "
+                            errors.append(f"{setting_label(key)}: changed by someone else in the meantime "
                                           f"(now {fmt_num(cur_val)}) — reload the page")
                         changed[key] = new_val
                         merged[key] = new_val
@@ -542,7 +573,7 @@ def settings_page():
                 for key, val in changed.items():
                     conn.execute("UPDATE ai_settings SET value = %s WHERE key = %s", (val, key))
             if changed:
-                flash("Saved: " + ", ".join(f"{k} = {fmt_num(v)}" for k, v in changed.items()), "ok")
+                flash("Saved: " + ", ".join(f"{setting_label(k)} = {fmt_num(v)}" for k, v in changed.items()), "ok")
             else:
                 flash("No changes.", "info")
         except ValueError as exc:
@@ -556,12 +587,22 @@ def settings_page():
         rows = conn.execute(
             "SELECT key, value, category, description, updated_at FROM ai_settings "
             "ORDER BY key").fetchall()
+        # The log table arrives with db_ai_pipeline.sql v2.2 — tolerate an older database.
+        blocks = []
+        if conn.execute("SELECT to_regclass('cyber_sentinel_ai.pihole_block_log') IS NOT NULL "
+                        "AND has_table_privilege('cyber_sentinel_ai.pihole_block_log', 'SELECT') AS ok"
+                        ).fetchone()["ok"]:
+            blocks = conn.execute(
+                "SELECT created_at, fqdn, observable_ip, vt_malicious, status, message "
+                "FROM pihole_block_log ORDER BY created_at DESC, id DESC LIMIT 20").fetchall()
     stages = {n: {"title": t, "intro": i, "rows": []} for n, (t, i) in PIPELINE_STEPS.items()}
     other = []
-    for r in rows:
+    # Keep the order of SETTING_HELP inside each step (it follows the decision flow).
+    order = {k: i for i, k in enumerate(SETTING_HELP)}
+    for r in sorted(rows, key=lambda r: order.get(r["key"], len(order))):
         r["help"] = SETTING_HELP.get(r["key"])
         (stages[r["help"]["stage"]]["rows"] if r["help"] else other).append(r)
-    return render_template("settings.html", stages=stages, other=other)
+    return render_template("settings.html", stages=stages, other=other, blocks=blocks)
 
 
 # ============================================================
@@ -903,6 +944,23 @@ def _normalize_domain(value):
     return d
 
 
+def _allowlist_reason(check):
+    """One sentence explaining the verdict of is_allowlisted() (mirrors its precedence rule)."""
+    active = [m for m in check["matches"] if m["is_active"]]
+    if not active:
+        return "No active allow-list entry matches this domain or any parent domain."
+    if not check["exclusions"]:
+        return f"Matched by '{active[0]['domain']}' ({active[0]['source']})."
+    depth = max(len(e["domain"].split(".")) for e in check["exclusions"])
+    excl_name = max(check["exclusions"], key=lambda e: len(e["domain"].split(".")))["domain"]
+    winner = next((m for m in active if m["source"] == "manual" and len(m["domain"].split(".")) > depth), None)
+    if winner:
+        return (f"Manual entry '{winner['domain']}' is more specific than the exclusion "
+                f"'{excl_name}', so the manual entry wins.")
+    return (f"The exclusion '{excl_name}' wins: only a manual entry for a more specific host "
+            f"name can override it.")
+
+
 @app.route("/allowlist", methods=["GET", "POST"])
 @login_required
 def allowlist_page():
@@ -917,15 +975,18 @@ def allowlist_page():
                                             (domain,)).fetchone()
                     if existing:
                         raise ValueError(f"{domain} is already on the allow-list (source: {existing['source']}).")
-                    excluded = conn.execute(
-                        "SELECT domain FROM domain_allowlist_exclusions "
-                        "WHERE domain = ANY (domain_suffixes(%s))", (domain,)).fetchone()
                     conn.execute("INSERT INTO v_manual_allowlist (domain, note) VALUES (%s, %s)",
                                  (domain, note))
                     flash(f"Added {domain} to the allow-list.", "ok")
-                    if excluded:
-                        flash(f"Note: {domain} matches the exclusion '{excluded['domain']}' — exclusions win, "
-                              f"so this domain will still be analysed.", "warn")
+                    # Same transaction: the new row is visible to is_allowlisted().
+                    if not conn.execute("SELECT is_allowlisted(%s) AS v", (domain,)).fetchone()["v"]:
+                        excluded = conn.execute(
+                            "SELECT domain FROM domain_allowlist_exclusions "
+                            "WHERE domain = ANY (domain_suffixes(%s)) "
+                            "ORDER BY length(domain) DESC LIMIT 1", (domain,)).fetchone()
+                        flash(f"Note: {domain} is not more specific than the exclusion "
+                              f"'{excluded['domain'] if excluded else '?'}', so it will still be analysed. "
+                              f"Add the exact host name instead (e.g. cdn.{domain}).", "warn")
                 elif action == "toggle":
                     r = conn.execute(
                         "UPDATE v_manual_allowlist SET is_active = NOT is_active, "
@@ -944,7 +1005,8 @@ def allowlist_page():
                     note = request.form.get("note", "").strip() or None
                     conn.execute("INSERT INTO domain_allowlist_exclusions (domain, note) VALUES (%s, %s)",
                                  (domain, note))
-                    flash(f"Added exclusion {domain} — its subdomains will always be analysed.", "ok")
+                    flash(f"Added exclusion {domain} — its subdomains are analysed unless a more specific "
+                          f"manual entry names one of them.", "ok")
                 elif action == "delete_exclusion":
                     r = conn.execute("DELETE FROM domain_allowlist_exclusions WHERE domain = %s "
                                      "RETURNING domain", (request.form["domain"],)).fetchone()
@@ -978,6 +1040,7 @@ def allowlist_page():
                         "WHERE domain = ANY (domain_suffixes(%s))", (d,)).fetchall(),
                     "enabled": conn.execute("SELECT setting('allowlist_enabled') AS v").fetchone()["v"] == 1,
                 }
+                check["reason"] = _allowlist_reason(check)
             except ValueError as exc:
                 flash(str(exc), "error")
         manual = conn.execute("SELECT * FROM v_manual_allowlist ORDER BY is_active DESC, domain").fetchall()

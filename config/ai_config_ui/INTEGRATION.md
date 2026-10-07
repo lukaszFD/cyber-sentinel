@@ -99,8 +99,33 @@ the other service names.
 | `domain_allowlist` | `SELECT`; changes only through `v_manual_allowlist` (`source = 'manual'` rows, `WITH CHECK OPTION`) — Tranco rows are untouchable |
 | `dic_threat_levels` | `SELECT`, `UPDATE(description, action_recommended, is_malicious_flag)` — no INSERT/DELETE; malicious levels must stay a contiguous top range (deferred trigger) |
 | `config_change_log` | `SELECT` only; append-only for everyone except superusers |
+| `pihole_block_log` | `SELECT` only (written by n8n) — shown under Settings → Automatic blocking |
 | `dns_queries`, `verdict_audit`, `threat_*`, everything else | no access |
 | `CREATE` in any schema | no |
 
 Every change made through the UI is logged with the UI user's name; changes from psql or
 n8n are logged with the database user.
+
+## Allow-list precedence
+
+`cyber_sentinel_ai.is_allowlisted()` applies "the most specific rule wins":
+
+- Tranco entries never override an exclusion (`evil.github.io` is analysed although `github.io` is popular).
+- A **manual** entry overrides an exclusion when it has more labels than it:
+  `yt3.googleusercontent.com` (manual) is skipped, `lh3.googleusercontent.com` is still analysed.
+- A manual entry equal to or broader than the exclusion (e.g. manual `github.io`) does not override it;
+  the UI warns when such an entry is added.
+
+## Pi-hole auto-block
+
+The workflow adds a domain to Pi-hole's exact denylist when `pihole_block_enabled = 1`,
+VirusTotal malicious >= `pihole_block_min_vt_malicious` (default 5) and the observable is not
+trusted infrastructure. Pi-hole blocks names, not IPs; the IP is kept in the log and in the
+Pi-hole comment.
+
+- Credential: a Pi-hole **application password** (not the admin password), created by playbook
+  06.1 Section 7b and stored in Vault at `credentials/pihole-api` (n8n policy: read).
+  Rotate with `ansible-playbook 06_1_initialize_provision_vault.yml -e pihole_api_rotate=true`.
+- Pi-hole API base URL defaults to `http://10.10.10.4` (`pihole_api_base_url` in group_vars).
+- Every attempt — `blocked`, `already_blocked` or `error` with the reason — is written to
+  `cyber_sentinel_ai.pihole_block_log`. To unblock, remove the domain in Pi-hole (Domains → Denylist).
