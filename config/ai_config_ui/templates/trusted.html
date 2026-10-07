@@ -6,7 +6,7 @@
 <div class="help-box">
   <strong>What a match does in the rule engine</strong>
   <ul>
-    <li><strong>Step 1</strong> — up to <a href="{{ url_for('settings_page') }}#stage-3"><code>vt_big_player_noise_max</code></a> VirusTotal detections are treated as noise (level CLEAN).</li>
+    <li><strong>Step 1</strong> — VirusTotal detections up to the number set in <a href="{{ url_for('settings_page') }}#stage-3">{{ setting_label('vt_big_player_noise_max') }}</a> are treated as noise (level CLEAN).</li>
     <li><strong>Step 5</strong> — the final rule score is capped at <strong>2 (Monitor)</strong> unless ThreatFox names a malware family. A match therefore prevents "Malicious" verdicts and e-mails for that host.</li>
   </ul>
   <strong>Match types</strong>

@@ -548,8 +548,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        2960,
-        176
+        2928,
+        112
       ],
       "id": "2a46d21e-1b71-5ea3-aaf7-03f0acb185e1",
       "name": "Insert raw payloads",
@@ -571,8 +571,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3168,
-        176
+        3136,
+        112
       ],
       "id": "a4a513df-58c0-508a-b7b1-5a07f9354811",
       "name": "Insert AI verdict",
@@ -594,8 +594,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3376,
-        176
+        3344,
+        112
       ],
       "id": "a6f31845-cca6-58ae-ba99-4f0ff8beb2dc",
       "name": "Insert AI audit",
@@ -634,8 +634,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3568,
-        176
+        3552,
+        112
       ],
       "id": "5fac1ca3-52ca-5421-a99e-3ab497f50621",
       "name": "AI verdict to remember?"
@@ -649,8 +649,8 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
       "typeVersion": 1.2,
       "position": [
-        3840,
-        160
+        3824,
+        96
       ],
       "id": "9dd38b79-9037-5491-80a2-297ef85bd4c2",
       "name": "Store verdict in vector memory",
@@ -700,8 +700,8 @@
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
       "position": [
-        3952,
-        336
+        3968,
+        272
       ],
       "id": "3474153c-2325-5c2a-975e-6ee8a2d86f02",
       "name": "Default Data Loader"
@@ -711,8 +711,8 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
       "typeVersion": 1,
       "position": [
-        3776,
-        336
+        3712,
+        272
       ],
       "id": "3d51f6c4-7dfe-5557-8401-5327b90f087c",
       "name": "Embeddings Google Gemini (store)",
@@ -751,8 +751,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3168,
-        704
+        2928,
+        544
       ],
       "id": "6525fd9a-c7ea-5d9e-ae96-19336bce3a03",
       "name": "Send alert?"
@@ -765,8 +765,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        3376,
-        704
+        3136,
+        544
       ],
       "id": "48e1a5eb-1a9a-56e5-bb13-2ea6271e2790",
       "name": "Get Email Pass",
@@ -785,8 +785,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3584,
-        704
+        3344,
+        544
       ],
       "id": "a8dff11a-9846-58f9-9ae8-fb9eb40d11cc",
       "name": "Build alert e-mail"
@@ -802,8 +802,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        3792,
-        704
+        3552,
+        544
       ],
       "id": "621f571c-a241-5f0c-bdb0-e88633e12691",
       "name": "Send an Email",
@@ -880,9 +880,9 @@
     },
     {
       "parameters": {
-        "content": "## Dual-Layer Persistence Strategy\n",
-        "height": 528,
-        "width": 1296,
+        "content": "## Dual-Layer Persistence Strategy\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "height": 416,
+        "width": 1488,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
@@ -896,19 +896,211 @@
     },
     {
       "parameters": {
-        "content": "## Incident Reporting & Remediation\n\n",
-        "height": 320,
-        "width": 1280,
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2743c8f9-379c-4a1a-8067-f1d26dff6bd0",
+              "leftValue": "={{ Number($('Load AI configuration').first().json.settings.pihole_block_enabled) === 1 && $json.record.vt.status === 'ok' && $json.record.vt.malicious >= Number($('Load AI configuration').first().json.settings.pihole_block_min_vt_malicious) && $json.record.rule.trusted_infrastructure !== true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2928,
+        736
+      ],
+      "id": "7cfc9f18-b3aa-466a-afeb-69c2099546de",
+      "name": "Block in Pi-hole?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/pihole-api",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        3136,
+        736
+      ],
+      "id": "40f3f21f-42f6-47a5-abae-15cefce9e448",
+      "name": "Pi-hole API password",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.10.10.4/api/auth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ password: $json.data?.password ?? '' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3344,
+        736
+      ],
+      "id": "63e4e278-3613-436d-9a43-0fb544c39718",
+      "name": "Pi-hole login",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.10.10.4/api/domains/deny/exact",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FTL-SID",
+              "value": "={{ $json.body?.session?.sid ?? '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  domain: $('Insert AI audit').item.json.record.observable.fqdn,\n  comment: `Cyber Sentinel auto-block ${$now.toFormat('yyyy-MM-dd HH:mm')}: VirusTotal ${$('Insert AI audit').item.json.record.vt.malicious}/${$('Insert AI audit').item.json.record.vt.engines_total} malicious on ${$('Insert AI audit').item.json.record.observable.observable_ip}, verdict ${$('Insert AI audit').item.json.record.verdict.threat_score}/5, analysis #${$('Insert AI audit').item.json.record.analysis_result_id}`,\n  groups: [0],\n  enabled: true\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3552,
+        736
+      ],
+      "id": "6116b117-89c0-485a-af52-c98280843490",
+      "name": "Pi-hole add to denylist",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "http://10.10.10.4/api/auth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FTL-SID",
+              "value": "={{ $('Pi-hole login').item.json.body?.session?.sid ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3760,
+        736
+      ],
+      "id": "b71103f5-e631-42b0-8183-e45a7786c774",
+      "name": "Pi-hole logout",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Evaluate Pi-hole result\n// Turns the login + denylist responses into one log row. Never throws: a\n// failed block must not stop the workflow (the verdict is already stored).\n//   blocked          domain added to the exact denylist now\n//   already_blocked  domain was on the denylist already (re-analysis)\n//   error            Vault secret missing, login failed, Pi-hole down, ...\n// Mode: Run Once for Each Item.\n\nconst record = $('Insert AI audit').item.json.record;\nconst vault = $('Pi-hole API password').item.json;\nconst login = $('Pi-hole login').item.json;\nconst add = $('Pi-hole add to denylist').item.json;\nconst fqdn = record.observable.fqdn;\n\n// Body may arrive as a string when Pi-hole answers with a non-JSON content type.\nfunction body(res) {\n  let b = res?.body;\n  if (typeof b === 'string') {\n    try { b = JSON.parse(b); } catch (e) { b = { raw: b.slice(0, 200) }; }\n  }\n  return b && typeof b === 'object' ? b : {};\n}\nconst errText = (res) => String(res?.error?.message || res?.error || '').slice(0, 300);\nconst ALREADY = /already present/i;\n\nlet status = 'error';\nlet message;\n\nif (vault.error || !vault.data?.password) {\n  message = 'Vault secret cyber-sentinel/credentials/pihole-api missing or unreadable - run playbook 06.1 (Section 7b).';\n} else if (login.error) {\n  message = `Pi-hole login failed: ${errText(login)}`;\n} else if (login.statusCode !== 200 || !body(login).session?.valid) {\n  message = `Pi-hole login rejected (HTTP ${login.statusCode}) - application password changed? Re-run 06.1 with -e pihole_api_rotate=true.`;\n} else if (add.error) {\n  message = `Pi-hole denylist request failed: ${errText(add)}`;\n} else {\n  const b = body(add);\n  const success = (b.processed?.success || []).some((s) => s.item === fqdn);\n  const procErr = (b.processed?.errors || []).find((e) => e.item === fqdn);\n  if (add.statusCode === 201 && success) {\n    status = 'blocked';\n    message = `Added to Pi-hole exact denylist (VirusTotal ${record.vt.malicious} malicious).`;\n  } else if (ALREADY.test(procErr?.error || '') || ALREADY.test(b.error?.hint || '')) {\n    status = 'already_blocked';\n    message = 'Domain was already on the Pi-hole denylist.';\n  } else {\n    const detail = procErr?.error || b.error?.message || b.error?.hint || JSON.stringify(b).slice(0, 200);\n    message = `Pi-hole returned HTTP ${add.statusCode}: ${detail}`;\n  }\n}\n\nreturn {\n  json: {\n    block: {\n      analysis_result_id: record.analysis_result_id ?? null,\n      fqdn,\n      observable_ip: record.observable.observable_ip,\n      vt_malicious: record.vt.malicious,\n      status,\n      message,\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3968,
+        736
+      ],
+      "id": "441f869b-a094-41b8-9660-f96a679977a3",
+      "name": "Evaluate Pi-hole result"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Audit of every auto-block attempt (read by the AI config UI).\nINSERT INTO cyber_sentinel_ai.pihole_block_log\n    (analysis_result_id, fqdn, observable_ip, vt_malicious, status, message)\nSELECT (r->>'analysis_result_id')::int, r->>'fqdn', r->>'observable_ip',\n       (r->>'vt_malicious')::int, r->>'status', r->>'message'\nFROM (SELECT $1::jsonb AS r) AS rec\nRETURNING id, status;",
+        "options": {
+          "queryReplacement": "={{ [ $json.block ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4176,
+        736
+      ],
+      "id": "84ee3af0-8952-42c5-95b7-d3cefd8156f4",
+      "name": "Log Pi-hole block",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Autonomous Response — Pi-hole auto-block & Incident Reporting ",
+        "height": 448,
+        "width": 1488,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        2864,
-        592
+        2848,
+        464
       ],
-      "id": "7a1f665b-99fb-519f-b65e-166b6212a27a",
-      "name": "Sticky Note10"
+      "id": "8ba9497b-5ade-469a-8b84-4b2056389eb9",
+      "name": "Sticky Note12"
     }
   ],
   "pinData": {},
@@ -1225,6 +1417,11 @@
             "node": "Send alert?",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Block in Pi-hole?",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1294,6 +1491,72 @@
           }
         ]
       ]
+    },
+    "Block in Pi-hole?": {
+      "main": [
+        [
+          {
+            "node": "Pi-hole API password",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pi-hole API password": {
+      "main": [
+        [
+          {
+            "node": "Pi-hole login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pi-hole login": {
+      "main": [
+        [
+          {
+            "node": "Pi-hole add to denylist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pi-hole add to denylist": {
+      "main": [
+        [
+          {
+            "node": "Pi-hole logout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pi-hole logout": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Pi-hole result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Pi-hole result": {
+      "main": [
+        [
+          {
+            "node": "Log Pi-hole block",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -1301,10 +1564,10 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "a4bd16c9-127c-4279-8a6e-4c05cfafe711",
+  "versionId": "4f428532-70c9-475c-939f-588eb6a16b5b",
   "meta": {
     "templateCredsSetupCompleted": true,
-    "instanceId": "aed28d93e614c1f9c79956d31115fcf659cd9c9baf99a258b26c19ae63a4116a"
+    "instanceId": "bf38cf4a88ced3e7b43a21e172315556a62cd55b64b1e4eb9edc17274c1af0a8"
   },
   "nodeGroups": [],
   "id": "ILhKRbyvF5NaIRYL",

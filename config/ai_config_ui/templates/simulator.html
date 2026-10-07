@@ -130,7 +130,7 @@
         The workflow never sees it: <strong>no VirusTotal request, no score, no e-mail</strong>.
         Everything below is hypothetical.
       {% elif result.allowlisted %}
-        allow-listed, but the allow-list is switched off (<code>allowlist_enabled = 0</code>) — queued normally.
+        allow-listed, but skipping popular and trusted domains is switched off in Settings — queued normally.
       {% else %}
         not on the allow-list — queued and sent to VirusTotal.
       {% endif %}

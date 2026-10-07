@@ -7,8 +7,9 @@
   <ul>
     <li><strong>Tranco</strong> entries — the top popular domains, refreshed every Saturday by the host cron job (playbook 04.4). Read-only here; the sync owns them.</li>
     <li><strong>Manual</strong> entries — your own additions (bank, employer, NAS vendor, ...). The weekly sync never touches them.</li>
-    <li><strong>Exclusions</strong> — platforms where anyone can publish under a subdomain (github.io, pages.dev, ...). An exclusion always wins: <code>evil.github.io</code> is analysed even though <code>github.io</code> is a top site.</li>
-    <li>The whole mechanism can be switched off with <a href="{{ url_for('settings_page') }}#stage-1"><code>allowlist_enabled</code></a>. Changes apply to the next workflow run.</li>
+    <li><strong>Exclusions</strong> — platforms where anyone can publish under a subdomain (github.io, pages.dev, ...). An exclusion beats every popular-site entry: <code>evil.github.io</code> is analysed even though <code>github.io</code> is a top site.</li>
+    <li><strong>The most specific rule wins.</strong> A manual entry for one exact host overrides a broader exclusion: <code>yt3.googleusercontent.com</code> (manual) is skipped although <code>googleusercontent.com</code> is excluded. All other hosts on that platform are still analysed.</li>
+    <li>The whole mechanism can be switched off in <a href="{{ url_for('settings_page') }}#stage-1">Settings → Skip popular and trusted domains</a>. Changes apply to the next workflow run.</li>
   </ul>
 </div>
 
@@ -22,8 +23,9 @@
     {% if check %}
       <p class="stat-sm">{{ check.domain }}:
         {% if check.allowlisted %}<span class="tag ok">skipped (allow-listed)</span>{% else %}<span class="tag bad">analysed</span>{% endif %}
-        {% if not check.enabled %}<span class="tag warn">allow-list switched off (allowlist_enabled = 0)</span>{% endif %}
+        {% if not check.enabled %}<span class="tag warn">allow-list switched off in Settings</span>{% endif %}
       </p>
+      {% if check.reason %}<p class="muted small">{{ check.reason }}</p>{% endif %}
       {% for m in check.matches %}<div class="muted small">match: <span class="mono">{{ m.domain }}</span> · {{ m.source }}{% if m.rank %} #{{ m.rank }}{% endif %} · {{ 'active' if m.is_active else 'inactive' }}</div>{% endfor %}
       {% for e in check.exclusions %}<div class="muted small">exclusion: <span class="mono">{{ e.domain }}</span> {{ e.note or '' }}</div>{% endfor %}
     {% endif %}
@@ -68,7 +70,7 @@
 </section>
 
 <section class="card">
-  <h2>Exclusions (never skipped)</h2>
+  <h2>Exclusions (analysed unless a more specific manual entry exists)</h2>
   <form method="post" class="form-row">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <input type="hidden" name="action" value="add_exclusion">

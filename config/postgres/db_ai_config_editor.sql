@@ -23,6 +23,7 @@
 --                                              (manual rows only — see below)
 --   cyber_sentinel_ai.domain_allowlist_sync_log SELECT
 --   cyber_sentinel_ai.config_change_log        SELECT (written by trigger)
+--   cyber_sentinel_ai.pihole_block_log         SELECT (written by n8n)
 --   cyber_sentinel.dic_threat_levels           SELECT, UPDATE(description,
 --                                              action_recommended,
 --                                              is_malicious_flag) — wording feeds
@@ -373,6 +374,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON cyber_sentinel_ai.v_manual_allowlist    
 GRANT SELECT ON cyber_sentinel_ai.domain_allowlist          TO "{{ ai_config_db_user }}";
 GRANT SELECT ON cyber_sentinel_ai.domain_allowlist_sync_log TO "{{ ai_config_db_user }}";
 GRANT SELECT ON cyber_sentinel_ai.config_change_log         TO "{{ ai_config_db_user }}";
+-- Read-only view of what the workflow auto-blocked in Pi-hole (Settings page).
+GRANT SELECT ON cyber_sentinel_ai.pihole_block_log          TO "{{ ai_config_db_user }}";
 
 GRANT SELECT                                   ON cyber_sentinel.dic_threat_levels        TO "{{ ai_config_db_user }}";
 GRANT UPDATE (description, action_recommended, is_malicious_flag) ON cyber_sentinel.dic_threat_levels TO "{{ ai_config_db_user }}";

@@ -18,7 +18,7 @@
   <section class="card">
     <h2>Pipeline settings</h2>
     <table class="kv">
-      {% for s in settings %}<tr><th>{{ s.key }}</th><td class="mono">{{ s.value|num }}</td></tr>{% endfor %}
+      {% for s in settings %}<tr><th>{{ setting_label(s.key) }}</th><td class="mono">{{ s.value|num }}</td></tr>{% endfor %}
     </table>
     <p><a href="{{ url_for('settings_page') }}">Edit settings →</a></p>
   </section>
