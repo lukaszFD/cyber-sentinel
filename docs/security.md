@@ -2,14 +2,12 @@
 
 ## Supported Versions
 
-We actively provide security updates for the following versions of **Cyber Sentinel**:
+Security fixes are provided only for the current major version:
 
-| Version     | Status               |
-|-------------|----------------------|
-| 1.0.2-rc1   | ⚠️ Pre-release (RC) |
-| 1.0.1       | ✅ Supported         |
-| 1.0.0       | ✅ Supported         |
-| < 1.0       | ❌ Not supported     |
+| Version | Status |
+|---------|--------|
+| 2.0.x   | ✅ Supported |
+| 1.x (including 1.0.2-rc1, 1.0.3) | ❌ Not supported — upgrade to 2.0 |
 
 ## Reporting a Vulnerability
 

@@ -1,318 +1,50 @@
-# Future Roadmap: Project Development
-
-This document outlines the planned technical improvements and new features for the **Cyber Sentinel** project. Items are tracked against actual releases — see [Project Releases](releases.md) for the full changelog.
-
-## Execution Stages
-
-The Postgres/RAG work (Section 8) is large enough that it needs its own sequencing, separate from the per-area status table below. This is the order work actually happens in, updated as stages complete — treat it as the single place to check "what's next."
-
-| Stage | Scope | Status |
-|-------|-------|:------:|
-| **0 — Documentation catch-up** | Bring this file's statuses in line with reality (Postgres is live, MySQL/MongoDB are gone) | 🟢 Done (this pass) |
-| **1 — n8n workflow migration** | Rewire the AI enrichment workflow's MySQL + MongoDB nodes to Postgres. Blocking — nothing writes `ai_analysis_results` / `threat_indicators` / `threat_indicator_details` until this lands. See Section 8.4 Stage 5. | 🔵 Planned — next up |
-| **2 — Migration hygiene** | Physically delete dead files (`config/mysql/*`, `config/mongo/*`, `docker-compose-postgres.yml`, `ds_mysql.yml`); `systemctl stop/disable hailo-ollama` on rpi5-prod (Hailo-10H is powered down to save power — see Section 2b). ~~Fix the `raw_time` bug~~ done — see Section 5. | 🟡 Partial — raw_time fixed, dead-file deletion and Hailo systemd disable still pending |
-| **3 — RAG** | Blocked on the Section 8.7 open question (does `nomic-embed-text` even run on Hailo-10H) — that gets answered first, before any `verdict_embeddings`/indexer work starts. See Section 8.3 / 8.4 Stage 4. | 🔵 Planned — blocked on 8.7 |
-| **4 — Backlog** | Everything else: per-user analytics (Section 5), hardening (Section 3), FIM (Section 4), backups (Section 7). Nothing here blocks anything else — pick up opportunistically. | 🔵 Planned |
-
-## Status Overview
-
-| Area | Item |    Status    | Delivered in | Notes |
-|------|------|:------------:|:------------:|-------|
-| **1. Database** | Transition to PostgreSQL (full migration) |  🟢 Delivered | — | `pgvector/pgvector:pg16` is the sole relational engine — `mysqldb` service removed from `docker-compose-cyber-sentinel.yml`. See Section 1 & Section 8.4. Not tagged to a release version yet. |
-| **1. Database** | Eliminate MongoDB (raw payloads → JSONB) |  🟢 Delivered | — | `threat_data_raw` (JSONB) replaces the `mongo` service, which is removed from the stack. See Section 8.4 Stage 2. |
-| **1. Database** | Dedicated schema (`cyber_sentinel`, not `public`) |  🟢 Delivered | — | **New, not in the original plan.** Added because this Postgres instance is expected to host other, unrelated applications later — `public` offers no isolation between them. All tables/views/functions live in `cyber_sentinel`; the app role's `search_path` defaults there so existing unqualified queries (`log_processor.py`, ad-hoc Grafana/pgAdmin SQL) needed no code changes. See Section 1. |
-| **1. Database** | Monthly partitioning + retention policy | 🟢 Delivered | — | Re-implemented on Postgres declarative partitioning + `pg_cron` (was MySQL RANGE partitioning + Event Scheduler). See Section 8.4 Stage 1. |
-| **1. Database** | User-Device correlation (`user_devices`) |  🔵 Planned  | — | — |
-| **1. Database** | Integrity Hash Storage (FIM) |  🔵 Planned  | — | Tied to Section 4 |
-| **1. Database** | Schema versioning (Liquibase) |  ❌ Abandoned  | — | **Decision finalized.** Liquibase is dropped entirely, not just paused. The [`liquibase` branch](https://github.com/lukaszFD/cyber-sentinel/tree/liquibase) only ever worked against the MySQL schema and was never adapted for Postgres. Versioning continues via plain, numbered SQL files (`config/mysql/` — kept for reference only, `config/postgres/`) deployed idempotently through the existing Ansible playbooks — same deployment model as today, Liquibase just isn't part of it. |
-| **2. Local LLM** | Ollama (CPU-only path) with CPU/RAM limits | ⚫ Abandoned | v1.0.1-alpha | `04_5_deploy_AI.yml` — remains in the repo, disabled by default, as a historical/reference artifact only. No further work planned; Hailo-10H (Section 2b) is the sole local-inference investment going forward. |
-| **2. Local LLM** | Llama 3.2 3b for security analysis (CPU path) |  ⚫ Abandoned  | — | Superseded by Hailo-10H's own `llama3.2:3b` (Section 2b) — the CPU-path analysis workflow will not be built |
-| **2. Local LLM** | Hailo-10H native inference service (`hailo-ollama`) | 🟢 Delivered | v1.0.3 | Runs as a systemd service (not containerized), rpi5-prod only — see Section 2b |
-| **2. Local LLM** | Open WebUI chat interface | 🟢 Delivered | v1.0.3 | Containerized, auto-provisioned admin account, reachable via Nginx at `open-webui.prod` |
-| **2. Local LLM** | Hailo-10H models wired into n8n AI Agent pipeline |  🔵 Planned  | — | Models verified working standalone via Open WebUI only; Gemini remains the pipeline's reasoning engine — see Section 2b findings |
-| **2. Local LLM** | Embedding model (`nomic-embed-text`) |  🔵 Planned  | — | New addition — required by RAG pipeline (Section 8). Host must now be Hailo-10H — the CPU-Ollama option is abandoned, see Section 8.7 |
-| **3. Hardening** | MFA / Hardware keys (YubiKey) | 🟢 Delivered | — | YubiKey 5 Series integrated and operational on production servers (SSH + Vault + Proxmox). Ansible role to be merged. |
-| **3. Hardening** | TOTP for web interfaces |  🔵 Planned  | — | — |
-| **3. Hardening** | Port Knocking |  🔵 Planned  | — | — |
-| **3. Hardening** | GeoIP Blocking |  🔵 Planned  | — | — |
-| **3. Hardening** | Nginx rate limiting + security headers |  🔵 Planned  | — | — |
-| **4. FIM** | Automated integrity checks |  🔵 Planned  | — | — |
-| **4. FIM** | AI agent triage of file changes |  🔵 Planned  | — | — |
-| **5. Grafana** | Threat Attribution Dashboard |  🟡 Partial  | — | Backing views ready (`v_grafana_malicious_stats`, `v_grafana_threat_explorer`, `v_grafana_threat_alerts`) — served from Postgres (`cyber_sentinel` schema). Per-user attribution still pending. The `raw_time` bug (filtered on a column that never existed in `v_grafana_dns_hourly_traffic`) is fixed — panel now filters on `hour_group`. |
-| **5. Grafana** | Per-User Analytics |  🔵 Planned  | — | Depends on `user_devices` mapping (Section 1) |
-| **5. Grafana** | Real-Time Alerting |  🟡 Partial  | — | Severity-graded alert email shipped via [n8n](n8n.md); native Grafana alerts not yet wired |
-| **5. Grafana** | DNS Traffic Overview dashboard |  🟢 Delivered | — | **New, not in the original plan.** 6 panels: pending-analysis queue depth, query/reply split, record-type breakdown, hourly traffic trend (queries/unique domains/unique sources), top queried domains, top source IPs. All sourced from `dns_queries` and `v_grafana_dns_hourly_traffic` — works today, doesn't depend on Execution Stage 1. |
-| **5. Grafana** | Client & Threat Visibility dashboard |  🟢 Delivered | — | **New, not in the original plan.** 5 panels: top local clients reaching malicious destinations, most-targeted malicious IPs, recent malicious contacts (detail table), NXDOMAIN rate over time, first-seen-ever domains. The three malicious-destination panels read `v_grafana_threat_alerts`, which is empty until Execution Stage 1 (n8n) lands — NXDOMAIN rate and first-seen domains work today since they only touch `dns_queries`. |
-| **6. AI Workflow** | Detection-first scoring (1–5 scale) | 🟢 Delivered | v1.0.2-rc1 | Dynamic threat scale loaded from `dic_threat_levels` at runtime |
-| **6. AI Workflow** | Long-Term Memory (current dual storage) |  🔴 Broken (was 🟡 Partial) | — | Storage side exists in Postgres (normalized verdicts + `threat_data_raw` JSONB, both in `cyber_sentinel`). But the n8n workflow's write nodes still target the now-decommissioned MySQL/MongoDB containers — every write currently fails. This is Execution Stage 1, the current top priority. Trend analysis on top will be delivered via RAG (Section 8) once the write path is fixed. |
-| **6. AI Workflow** | Historical-context RAG retrieval |  🔵 Planned  | — | **New** — feeds top-K similar past verdicts into AI prompt; see Section 8 |
-| **6. AI Workflow** | Knowledge-base RAG (MITRE / malware families) |  🔵 Planned  | — | **New** — static corpus indexed alongside verdicts; see Section 8 |
-| **6. AI Workflow** | Self-healing meta-agent |  🔵 Planned  | — | Scoped for v1.1.0 — see [Known Issues in v1.0.2-rc1](releases.md) |
-| **6. AI Workflow** | Autonomous network reconnaissance |  🔵 Planned  | — | — |
-| **6. AI Workflow** | CVE correlation against discovered assets |  🔵 Planned  | — | — |
-| **7. IaC & Backup** | Ansible-driven stack deployment | 🟢 Delivered | v1.0.1-alpha | Full IaC pipeline (`00_main.yml`) covers OS hardening, Docker stack, Vault, DB |
-| **7. IaC & Backup** | Unified Vault lifecycle playbook | 🟢 Delivered | v1.0.2-rc1 | Single idempotent `06_initialize_provision_vault.yml` |
-| **7. IaC & Backup** | Off-site backup to external SSD |  🔵 Planned  | — | — |
-| **7. IaC & Backup** | Retention policy (6 months) | 🟢 Delivered | v1.0.2-rc1 | Implemented at the database layer for `dns_queries`, `network_events`, `threat_indicators` |
-| **8. RAG & Postgres** | Postgres + pgvector container (`04_3b_db_postgres.yml`) |  🟢 Delivered | — | Replaced `mysqldb` and `mongo` services (playbook renamed `04_3` → `04_3b` during drafting) |
-| **8. RAG & Postgres** | Schema port (MySQL DDL → Postgres DDL) |  🟢 Delivered | — | FKs restored where Postgres 12+ allows it (partitioned table as FK source, not target — see Section 8.4 correction note). Lives in the `cyber_sentinel` schema, not `public`. |
-| **8. RAG & Postgres** | Raw CTI payloads → `threat_data_raw` (JSONB) |  🟢 Delivered | — | Eliminates MongoDB; `mongo_ref_id` → `raw_data_id` BIGINT FK. Table exists and is empty — nothing writes to it yet, blocked on Execution Stage 1 (n8n rewrite). |
-| **8. RAG & Postgres** | `verdict_embeddings` table + HNSW index |  🔵 Planned  | — | 768-dim vectors from `nomic-embed-text`; cosine similarity. Blocked on Section 8.7. |
-| **8. RAG & Postgres** | n8n RAG indexer workflow (hourly) |  🔵 Planned  | — | Embeds new verdicts asynchronously; backfill script for historical data |
-| **8. RAG & Postgres** | Retrieval node in main enrichment workflow |  🔵 Planned  | — | Top-K=5 similar verdicts injected into AI prompt as `HISTORICAL CONTEXT` |
-| **8. RAG & Postgres** | Knowledge-base collection (MITRE / malware) |  🔵 Planned  | — | Second pgvector table indexed from static corpus |
-| **8. RAG & Postgres** | Decommission MySQL + MongoDB containers |  🟢 Delivered | — | Both services removed from `docker-compose-cyber-sentinel.yml`. **Not** the parallel-run-then-validate approach originally planned below (Stage 6) — this was a direct cutover on the dev environment, no production data was at stake. See the Stage 6 note for what that means for prod. |
-
-Legend: 🟢 Delivered · 🟡 Partial · 🔵 Planned · ⚫ Abandoned · 🔴 Broken
-
----
-
-## 1. Database Infrastructure Migration & Analytics
-
-* 🟢 **Transition to PostgreSQL** — *delivered.* `pgvector/pgvector:pg16` is the single relational engine. This is the foundation for Section 8 (RAG) — vector similarity, JSONB raw-payload storage, and partitioned tables with foreign keys all converge on a single Postgres instance. Detailed migration plan and what actually happened during the cutover live in Section 8.
-* 🟢 **Eliminate MongoDB** — *delivered.* The `threat_data_raw` collection is now a `JSONB` column inside Postgres, and MongoDB is dropped from the stack. Rationale held up: prior usage was read-by-`mongo_ref_id` only — none of MongoDB's strengths (aggregation, schema flexibility, sharding) were exercised, and a single engine simplifies backups, Vault paths, Ansible roles, and Grafana data sources. See Section 8 for the cut-over details.
-* 🟢 **Dedicated `cyber_sentinel` schema** — *delivered, not in the original plan.* Everything lives in `cyber_sentinel`, not Postgres's default `public` schema — added because this Postgres instance is expected to host other, unrelated applications later, and `public` gives no isolation between them. The app role's `search_path` defaults to `cyber_sentinel, public`, so pre-existing unqualified queries (`log_processor.py`, ad-hoc Grafana/pgAdmin SQL) needed no code changes to keep working.
-* 🟢 **Monthly partitioning + 6-month retention policy** — *delivered.* `dns_queries`, `network_events`, and `threat_indicators` use Postgres declarative `PARTITION BY RANGE`, with `pg_cron` (replacing the old MySQL Event Scheduler) handling monthly add/drop. Maintenance is logged to `partition_maintenance_log`.
-* **User-Device Correlation Logic** 🔵
-  * Implement a mapping schema (`user_devices`) to link internal IP addresses to specific users.
-  * Develop advanced SQL queries to join DNS logs with threat intelligence, attributed to specific network participants.
-* **Integrity Hash Storage** 🔵 — store master hashes of critical system and configuration files for the File Integrity Monitoring (FIM) system.
-* ❌ **Database Versioning (Liquibase)** — *abandoned, decision finalized.* Liquibase is no longer part of this project's toolchain. The working implementation on the [`liquibase` branch`](https://github.com/lukaszFD/cyber-sentinel/tree/liquibase) was built against the MySQL schema only and was never ported. Rather than re-evaluating changelog structure, preconditions, and contexts for Postgres, schema versioning stays on the simpler approach already in use: plain, numbered SQL files (`config/mysql/db_deployment.sql` — kept for reference only, MySQL is gone; `config/postgres/db_deployment.sql` + `db_partitioning_retention.sql`) deployed idempotently by the same Ansible playbooks used for every other deployment step. The `liquibase` branch is kept for reference only and should not be merged.
-
----
-
-## 2. Local LLM Integration — CPU Ollama (Abandoned)
-
-* ⚫ **Resource-Aware Ansible Playbook** — *delivered in v1.0.1-alpha, no further work planned.* `04_5_deploy_AI.yml` deploys Ollama with strict hardware limits suitable for Raspberry Pi 5 (CPU pinned to 2 cores, RAM capped at 4 GB). Kept in the repo, disabled by default, as a historical artifact — Hailo-10H (Section 2b) is now the only local-inference path being developed.
-* ⚫ **Llama 3.2 3b for security analysis (CPU path)** — model was deployed but the analysis workflow was never built, and won't be. Superseded by Hailo-10H's own `llama3.2:3b`.
-* ⚫ **`nomic-embed-text` for RAG embeddings (CPU path)** — 137M-parameter embedding model, 768-dim output, Apache 2.0. Required by Section 8, but the CPU-Ollama hosting option described here is abandoned along with the rest of this section — embeddings must now come from Hailo-10H if the model is available there. See Section 8.7.
-
----
-
-## 2b. Hailo-10H NPU Inference
-
-* 🟢 **Native inference service** — *delivered in v1.0.3.* `hailo-ollama` (Hailo's own Ollama-compatible API server, built on HailoRT) runs as a systemd service directly on the Raspberry Pi 5 host, not as a container — this matches Hailo's own deployment guidance and avoids the PCIe device-passthrough complexity of containerizing it. Playbook `04.7` stages the unit file, starts and enables the service, verifies the NPU device is actually in use (not silently falling back), and pulls the configured models via the service's own API.
-* 🟢 **Three models provisioned** — *delivered in v1.0.3.* `deepseek_r1_distill_qwen:1.5b`, `qwen2.5-coder:1.5b`, `llama3.2:3b` — confirmed via the service's `/hailo/v1/list` and `/api/tags` endpoints. Model names and availability were confirmed empirically against the live device, not assumed from Hailo's published model catalog, which does not fully match what's actually installed.
-* 🟢 **Open WebUI chat interface** — *delivered in v1.0.3.* Containerized (`docker-compose-hailo.yml`, rpi5-prod only), auto-provisions its admin account from Vault-managed secrets on first start, reachable through the existing Nginx reverse proxy.
-* 🟡 **Model suitability evaluation** — *completed for v1.0.3, findings below.* Manual testing against structured, multi-source threat-scoring prompts (VirusTotal + ThreatFox + URLHaus, the same shape of data the n8n pipeline uses) surfaced consistent reliability issues across all four available models at the 1.5–3B scale on this hardware:
-  * Factual confabulation presented with high confidence (e.g. an incorrect TLD attribution, a fabricated RFC citation, a malware family name silently substituted with a different, invented one)
-  * Direct contradiction of provided input data in one case (asserting ThreatFox showed no active threat when the input explicitly stated `threatfox_active: true`)
-  * Internally inconsistent structured output (e.g. `threat_score: 4` paired with `is_malicious: false`, which violates the stated scoring policy within the same response)
-  * A generation timeout on the largest available model (`llama3.2:3b`) when given the full-length production-style prompt
-  * **Conclusion:** Gemini remains the primary reasoning engine for the n8n AI Agent pipeline. Local Hailo-10H inference is not currently wired into n8n (see Status Overview) and is not recommended for unattended multi-source scoring decisions at this model scale. Better-fit candidate uses identified: single-source tool-output summarization (e.g. Kali command output already executed and captured, not model-selected), and lower-stakes triage/classification tasks without cross-field logical constraints.
-* 🔵 **n8n workflow integration** — not yet started. Scoped as a possible future addition once a narrower, better-suited task is identified (see evaluation findings above), rather than a like-for-like replacement of the Gemini-based reasoning agent.
-* 🔵 **Host-only installation gap** — `hailo-ollama`'s own installation (the binary at `/usr/bin/hailo-ollama`, and the underlying HailoRT + `hailo1x` driver) predates this repo's IaC and is not yet captured in Ansible. Playbook `04.7` verifies it's present and manages it from that point forward, but a clean-host bootstrap isn't automated yet.
-* ⏸️ **Powered down (not decommissioned)** — Hailo-10H is currently unused day-to-day, so it's being kept powered down to avoid drawing power for nothing. `hailo_compose_flag` in `04_2_deploy_containers.yml` is hardcoded empty (was `rpi5-prod`-conditional) and the matching `docker-compose-hailo.yml` staging task in `04_1_prepare_stack.yml` is disabled (`when: false`) — both reversible in one line each. The host-level `hailo-ollama.service` itself still needs a manual `systemctl stop && systemctl disable` on rpi5-prod (Execution Stage 2) — the Ansible-side flags only stop the `open-webui` *container* from deploying, they don't touch the NPU's own power draw.
-* All Hailo-10H components (service, Open WebUI, and the UFW rule opening `hailo-ollama`'s port to `internal_network` only) are scoped exclusively to the `rpi5-prod` inventory group and are structurally prevented from being scheduled on the Dev environment (Dell Optiplex 7050).
+# Roadmap
 
----
+What is planned next. Delivered work is listed in [Releases](releases.md).
 
-## 3. Advanced Security Hardening (IaC driven)
+## 1. Sentinel Engram
 
-* 🟢 **Multi-Factor Authentication (MFA/2FA)** — *YubiKey delivered.*
-  * **Hardware Keys**: 🟢 YubiKey 5 Series is integrated and operational on production servers — covers SSH access, Vault unseal/login, and Proxmox console authentication. Ansible role pending merge to `main`.
-  * **TOTP Support** 🔵 — 6-digit code generation for web interfaces (Grafana, n8n, Portainer) still planned.
-* **Network Defense** 🔵
-  * **Port Knocking**: stealth SSH access via port-hit sequences.
-  * **GeoIP Blocking**: drop traffic from high-risk geographic regions using Ansible-managed firewall rules.
-* **Nginx Reverse Proxy Optimization** 🔵
-  * **Rate Limiting**: protection against DDoS and brute-force by limiting requests per IP.
-  * **Security Headers**: HSTS, X-Frame-Options, X-Content-Type-Options.
+[Sentinel Engram](https://github.com/lukaszFD/sentinel-engram) is the long-term memory of Cyber Sentinel: a separate project that loads AI verdicts, DNS activity and Pi-hole blocklists into a Vertex Synapse CTI graph, with a Neo4j view for visual analysis. It reads Cyber Sentinel's database through a read-only role and an SSH tunnel and never writes to it.
 
----
+Planned on the Cyber Sentinel side:
 
-## 4. File Integrity Monitoring (FIM) & AI Audit
+- **Ship the export in this repo** — move `db_engram_export.sql` (role `engram_reader`, schema `engram_export`) and the `engram-tunnel` user into Cyber Sentinel's playbooks, so a dev deploy no longer removes them.
+- **Graph context for the AI agent** — n8n queries Synapse (user `n8n-agent`: read, `ai.*` tags only) to give the agent history the database does not have: blocklist membership, related domains on the same IP, first-seen dates.
+- **Anomaly agent** — a scheduled n8n agent compares daily device behaviour in the graph against a baseline and tags findings with `ai.*`. Device data must be anonymised before it leaves Cyber Sentinel.
 
-* **Automated Integrity Checks** 🔵 — monitor changes in critical files (e.g. `/etc/ssh/sshd_config`, Ansible playbooks).
-* **AI Agent Integration (n8n)** 🔵
-  * The AI agent will periodically compare current file hashes with master hashes stored in the database.
-  * **Automated Triage**: if a mismatch is detected, the AI agent analyzes the change to determine if it was a legitimate administrative action or a potential compromise.
-  * **Alerting**: instant notification via preferred channels if unauthorized modifications are found.
+## 2. Agentic Development
 
----
+Goal: a system that checks itself, corrects its own mistakes and improves its own configuration, with a human approving changes instead of doing them. Each item runs as a separate n8n workflow; workflows hand work to each other through a status-driven queue table. Order below is the planned order.
 
-## 5. Visual Analytics & Monitoring (Grafana)
+1. **Health agent** — daily check of the pipeline: queue depth, VirusTotal 429 errors, failed AI analyses, pg_cron jobs, aborted Tranco syncs, and host state from Prometheus (see section 6). Sends a short daily report and alerts when the pipeline stops.
+2. **Verdict review and auto-unblock** — weekly re-scan of verdicts scored 3–5 and of everything blocked in Pi-hole. Blocks get an expiry date; a domain that stays clean is unblocked, one that became malicious is raised.
+3. **Analyst feedback** — mark a verdict as false positive or true positive in the AI Config UI (or with the `cs.fp` tag in Engram). Labelled verdicts go into vector memory as confirmed examples.
+4. **Prompt and threshold tuning agent** — analyses `verdict_audit` and feedback: where the AI deviates from the rules and why, which rules produce false positives, how often the agent fails. Creates a new prompt version or setting change as an **inactive draft**, replays it against stored evidence from recent verdicts (no CTI API calls) and shows the difference. Activation stays manual in the AI Config UI.
+5. **Retro-hunting** — daily download of new ThreatFox IOCs, searched backwards in `dns_queries`: which device contacted a domain before it was known to be malicious. Needs no VirusTotal calls; can run in parallel with the items above.
+6. **Agent-chosen enrichment** — CTI sources become tools the agent picks within a budget instead of a fixed sequence. New sources: domain age (RDAP/WHOIS), certificate transparency (crt.sh), urlscan.io (already in Vault, unused).
+7. **Engram tools** — the Synapse graph as an agent tool and the device anomaly agent (see section 1). Optional at run time: the Engram host is up only a few hours a day, so anomaly analysis runs in batches.
+8. **Agent-decided actions** — blocking and alerting decided by the agent instead of fixed thresholds, with hard limits enforced by the workflow: never block trusted infrastructure, a daily block limit, every block with an expiry. Depends on item 2, so wrong decisions undo themselves.
 
-* 🟡 **Threat Attribution Dashboard** — *partially delivered.* The backing views are in place: `v_grafana_malicious_stats`, `v_grafana_daily_trends`, `v_grafana_dns_hourly_traffic`, `v_grafana_threat_explorer`, and `v_grafana_threat_alerts`, all served from Postgres (`cyber_sentinel` schema). They all use `is_malicious_flag` instead of the legacy hardcoded threshold. Per-user attribution panels are blocked on Section 1's `user_devices` mapping.
-* **Per-User Analytics** 🔵 — filter security events by device/user. Depends on `user_devices` (Section 1).
-* 🟡 **Real-Time Alerting** — *partially delivered.* Severity-graded alert email is shipped through the n8n workflow (green INFO / amber REVIEW / red ALERT) — though the workflow itself needs the Postgres rewrite (Execution Stage 1) before this fires again. Native Grafana alert rules driven by `is_malicious_flag` are still on the to-do list.
-* 🟢 **DNS Traffic Overview dashboard** — *delivered, not in the original plan.* `config/grafana/dashboards/DNS_Traffic_Overview.json`. Pending-analysis queue depth, query/reply split, record-type breakdown (A/AAAA/PTR/HTTPS/etc.), hourly traffic trend, top queried domains, top source IPs. Fully functional today — depends only on `dns_queries`, not on the n8n rewrite.
-* 🟢 **Client & Threat Visibility dashboard** — *delivered, not in the original plan.* `config/grafana/dashboards/Client_Threat_Visibility.json`. Top local clients reaching malicious destinations, most-targeted malicious IPs, a detailed recent-contacts table, NXDOMAIN rate over time, and domains seen for the first time ever. The three malicious-destination panels read `v_grafana_threat_alerts` and stay empty until Execution Stage 1 lands; NXDOMAIN rate and first-seen domains work now.
+Constraints for all items: VirusTotal free tier (500 requests/day), Gemini free tier limits, Raspberry Pi 5 with 8 GB RAM.
 
----
+## 3. Device Attribution
 
-## 6. Advanced AI Workflow (n8n)
+- `user_devices` table mapping internal IPs to devices and owners.
+- Per-device reports and alerts from n8n.
+- Identity signals (Vault audit log, SSH auth log) as a later step.
 
-* 🟢 **Detection-first scoring** — *delivered in v1.0.2-rc1.* The 1–5 threat scale is now loaded dynamically from `dic_threat_levels` via `v_threat_scale_for_agent` at every AI invocation. URLHaus reweighted as a supporting source. See the [n8n Workflow](n8n.md) page for the full prompt and email pipeline.
-* 🔴 **Long-Term Memory** — *broken, was partially delivered.* Storage exists in Postgres (normalized verdicts + `threat_data_raw` JSONB, both in `cyber_sentinel`), but the n8n workflow's write nodes still target the decommissioned MySQL/MongoDB containers, so every write currently fails. Fixing the write path is Execution Stage 1, current top priority. Trend-analysis / historical-context on top will be delivered via RAG once that's done — see Section 8.
-* **Historical-context RAG retrieval** 🔵 — at every AI invocation, the workflow embeds the current observable, performs a similarity search against `verdict_embeddings`, and injects the top-K matches as `HISTORICAL CONTEXT` in the prompt. Full design in Section 8.
-* **Knowledge-base RAG** 🔵 — second pgvector collection indexed from a static corpus (MITRE ATT&CK techniques, MalwareBazaar family descriptions, in-house runbooks). Retrieved alongside historical verdicts when relevant. Section 8.
-* **Self-healing meta-agent** 🔵 — auto-tuning of `dic_threat_levels` based on operator feedback and false-positive patterns. Scoped for v1.1.0.
-* **Autonomous Security Agent** 🔵 — n8n agent with a toolset for network reconnaissance and FIM auditing.
-* **Vulnerability Mapping** 🔵 — real-time CVE correlation based on discovered assets and software versions.
+## 4. Hardening
 
----
+- TOTP for web UIs (n8n, Portainer, AI Config UI).
+- Nginx rate limiting and security headers (HSTS, X-Frame-Options, X-Content-Type-Options).
+- GeoIP blocking and port knocking for SSH.
 
-## 7. Infrastructure as Code & Backups
+## 5. File Integrity Monitoring
 
-* 🟢 **Ansible-driven full stack deployment** — *delivered in v1.0.1-alpha.* The master playbook `00_main.yml` covers OS hardening, Docker engine, the full container stack, the database, and post-config in a single pass. Each numbered playbook (00 → 06) is documented separately.
-* 🟢 **Unified Vault lifecycle** — *delivered in v1.0.2-rc1.* The previously split `06_1_initialize_vault.yml` and `06_2_provision_vault.yml` are now a single idempotent playbook with pre-flight validation and `no_log` discipline.
-* 🟢 **Database retention policy** — *delivered in v1.0.2-rc1.* 6-month rolling window for `dns_queries`, `network_events`, and `threat_indicators` is enforced automatically by the MySQL Event Scheduler.
-* **Off-site Backup** 🔵 — daily cron-based backup (02:00 AM) to external Patriot 512 GB M.2 SSD.
-* **DB backup rotation** 🔵 — 30-day rolling rotation for database backups (separate from the 6-month retention applied to the live tables).
+- Hashes of critical files (`sshd_config`, playbooks, compose) stored in the database.
+- Scheduled comparison; an AI agent decides whether a change looks like administration or compromise and alerts.
 
----
+## 6. Monitoring
 
-## 8. RAG Pipelines & Unified Postgres Migration
-
-**Scope:** consolidate the data layer onto a single `pgvector/pgvector:pg16` container and add Retrieval-Augmented Generation to the AI enrichment pipeline. This section supersedes the dual-storage strategy (MySQL + MongoDB) described in [`n8n.md` §12](n8n.md) and the deferred "Long-Term Memory" item in Section 6.
-
-### 8.1 Motivation
-
-The current architecture splits operational data across two engines:
-
-| Engine | Role | Issue |
-|--------|------|-------|
-| MySQL 8.0 | Structured verdicts, dictionaries, analytical views | No native vector type; no FKs across partitioned tables |
-| MongoDB 4.4 | Raw CTI payloads (VirusTotal / ThreatFox / URLHaus) | Used only as a key/value blob store via `mongo_ref_id` |
-
-Neither engine alone can host RAG (MySQL lacks vectors; MongoDB lacks relational joins with the verdict tables). Adding a third engine (e.g. Qdrant) would mean three paradigms to back up, secure, and document. Postgres 16 with the `pgvector` extension handles **all three workloads natively**:
-
-- Relational tables and views (replaces MySQL)
-- JSONB documents with GIN indexes (replaces MongoDB)
-- Vector similarity search with HNSW indexes (new — enables RAG)
-
-### 8.2 Target architecture
-
-```mermaid
-flowchart LR
-    subgraph Before[" Before (superseded) "]
-        M1[(MySQL<br/>cyber_intelligence)]
-        M2[(MongoDB<br/>threat_data_lake)]
-        N1[n8n] -->|verdicts| M1
-        N1 -->|raw JSON| M2
-        M1 <-->|mongo_ref_id<br/>logical link| M2
-    end
-
-    subgraph After[" Current (delivered) — n8n writes not yet reconnected "]
-        P[(Postgres + pgvector<br/>cyber_intelligence)]
-        P -.-> P1[Relational tables]
-        P -.-> P2[JSONB raw payloads]
-        P -.-> P3[verdict_embeddings<br/>HNSW index]
-        N2[n8n] -->|all writes| P
-        N2 -->|similarity search| P3
-    end
-```
-
-### 8.3 RAG design
-
-Two parallel retrieval workloads share the same vector store.
-
-**RAG-A — Historical verdicts retrieval**
-
-* **Corpus:** every row in `ai_analysis_results` (currently MySQL, post-migration Postgres).
-* **Document built per row:** `fqdn`, `observable_ip`, `threat_label`, `threat_score`, `vt_owner`, `malware_family`, `verdict_en`, `scoring_rationale`, `last_scan`. Raw IPs are never embedded directly — the document is a semantic summary, not a key.
-* **Indexed by:** hourly n8n workflow (`rag_indexer`) that selects rows missing from `verdict_embeddings_meta`, embeds the document via Ollama `/api/embeddings`, and upserts into the `verdict_embeddings` table.
-* **Retrieved by:** the main enrichment workflow before the AI Agent node. Filter: `threat_score >= 3 AND last_scan > NOW() - INTERVAL '30 days'`. Top-K = 5.
-* **Injected as:** a new `HISTORICAL CONTEXT` section in the system prompt, with a citation rule — the LLM must reference matched verdict IDs in `scoring_rationale`.
-
-**RAG-B — Static knowledge base**
-
-* **Corpus:** MITRE ATT&CK technique descriptions, MalwareBazaar family summaries, in-house runbooks.
-* **Indexed by:** one-off backfill script (no scheduled refresh — corpus is curated, not streamed).
-* **Retrieved by:** the same enrichment workflow, as a second similarity query against a separate `knowledge_base_embeddings` table.
-* **Injected as:** an additional `REFERENCE MATERIAL` section, only when at least one match clears a similarity threshold (default 0.75).
-
-### 8.4 Migration plan (Postgres + RAG) — as planned, and what actually happened
-
-The plan below was written as a single coordinated release with sequential, independently-testable sub-stages and one production switch at the end (Stage 6). **That is not what happened on the dev environment** — Stages 0 through 3 collapsed into a direct cutover: Postgres was stood up, the schema ported, MySQL and MongoDB were decommissioned immediately after, with no parallel-run validation window. This was a deliberate choice given the environment (dev VM, restorable from a Proxmox snapshot, no production data at stake) — the original plan's caution around data-loss and equivalence-validation matters far more for `rpi5-prod`, which has no such safety net. Anyone repeating this on prod should default back to the original Stage-6 approach (parallel-run, validate, then decommission) rather than this shortcut.
-
-Two corrections to the plan as originally written surfaced while implementing it: (1) Postgres declarative partitioning must be declared at `CREATE TABLE` time, so the schema port and the partitioning step cannot be split the way MySQL's `ALTER TABLE ... PARTITION BY` allowed — the Postgres schema script creates the partitioned parents empty, and the partitioning script must run immediately after; (2) "restore FKs on partitioned tables" turned out to be only partially achievable — Postgres allows a partitioned table to hold an *outgoing* FK to a non-partitioned table (delivered for `threat_indicators.analysis_result_id` and `threat_indicators.type_id`, both new real constraints MySQL could never support), but a partitioned table can only be an FK *target* if the referencing side carries its full composite partition key — so `dns_query_id` / `threat_indicator_id` references stay app-layer-enforced, same as on MySQL, unless denormalized columns are added later.
-
-A third thing not in the original plan at all: everything lives in a dedicated `cyber_sentinel` schema, not `public` — see Section 1.
-
-**Stage 0 — Preparation** 🟢 Delivered
-
-* ~~Add `pgvector/pgvector:pg16` to `docker-compose-cyber-sentinel.yml` alongside the existing `mysqldb` and `mongo` services (parallel-run during migration).~~ Done, but superseded — `mysqldb`/`mongo` are now removed entirely rather than kept alongside (see the note above this stage list).
-* New Vault paths: `cyber-sentinel/credentials/postgres/root`, `cyber-sentinel/credentials/postgres/app_manager`.
-* New Ansible playbook: `04_3b_db_postgres.yml` (named `04_3b`, not `04_3`, to sort immediately after MySQL's `04_3_db_create.yml` during the brief period both existed) — with `CREATE EXTENSION vector;` and `CREATE EXTENSION pg_cron;` as first steps.
-
-**Stage 1 — Schema port** 🟢 Delivered
-
-* Translated `config/mysql/db_deployment.sql` → `config/postgres/db_deployment.sql`. Mechanical changes:
-  * `AUTO_INCREMENT` → `GENERATED BY DEFAULT AS IDENTITY` (not `ALWAYS` — kept the door open for a Stage-3-style ID-preserving data migration, even though that stage ended up skipped on dev)
-  * `DATETIME` → `TIMESTAMP`
-  * `TINYINT(1)` → `BOOLEAN`
-  * `VARCHAR(255)` → `TEXT`
-  * `ENGINE=InnoDB` → removed
-* Restored foreign keys on the partitioned tables where Postgres 12+ actually allows it — see the correction note above this stage list for what "restore" means in practice (not full parity with a non-partitioned schema).
-* Partitioning translated: MySQL `PARTITION BY RANGE (TO_DAYS(...))` → Postgres declarative `PARTITION BY RANGE (timestamp_col)` with per-month child tables, named `<table>_p<YYYYMM>` (table-prefixed — Postgres partitions share one namespace, unlike MySQL's per-table-local partition names). Retention moved from MySQL Event Scheduler to `pg_cron`.
-* Every analytical view (`v_pending_analysis`, `v_grafana_*`, `v_threat_scale_for_agent`) translated — `GROUP_CONCAT` → `STRING_AGG`, `REGEXP` → `~`, `DATE_FORMAT`/`UNIX_TIMESTAMP` → `date_trunc`/`EXTRACT(EPOCH FROM ...)`.
-
-**Stage 2 — JSONB replacement for MongoDB** 🟢 Delivered
-
-* New table `threat_data_raw` with `raw_data JSONB NOT NULL` + GIN index on the relevant JSON paths.
-* Replaced `threat_indicator_details.mongo_ref_id CHAR(24)` with `raw_data_id BIGINT REFERENCES threat_data_raw(id)` — a real FK, which MongoDB's key-value usage never had.
-* The table exists and is wired up, but nothing writes to it yet — the n8n workflow that would populate it still targets the now-gone MySQL/Mongo containers (Execution Stage 1).
-
-**Stage 3 — Data migration** ⚫ Skipped (not needed on dev)
-
-* Written for a scenario with real production data to carry over. The dev environment had none worth preserving (test/scratch data only, and the VM restores from a Proxmox snapshot on every full deploy anyway), so this stage was skipped rather than executed. **Still needed if/when this migration is repeated on `rpi5-prod`** with real accumulated data — the plan as originally written stands:
-  * `mongodump` → JSON files → Python script that maps each MongoDB `_id` (ObjectId) to a new Postgres `BIGINT id` and rewrites `threat_indicator_details` rows accordingly via a temporary mapping table.
-  * `mysqldump --no-create-info --complete-insert` → Postgres `INSERT` statements (the open-source `pgloader` tool can automate this; manual review of generated DDL is still required).
-  * Validation queries: row counts per table match, foreign-key reachability for every `threat_indicator_details` row, JSONB integrity check (`raw_data ? 'data'`).
-
-**Stage 4 — RAG tables & indexer** 🔵 Planned — Execution Stage 3, blocked on Section 8.7
-
-* Create `verdict_embeddings` (768-dim vector + payload columns for filtering) with HNSW index on `vector_cosine_ops`.
-* Create `verdict_embeddings_meta` for audit (which rows are embedded, when, by which model).
-* Create `knowledge_base_embeddings` (same shape, different source).
-* Deploy the `rag_indexer` workflow in n8n on an hourly schedule.
-* One-off backfill of all historical `ai_analysis_results` rows.
-
-**Stage 5 — n8n workflow rewrite** 🔵 Planned — Execution Stage 1, current top priority
-
-* Replace all MySQL nodes with Postgres nodes (`pg` credential type in n8n) — most SQL is portable, exceptions logged in the workflow comments.
-* Replace the MongoDB Insert nodes with a single Postgres Insert using JSONB.
-* Add two new nodes before the AI Agent: `Embed query` (HTTP → Ollama) and `Retrieve historical context` (Postgres similarity query). Both wrapped in a 2 s timeout — if either fails, the workflow proceeds without RAG context (graceful degradation). **These two nodes belong to Stage 4/RAG, not this stage** — Stage 5 on its own is just "make the workflow write to Postgres instead of dead containers again."
-* Extend the AI Agent prompt with `HISTORICAL CONTEXT` and `REFERENCE MATERIAL` sections, plus a citation requirement in the output schema (`historical_match_ids` array). Also Stage 4/RAG scope, not this one.
-
-**Stage 6 — Decommission MySQL + MongoDB** 🟢 Delivered (on dev — differently than planned)
-
-* ~~Run both stacks in parallel for one full retention window (1 week minimum, ideally 1 month) — n8n dual-writes to both, alerts compared. When verdict equivalence is confirmed on ≥ 95% of observables, flip the read path to Postgres exclusively.~~ **Not what happened.** Both containers were removed immediately after Stages 0–2 landed, with no parallel-run window — see the note at the top of this section for why that was an acceptable shortcut on dev and why it should NOT be repeated as-is on prod.
-* `mysqldb` and `mongo` services removed from `docker-compose-cyber-sentinel.yml`. ✅
-* Ansible playbooks `04_3_db_create.yml` (MySQL schema) and `04_6_setup_partitioning.yml` (MySQL partitioning) removed from `00_main.yml`'s import list — files themselves kept in the repo for reference, per an explicit decision to leave them rather than delete outright. `config/mongo/init_mongo.js` likewise kept, unreferenced.
-* Vault paths `mysql/root`, `mysql/app_manager`, `mongodb/admin` actively deleted (not just stopped-being-written) via a Stage 6B cleanup task in `06_initialize_provision_vault.yml` — `DELETE` on `/v1/secret/metadata/...`, full version history removed, not a soft-delete.
-* `docs/components.md`, `docs/db.md`, `docs/architecture.md`, `docs/n8n.md` § "Architecture Patterns" — **not yet updated.** Still describe the dual-storage pattern as current. Execution Stage 2 territory.
-
-### 8.5 Hardware budget on Raspberry Pi 5 (8 GB)
-
-| Component | RAM | Notes |
-|-----------|-----|-------|
-| Postgres 16 + pgvector | ~1.0 GB | `shared_buffers=256MB`, `work_mem=16MB` |
-| Ollama (Llama 3.2 3b chat) | — | **Removed from this budget** — CPU-Ollama path abandoned (Section 2); chat inference now runs on Hailo-10H NPU, outside host RAM |
-| Ollama (`nomic-embed-text`) | TBD | Host undecided pending Section 8.7 — figure depends on whether this ends up on Hailo-10H or elsewhere |
-| n8n | ~0.5 GB | Existing |
-| Pi-hole + Unbound + passive DNS | ~0.4 GB | Existing |
-| Grafana + Prometheus + node_exporter | ~0.6 GB | Existing |
-| Vault | ~0.2 GB | Existing |
-| Other (nginx, portainer, firefox) | ~0.4 GB | Existing |
-| **Total** | **TBD** | Recalculate once the embedding host (Section 8.7) is decided — removing the CPU-Ollama chat model from this budget frees ~3.0 GB versus the original estimate, but the actual total now depends on where `nomic-embed-text` ends up running |
-
-### 8.6 Risks & mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Vector retrieval returns irrelevant historical matches | Filter by `threat_score >= 3` and recency window; require similarity > 0.75 before injection; track `rag_used` flag in `scoring_rationale` for offline evaluation |
-| Embedding latency blocks main workflow | 2 s timeout on Ollama call; on timeout the workflow proceeds without `HISTORICAL CONTEXT` |
-| Data loss during MongoDB → JSONB migration | Mandatory `mongodump` + Postgres dump before stage 6; parallel-run validation period before decommission. **On dev: risk accepted, not mitigated** — no real data existed to lose (Stage 3 skipped, Stage 6 was a direct cutover). This mitigation is still the right call for `rpi5-prod`, which will have real accumulated data by the time it's migrated. |
-| Grafana dashboards break on data source switch | ~~Maintain MySQL `mysqldb` container in read-only mode for one release after migration~~ — moot, MySQL is fully removed, no fallback container exists. Mitigated differently in practice: the new `ds_postgres.yml` datasource reuses the *same* `uid` as the old MySQL one, so every dashboard panel's datasource reference kept working without per-panel edits — only the engine underneath changed. Delivered; no outstanding risk here. |
-| HNSW index build time on Pi 5 with full backfill | One-off backfill scheduled overnight; index built `CONCURRENTLY` to avoid blocking writes |
-| Postgres unfamiliar to operators used to MySQL | Inline comments in `db_deployment.sql` cross-reference each table to its MySQL equivalent; cheat-sheet added to `docs/db.md` |
-
-### 8.7 Open questions
-
-* **Embedding host: Hailo-10H only, availability unconfirmed** — the RAG design in 8.3 assumes `nomic-embed-text` runs via an "Ollama `/api/embeddings`" endpoint, written before Hailo-10H's native `hailo-ollama` existed and before the CPU-Ollama path (Section 2) was abandoned. With CPU Ollama no longer an option, Hailo-10H is now the only remaining candidate host for this model — but it's unconfirmed whether `nomic-embed-text` is even in Hailo's model catalog, or whether embedding workloads suit the NPU's access pattern as well as chat inference does (Section 2b's evaluation only covered chat/instruct models). Needs a decision, and a suitability check, before Stage 4 (RAG tables & indexer) is implemented — if `nomic-embed-text` isn't available on Hailo-10H, an alternative embedding model or host needs to be found.
-* ~~**`pg_cron` vs `pgAgent` vs external `cron`** for partition rotation.~~ **Resolved during Stage 0/1.** `pg_cron` was chosen; confirmed the `pgvector/pgvector:pg16` image does NOT bundle it. `config/postgres/Dockerfile.postgres` adds `postgresql-16-cron` via apt on top of the base image, and `docker-compose-cyber-sentinel.yml`'s `postgres_db` service sets `shared_preload_libraries=pg_cron` and `cron.database_name=cyber_intelligence` at container start.
-* **Embedding model lock-in** — `nomic-embed-text` is 768-dim. Switching models means re-embedding the entire corpus. Acceptable for v1.1.0 but should be documented as a known constraint.
-* **Knowledge-base curation** — MITRE ATT&CK has a published JSON feed (STIX 2.1), MalwareBazaar has a CSV daily dump. In-house runbooks are not yet written. Knowledge-base RAG (RAG-B) ships only when a minimum corpus exists.
+- Prometheus and node_exporter become the data source for the health agent instead of something to look at: disk usage, Pi temperature, SSD SMART (playbook 07), read by n8n through the Prometheus HTTP API.
+- Grafana will be removed. Its job — showing what happens in the pipeline — is taken over by the n8n agents: the health agent's daily report and alerts, plus operational views in the AI Config UI.

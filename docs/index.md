@@ -10,7 +10,7 @@
     Project
   </p>
   <p style="margin: 0 0 1.2rem; line-height: 1.9;">
-    <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v1.0.2-rc1" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v1.0.2-rc1&color=ff9800&style=flat-square"></a>
+    <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v1.0.3" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v1.0.3&color=ff9800&style=flat-square"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/blob/main/LICENSE" target="_blank"><img alt="license" src="https://img.shields.io/github/license/lukaszFD/cyber-sentinel?style=flat-square&color=blue" style="margin-left:6px;"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/commits/main" target="_blank"><img alt="last commit" src="https://img.shields.io/github/last-commit/lukaszFD/cyber-sentinel?style=flat-square&color=brightgreen" style="margin-left:6px;"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/stargazers" target="_blank"><img alt="stars" src="https://img.shields.io/github/stars/lukaszFD/cyber-sentinel?style=flat-square&logo=github" style="margin-left:6px;"></a>
@@ -38,10 +38,9 @@
     <img alt="ansible" src="https://img.shields.io/badge/IaC-Ansible-EE0000?style=flat-square&logo=ansible&logoColor=white" style="margin-left:6px;">
     <img alt="docker" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" style="margin-left:6px;">
     <img alt="vault" src="https://img.shields.io/badge/Secrets-HashiCorp%20Vault-FFCA00?style=flat-square&logoColor=black" style="margin-left:6px;">
-    <img alt="MySQL" src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white" style="margin-left:6px;">
-    <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-4.4-47A248?style=flat-square&logo=mongodb&logoColor=white" style="margin-left:6px;">
+    <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white" style="margin-left:6px;">
+    <img alt="pgvector" src="https://img.shields.io/badge/Vector-pgvector-336791?style=flat-square&logo=postgresql&logoColor=white" style="margin-left:6px;">
     <img alt="n8n" src="https://img.shields.io/badge/Workflow-n8n-EA4B71?style=flat-square&logo=n8n&logoColor=white" style="margin-left:6px;">
-    <img alt="Grafana" src="https://img.shields.io/badge/Monitoring-Grafana-F46800?style=flat-square&logo=grafana&logoColor=white" style="margin-left:6px;">
     <img alt="Prometheus" src="https://img.shields.io/badge/Metrics-Prometheus-E6522C?style=flat-square&logo=prometheus&logoColor=white" style="margin-left:6px;">
     <img alt="Raspberry Pi" src="https://img.shields.io/badge/Raspberry%20Pi-5-A22846?style=flat-square&logo=raspberrypi&logoColor=white" style="margin-left:6px;">
   </p>
@@ -50,23 +49,21 @@
 
 ## 🎯 Project Purpose
 
-**Cyber Sentinel** is an AI-native security orchestration platform designed to bridge the gap between raw network telemetry and autonomous threat response. It transforms passive monitoring into an active, intelligent defense layer.
+Cyber Sentinel turns raw DNS traffic into decisions. Every new domain seen on the network is checked against threat intelligence, scored by an AI agent and — if malicious — blocked, without anyone reading logs.
 
-### 🛡️ Core Problems Solved
+### 🛡️ Problems Solved
 
-* **Analysis Fatigue:** Automates the evaluation of thousands of DNS queries, using AI to identify malicious patterns that traditional signature-based systems miss.
-* **Data Fragmentation:** Consolidates disparate CTI (Cyber Threat Intelligence) sources into a unified, AI-ready intelligence pool.
-* **Manual Response Lag:** Eliminates the "human-in-the-loop" delay by triggering autonomous security playbooks the moment a threat is verified by AI.
-* **Secrets:** Solves the risk of exposed API keys and credentials across distributed containers by centralizing all sensitive data in [**HashiCorp Vault**](https://www.hashicorp.com/en/products/vault).
+* **Analysis fatigue:** thousands of DNS queries a day are filtered and scored automatically; only real threats reach a human.
+* **Scattered CTI:** VirusTotal, ThreatFox and URLhaus results are combined into one 1–5 score with a rationale in English and Polish.
+* **Slow response:** confirmed malicious domains are added to the Pi-hole denylist and reported by email straight away.
+* **Exposed secrets:** all API keys and credentials live in [**HashiCorp Vault**](https://www.hashicorp.com/en/products/vault), not in containers or the repo.
 
-### 🚀 The Evolution of Sentinel
+### ⚙️ How It Works
 
-By orchestrating a high-performance Docker stack, the system provides a structured pipeline where DNS traffic is captured, processed, and enriched. The key pillars of this version are:
-
-* **AI engine:** The system is not limited to simply storing logs, but treats data as a "Neural Lake". It uses analysis based on LLM models (via Gemini/n8n) with a **detection-first 1–5 scoring policy** loaded dynamically from the database, generating bilingual security assessments (English/Polish) and an audit-ready scoring rationale for each detected indicator.
-* **Autonomous coordination:** Centralises the entire threat lifecycle — from detection to mitigation — within **n8n** workflows, acting as a modular SOAR (Security Orchestration, Automation, and Response) system.
-* **Predictive CTI:** Transforms raw, passive DNS logs into predictive intelligence, identifying potential infrastructure before it is used in an active attack.
-* **Hardened infrastructure:** Secured by **HashiCorp Vault** for enterprise-grade secret lifecycle management and **Nginx SSL Proxy** to ensure encrypted communication across all service nodes.
+* **Rules first, AI second:** a rule-based score is computed in PostgreSQL; a **Gemini** AI agent in **n8n** reviews it, using past verdicts from **pgvector** memory, within limits set in the database.
+* **Noise filtering:** Tranco top domains, a manual allow-list and trusted infrastructure are skipped before any API call.
+* **Configuration outside the workflow:** thresholds, prompts (versioned), allow-lists and threat levels are edited in the **AI Config** web UI and stored in the database — the workflow only reads them. Every change is audited.
+* **Hardened infrastructure:** Raspberry Pi 5, Docker images pinned by digest, Nginx with TLS in front of every service, deployed end-to-end with Ansible.
 
 ---
 
@@ -81,26 +78,26 @@ By orchestrating a high-performance Docker stack, the system provides a structur
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🚀 <a href="deployment/">Deployment</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Full Ansible IaC — one command, modular playbooks 00 → 06</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Ansible IaC — one command, modular playbooks</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>🐳 <a href="components/">Components</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">13 Docker services documented with config snippets</span>
+    <strong>🐳 <a href="docker-compose/">Docker Compose</a></strong><br>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Services, IPs, exposed ports, hardening, volumes</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🤖 <a href="n8n/">n8n Workflow</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI threat enrichment pipeline with severity-graded alerts</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI agent pipeline: enrichment, scoring, alerts, auto-block</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🗄️ <a href="db/">Database Schema</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">MySQL tables, analytical views, partitioning &amp; retention</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">PostgreSQL + pgvector, partitioning &amp; retention</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>🔐 <a href="ansible-06-vault/">Vault &amp; Secrets</a></strong><br>
+    <strong>🔐 <a href="deployment/#secrets">Vault &amp; Secrets</a></strong><br>
     <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">Zero-secrets policy, KV v2 provisioning via Ansible</span>
   </div>
 
@@ -127,7 +124,3 @@ By orchestrating a high-performance Docker stack, the system provides a structur
     </span>
   </div>
 </div>
-
----
-
-*Documentation is being added successively as the project evolves. Check back often for updates on AI workflows, database schemas, and Ansible automation.*
