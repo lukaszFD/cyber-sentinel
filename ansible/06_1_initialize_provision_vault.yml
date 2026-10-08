@@ -239,9 +239,8 @@
         method: POST
         headers: { X-Vault-Token: "{{ effective_root_token }}" }
         body:
-          data:
-            user: "{{ item.user | default('admin') }}"
-            password: "{{ item.value }}"
+          # `extra` adds fields to a secret (gmail: alert recipient)
+          data: "{{ {'user': item.user | default('admin'), 'password': item.value} | combine(item.extra | default({})) }}"
         body_format: json
         status_code: [200, 204]
       no_log: true
@@ -256,7 +255,8 @@
         - { path: "postgres/app_manager", value: "{{ vault_postgres_password }}",       user: "{{ postgres_user }}" }
         - { path: "postgres/ai_config_editor", value: "{{ vault_ai_config_db_password }}", user: "{{ ai_config_db_user }}" }
         # Email
-        - { path: "gmail",   value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}" }
+        - { path: "gmail",   value: "{{ vault_n8n_gmail }}",           user: "{{ vault_n8n_user }}",
+            extra: { to: "{{ vault_n8n_alert_to | default(vault_n8n_user) }}" } }
 
     # ============================================================
     # SECTION 7 — N8N READ-ONLY TOKEN (LEAST PRIVILEGE)

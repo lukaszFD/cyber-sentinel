@@ -794,7 +794,7 @@
     {
       "parameters": {
         "fromEmail": "={{ $('Get Email Pass').item.json.data.user }}",
-        "toEmail": "home-network-guardian@proton.me",
+        "toEmail": "={{ $('Get Email Pass').item.json.data.to }}",
         "subject": "={{ $json.subject }}",
         "html": "={{ $json.html }}",
         "options": {}

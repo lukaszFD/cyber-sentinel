@@ -28,10 +28,3 @@ https://raw.githubusercontent.com/Spam404/lists/master/main-blacklist.txt
 https://raw.githubusercontent.com/AssoEchap/stalkerware-indicators/master/generated/hosts
 https://urlhaus.abuse.ch/downloads/hostfile/
 https://lists.cyberhost.uk/malware.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/advertising.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/comprehensive.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/malicious.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/nsfw.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/nsfw_abp.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/suspicious.txt
-https://github.com/zachlagden/Pi-hole-Optimized-Blocklists/blob/main/lists/tracking.txt

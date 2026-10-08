@@ -32,10 +32,13 @@
 #               with Privilege Separation OFF is the easiest path.
 #             - At least one backup of the target VMID in the
 #               configured backup storage.
-#             - community.general collection installed.
 #
-# Outputs:    - vm-prox-dev VM stopped, restored from latest backup,
-#               and started again
+# Flow:       VM running -> stop, wait until stopped -> restore -> start
+#             VM stopped -> restore -> start
+#             All calls go to the Proxmox API from the control machine;
+#             the VM itself is not contacted until the final SSH wait.
+#
+# Outputs:    - vm-prox-dev VM restored from latest backup and started
 #             - SSH on dev_vm becomes responsive within ~30-90s
 #               (handled by the wait_for in [00.1.4.2])
 #
@@ -43,7 +46,9 @@
 
 - name: 00.1 - Proxmox Snapshot Restore (DEV VM only)
   hosts: all_servers
-  gather_facts: yes
+  # No facts: the VM may be powered off, and every task talks to the
+  # Proxmox API from localhost anyway.
+  gather_facts: false
 
   vars:
     # Target VMID in Proxmox — corresponds to "dev-network-guardian".
@@ -61,6 +66,9 @@
 
     # Computed at runtime by [00.1.0.1].
     should_restore: false
+
+    proxmox_api: "https://{{ proxmox_host }}:8006/api2/json/nodes/{{ proxmox_node }}"
+    proxmox_auth: "PVEAPIToken={{ proxmox_user_token }}={{ proxmox_api_secret }}"
 
   tasks:
 
@@ -145,18 +153,47 @@
       delegate_to: localhost
 
     # ============================================================
-    # SECTION 2 — Stop the VM before restore
+    # SECTION 2 — Make sure the VM is stopped
     # ============================================================
 
-    - name: "[00.1.2.1] Stop VM {{ dev_hng_vm_id }} before restore"
-      community.general.proxmox_kvm:
-        api_host: "{{ proxmox_host }}"
-        api_user: "{{ proxmox_user_token.split('!')[0] }}"
-        api_token_id: "{{ proxmox_user_token.split('!')[1] }}"
-        api_token_secret: "{{ proxmox_api_secret }}"
-        vmid: "{{ dev_hng_vm_id }}"
-        state: stopped
+    - name: "[00.1.2.1] Get current state of VM {{ dev_hng_vm_id }}"
+      ansible.builtin.uri:
+        url: "{{ proxmox_api }}/qemu/{{ dev_hng_vm_id }}/status/current"
+        method: GET
+        headers: { Authorization: "{{ proxmox_auth }}" }
         validate_certs: false
+      register: vm_state
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.1.2.2] Report VM state"
+      ansible.builtin.debug:
+        msg: "VM {{ dev_hng_vm_id }} is {{ vm_state.json.data.status }} — {{ 'stopping it first' if vm_state.json.data.status != 'stopped' else 'restoring directly' }}"
+      run_once: true
+      delegate_to: localhost
+
+    # Hard stop: the disk is overwritten by the restore anyway.
+    - name: "[00.1.2.3] Stop VM {{ dev_hng_vm_id }}"
+      ansible.builtin.uri:
+        url: "{{ proxmox_api }}/qemu/{{ dev_hng_vm_id }}/status/stop"
+        method: POST
+        headers: { Authorization: "{{ proxmox_auth }}" }
+        validate_certs: false
+      when: vm_state.json.data.status != 'stopped'
+      run_once: true
+      delegate_to: localhost
+
+    - name: "[00.1.2.4] Wait until VM {{ dev_hng_vm_id }} is stopped"
+      ansible.builtin.uri:
+        url: "{{ proxmox_api }}/qemu/{{ dev_hng_vm_id }}/status/current"
+        method: GET
+        headers: { Authorization: "{{ proxmox_auth }}" }
+        validate_certs: false
+      register: vm_stop_state
+      until: vm_stop_state.json.data.status == 'stopped'
+      retries: 30
+      delay: 5
+      when: vm_state.json.data.status != 'stopped'
       run_once: true
       delegate_to: localhost
 
@@ -214,13 +251,10 @@
     # ============================================================
 
     - name: "[00.1.4.1] Start VM after restore"
-      community.general.proxmox_kvm:
-        api_host: "{{ proxmox_host }}"
-        api_user: "{{ proxmox_user_token.split('!')[0] }}"
-        api_token_id: "{{ proxmox_user_token.split('!')[1] }}"
-        api_token_secret: "{{ proxmox_api_secret }}"
-        vmid: "{{ dev_hng_vm_id }}"
-        state: started
+      ansible.builtin.uri:
+        url: "{{ proxmox_api }}/qemu/{{ dev_hng_vm_id }}/status/start"
+        method: POST
+        headers: { Authorization: "{{ proxmox_auth }}" }
         validate_certs: false
       run_once: true
       delegate_to: localhost
