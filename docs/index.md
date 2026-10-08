@@ -10,7 +10,7 @@
     Project
   </p>
   <p style="margin: 0 0 1.2rem; line-height: 1.9;">
-    <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v1.0.3" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v1.0.3&color=ff9800&style=flat-square"></a>
+    <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v2.0.0" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v2.0.0&color=ff9800&style=flat-square"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/blob/main/LICENSE" target="_blank"><img alt="license" src="https://img.shields.io/github/license/lukaszFD/cyber-sentinel?style=flat-square&color=blue" style="margin-left:6px;"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/commits/main" target="_blank"><img alt="last commit" src="https://img.shields.io/github/last-commit/lukaszFD/cyber-sentinel?style=flat-square&color=brightgreen" style="margin-left:6px;"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/stargazers" target="_blank"><img alt="stars" src="https://img.shields.io/github/stars/lukaszFD/cyber-sentinel?style=flat-square&logo=github" style="margin-left:6px;"></a>
@@ -92,7 +92,7 @@ Cyber Sentinel turns raw DNS traffic into decisions. Every new domain seen on th
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>🗄️ <a href="db/">Database Schema</a></strong><br>
+    <strong>🗄️ <a href="database/">Database Schema</a></strong><br>
     <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">PostgreSQL + pgvector, partitioning &amp; retention</span>
   </div>
 
