@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Recon prompt{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Recon analyst prompt</h1>
+  <a class="btn ghost" href="{{ url_for('recon_page') }}">← Deep recon</a>
+</div>
+<p class="muted">System prompt of the AI analyst in the Deep Recon workflow. It receives the verdict, the domain registration, the certificate history and the page as JSON, and has no tools. <code>[[THREAT_SCALE]]</code> and <code>[[MAX_DEVIATION]]</code> are filled in by the workflow and must be present. The active version is read-only; create a new version, then activate it. Every result stores the version it was produced with.</p>
+
+<section class="card">
+<table class="list">
+  <thead><tr><th>Version</th><th>Status</th><th>Note</th><th>Size</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'row-active' if r.is_active }}">
+      <td class="mono"><a href="{{ url_for('recon_prompt_page', v=r.version) }}">{{ r.version }}</a></td>
+      <td>{% if r.is_active %}<span class="tag ok">ACTIVE</span>{% else %}<span class="tag">draft</span>{% endif %}</td>
+      <td>{{ r.notes or '' }}</td>
+      <td class="muted small nowrap">{{ r.chars }} chars</td>
+      <td class="nowrap muted small">{{ r.created_at|dt }}</td>
+      <td class="row-actions">
+        {% if not r.is_active %}
+        <form method="post" data-confirm="Activate recon prompt {{ r.version }}?">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="activate">
+          <input type="hidden" name="version" value="{{ r.version }}">
+          <button class="btn small primary" type="submit">Activate</button>
+        </form>
+        <form method="post" data-confirm="Delete recon prompt {{ r.version }}? The text stays in the change log.">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="version" value="{{ r.version }}">
+          <button class="btn small danger" type="submit">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6"><span class="flash error">No recon prompt — the Deep Recon workflow stops at "Build recon prompt".</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+
+{% if shown %}
+<section class="card">
+  <h2>Version {{ shown.version }}{% if shown.is_active %} · active{% endif %}</h2>
+  {% if report and (report.missing or report.unknown) %}<div class="flash warn">{% if report.missing %}Missing placeholders: {{ report.missing|join(', ') }}. {% endif %}{% if report.unknown %}Unknown placeholders (sent to the model as they are): {% for p in report.unknown %}[[{{ p }}]] {% endfor %}{% endif %}This version cannot be activated.</div>{% endif %}
+  <pre class="preview">{{ shown.system_prompt }}</pre>
+</section>
+{% endif %}
+
+<form method="post" class="card">
+  <h2>New version{% if shown %} (based on {{ shown.version }}){% endif %}</h2>
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="new">
+  <div class="form-row">
+    <label>Version<input name="version" value="{{ suggestion }}" required maxlength="20"></label>
+    <label class="grow">Note<input class="wide" name="notes" value="{{ 'Based on ' ~ shown.version if shown }}"></label>
+  </div>
+  <label>Prompt text
+    <textarea class="prompt" name="system_prompt" data-counter required>{{ shown.system_prompt if shown }}</textarea>
+  </label>
+  <div class="counter muted small"></div>
+  <div class="actions"><button class="btn primary" type="submit">Save as draft</button></div>
+</form>
+{% endblock %}

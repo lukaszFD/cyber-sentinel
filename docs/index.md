@@ -110,7 +110,7 @@ Cyber Sentinel turns raw DNS traffic into decisions. Every new domain seen on th
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
-    <strong>🤖 <a href="n8n/">n8n Workflow</a></strong><br>
+    <strong>🤖 <a href="n8n/">n8n Workflows</a></strong><br>
     <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI agent pipeline: enrichment, scoring, alerts, auto-block</span>
   </div>
 

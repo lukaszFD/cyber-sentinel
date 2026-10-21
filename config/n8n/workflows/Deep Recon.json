@@ -1,0 +1,1406 @@
+{
+  "name": "Deep Recon",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        300
+      ],
+      "id": "62010b71-332d-507f-b53a-f3244edc5552",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Settings, today's new urlscan.io scans, threat scale and the active recon\n-- prompt, read once per run.\nSELECT\n    (SELECT jsonb_object_agg(key, value) FROM cyber_sentinel_ai.ai_settings) AS settings,\n    (SELECT count(*) FROM cyber_sentinel_ai.deep_recon\n      WHERE mode = 'submitted' AND started_at >= CURRENT_DATE)            AS submitted_today,\n    (SELECT string_agg(formatted_line, E'\\n' ORDER BY score)\n       FROM cyber_sentinel.v_threat_scale_for_agent)                        AS threat_scale,\n    (SELECT jsonb_object_agg(score, jsonb_build_object(\n                'description', description, 'action', action_recommended))\n       FROM cyber_sentinel.dic_threat_levels)                               AS threat_levels,\n    p.version                                                               AS prompt_version,\n    p.system_prompt\nFROM (SELECT 1) AS one\nLEFT JOIN cyber_sentinel_ai.recon_prompt_templates p ON p.is_active;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -200,
+        300
+      ],
+      "id": "c986d96d-1c08-5754-bb76-ad4355ce2eff",
+      "name": "Load recon configuration",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6a57e0be-d8f5-57eb-9a45-497850a011ef",
+              "leftValue": "={{ Number($json.settings.recon_enabled) === 1 && Number($json.submitted_today) < Number($json.settings.recon_daily_limit) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        300
+      ],
+      "id": "2c740a6e-0e65-5fff-8f39-6f45bc59d742",
+      "name": "Recon enabled and budget left?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Claim ONE verdict before any external call: the 'running' row keeps a\n-- failing domain from being picked again on the next run. Returns the\n-- verdict as the main workflow stored it. No row = nothing to do, the run\n-- ends here.\nWITH next AS (\n    SELECT * FROM cyber_sentinel_ai.v_pending_recon LIMIT 1\n), claimed AS (\n    INSERT INTO cyber_sentinel_ai.deep_recon (analysis_result_id, fqdn, observable_ip, original_score, original_label)\n    SELECT analysis_result_id, fqdn, observable_ip, final_score, LEFT(threat_label, 50)\n    FROM next\n    RETURNING id, analysis_result_id, fqdn, observable_ip, original_score, original_label\n)\nSELECT c.id                     AS recon_id,\n       c.analysis_result_id,\n       c.fqdn,\n       c.observable_ip,\n       c.original_score,\n       c.original_label,\n       ar.verdict_summary_en    AS original_summary,\n       va.rule_score,\n       va.vt_malicious,\n       va.primary_evidence,\n       va.supporting_context,\n       va.deviation_reason,\n       va.evidence->'shodan'    AS shodan,\n       va.evidence->'urlscan'   AS urlscan_search,\n       va.analyzed_at,\n       -- Subdomain of a platform where anyone can publish (github.io, ...):\n       -- its registration data describes the platform, not the owner.\n       EXISTS (SELECT 1 FROM cyber_sentinel_ai.domain_allowlist_exclusions e\n               WHERE e.domain = ANY (cyber_sentinel_ai.domain_suffixes(c.fqdn))) AS shared_platform\nFROM claimed c\nJOIN cyber_sentinel_ai.verdict_audit va      ON va.analysis_result_id = c.analysis_result_id\nJOIN cyber_sentinel.ai_analysis_results ar   ON ar.id = c.analysis_result_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        300
+      ],
+      "id": "78288dc0-d672-52a8-81fe-3513994f63d9",
+      "name": "Claim next verdict",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Plan domain lookups\n// RDAP needs the registered domain, which is not always the last two labels\n// (shop.firma.com.pl -> firma.com.pl). Without a public-suffix list, RDAP is\n// asked for two candidates - the last three and the last two labels - and\n// \"Data reduction - RDAP\" keeps the longest one the registry knows.\n// Mode: Run Once for All Items (emits one item per candidate).\n\nconst claim = $('Claim next verdict').first().json;\nconst labels = String(claim.fqdn).toLowerCase().replace(/\\.$/, '').split('.').filter(Boolean);\nconst candidates = [];\nif (labels.length >= 3) candidates.push(labels.slice(-3).join('.'));\nif (labels.length >= 2) candidates.push(labels.slice(-2).join('.'));\nreturn candidates.map((domain) => ({ json: { domain } }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "id": "ae39df0c-f362-5cc4-8a94-37a35334ac69",
+      "name": "Plan domain lookups"
+    },
+    {
+      "parameters": {
+        "url": "=https://rdap.org/domain/{{ $json.domain.replace(/[^a-z0-9.-]/g, '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/rdap+json, application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "id": "610a7e48-1143-526a-baf4-25b7187d50d9",
+      "name": "RDAP lookup",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Data reduction - RDAP\n// Keeps the longest candidate the registry answered for (the registered\n// domain) and reduces the RDAP record (RFC 9083) to what an analyst needs:\n// registration date and age, registrar, status flags, nameservers.\n// Not every TLD offers RDAP: no answer is recorded as status \"no_data\".\n// Mode: Run Once for All Items.\n\nconst claim = $('Claim next verdict').first().json;\nconst candidates = $('Plan domain lookups').all().map((i) => i.json.domain);\nconst answers = $input.all().map((item, i) => ({ domain: candidates[i], res: item.json }));\n\nconst parsed = answers\n  .map((a) => {\n    let body = a.res?.body;\n    if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }\n    return { domain: a.domain, status: a.res?.statusCode, body };\n  })\n  .filter((a) => a.status === 200 && a.body && a.body.objectClassName === 'domain');\nparsed.sort((a, b) => b.domain.split('.').length - a.domain.split('.').length);\nconst best = parsed[0];\n\nlet domain;\nlet raw = null;\nif (!best) {\n  const codes = answers.map((a) => a.res?.statusCode ?? (a.res?.error ? 'error' : 'n/a'));\n  domain = {\n    status: codes.every((c) => c === 404) ? 'no_data' : 'error',\n    registrable_domain: candidates[candidates.length - 1] || null,\n    message: `RDAP answered ${codes.join(', ')}`,\n  };\n} else {\n  const b = best.body;\n  const event = (action) => (Array.isArray(b.events) ? b.events : []).find((e) => e.eventAction === action)?.eventDate || null;\n  const vcardName = (ent) => {\n    const props = Array.isArray(ent?.vcardArray?.[1]) ? ent.vcardArray[1] : [];\n    const fn = props.find((p) => Array.isArray(p) && p[0] === 'fn');\n    return fn ? String(fn[3] || '').trim() : '';\n  };\n  // Registrar can be nested one level down (registry -> registrar entity).\n  const entities = (Array.isArray(b.entities) ? b.entities : [])\n    .flatMap((e) => [e, ...(Array.isArray(e.entities) ? e.entities : [])]);\n  const registrar = entities.find((e) => Array.isArray(e.roles) && e.roles.includes('registrar'));\n  const registered = event('registration');\n  const ageDays = registered && !Number.isNaN(Date.parse(registered))\n    ? Math.floor((Date.now() - Date.parse(registered)) / 86400000) : null;\n  domain = {\n    status: 'ok',\n    registrable_domain: String(b.ldhName || best.domain).toLowerCase(),\n    registered_at: registered,\n    age_days: ageDays,\n    expires_at: event('expiration'),\n    last_changed_at: event('last changed'),\n    registrar: (vcardName(registrar) || null)?.slice(0, 200) ?? null,\n    status_flags: (Array.isArray(b.status) ? b.status : []).map(String).slice(0, 10),\n    nameservers: (Array.isArray(b.nameservers) ? b.nameservers : [])\n      .map((n) => String(n.ldhName || '').toLowerCase()).filter(Boolean).slice(0, 8),\n    dnssec: typeof b.secureDNS?.delegationSigned === 'boolean' ? b.secureDNS.delegationSigned : null,\n  };\n  raw = { source: 'RDAP', resource: domain.registrable_domain, payload: b };\n}\ndomain.shared_platform = claim.shared_platform === true;\n\nreturn [{ json: { domain, raw } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ],
+      "id": "1473eda3-4a0b-5880-953b-46f82672cccd",
+      "name": "Data reduction - RDAP"
+    },
+    {
+      "parameters": {
+        "url": "https://crt.sh/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $('Claim next verdict').first().json.shared_platform === true ? String($('Claim next verdict').first().json.fqdn).replace(/[^A-Za-z0-9._-]/g, '') : '%.' + String($json.domain.registrable_domain || '').replace(/[^a-z0-9.-]/g, '') }}"
+            },
+            {
+              "name": "output",
+              "value": "json"
+            },
+            {
+              "name": "deduplicate",
+              "value": "Y"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 45000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ],
+      "id": "c00420cd-6601-5b79-8cc7-39a01d46951f",
+      "name": "crt.sh lookup",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Data reduction - domain\n// Certificate history from crt.sh (Certificate Transparency logs): how many\n// certificates, when the first and the latest were issued, by whom, and the\n// subdomains they name. crt.sh is often slow or down: a failure is recorded\n// as status \"error\" and the run goes on. Only the reduced facts are kept.\n// Mode: Run Once for Each Item.\n\nconst { domain, raw } = $('Data reduction - RDAP').first().json;\nconst res = $json;\n\nlet certificates;\nlet rows = null;\nif (res?.statusCode === 200) {\n  try { rows = typeof res.body === 'string' ? JSON.parse(res.body) : res.body; } catch (e) { rows = null; }\n}\nif (!Array.isArray(rows)) {\n  certificates = { status: 'error', error: res?.statusCode ? `HTTP ${res.statusCode}` : String(res?.error?.message || res?.error || 'request failed') };\n} else if (rows.length === 0) {\n  certificates = { status: 'no_data' };\n} else {\n  const time = (v) => { const t = Date.parse(String(v || '').replace(' ', 'T') + (/[zZ]|[+-]\\d\\d:?\\d\\d$/.test(String(v)) ? '' : 'Z')); return Number.isNaN(t) ? null : t; };\n  const issued = rows.map((r) => time(r.not_before) ?? time(r.entry_timestamp)).filter((t) => t !== null);\n  const issuerOrg = (n) => (String(n || '').match(/O=(\"?)([^,\"]+)\\1/) || [])[2] || String(n || '').slice(0, 60);\n  const issuers = {};\n  rows.forEach((r) => { const k = issuerOrg(r.issuer_name); issuers[k] = (issuers[k] || 0) + 1; });\n  const names = new Set();\n  rows.forEach((r) => String(r.name_value || '').split('\\n').forEach((n) => { n = n.trim().toLowerCase(); if (n) names.add(n); }));\n  const iso = (t) => (t === null ? null : new Date(t).toISOString());\n  certificates = {\n    status: 'ok',\n    count: rows.length,\n    first_seen: iso(issued.length ? Math.min(...issued) : null),\n    latest: iso(issued.length ? Math.max(...issued) : null),\n    first_seen_days_ago: issued.length ? Math.floor((Date.now() - Math.min(...issued)) / 86400000) : null,\n    issuers: Object.entries(issuers).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, n]) => ({ name, certificates: n })),\n    names_seen: names.size,\n    name_sample: [...names].sort().slice(0, 20),\n  };\n}\n\nreturn { json: { domain, certificates, raw: raw ? [raw] : [] } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "id": "59f66257-e28e-5561-9447-f5d3e6a99aa2",
+      "name": "Data reduction - domain"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/urlscanio/api-key",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        300
+      ],
+      "id": "4dafd760-9d97-517e-85de-15e485efbbe0",
+      "name": "urlscan.io API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://urlscan.io/api/v1/search/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ `page.domain:\"${String($('Claim next verdict').first().json.fqdn).replace(/[^A-Za-z0-9._-]/g, '')}\" AND date:>now-${Number($('Load recon configuration').first().json.settings.recon_reuse_days)}d` }}"
+            },
+            {
+              "name": "size",
+              "value": "5"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "={{ $('urlscan.io API TOKEN').first().json.data.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ],
+      "id": "4bb57c92-198b-5b13-b85d-fb0f2f01e895",
+      "name": "Search existing scan",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Plan scan\n// Reuses the newest urlscan.io scan of exactly this domain when one exists\n// within recon_reuse_days; otherwise asks for a new scan. Without a urlscan\n// key the page is skipped - the analyst still gets the domain context.\n// Mode: Run Once for Each Item.\n\nconst claim = $('Claim next verdict').first().json;\nconst vault = $('urlscan.io API TOKEN').first().json;\nconst res = $json;\n\nif (vault.error || !vault.data?.token) {\n  return { json: { action: 'skip', failure: { page_status: 'not_scanned', mode: null, uuid: null,\n    message: 'No urlscan.io key in Vault (cyber-sentinel/api-keys/urlscanio/api-key, vault_urlscanio_api_key, playbook 06.1).' } } };\n}\n\nlet body = res?.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }\nconst fqdn = String(claim.fqdn).toLowerCase();\nconst scans = (res?.statusCode === 200 && Array.isArray(body?.results) ? body.results : [])\n  .filter((r) => String(r?.page?.domain || '').toLowerCase() === fqdn && (r._id || r.task?.uuid))\n  .sort((a, b) => String(b?.task?.time || '').localeCompare(String(a?.task?.time || '')));\n\nif (scans.length > 0) {\n  return { json: { action: 'reuse', uuid: scans[0]._id || scans[0].task.uuid, mode: 'reused' } };\n}\nreturn { json: { action: 'submit', search_status: res?.statusCode ?? null } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ],
+      "id": "6b50f804-c0ca-592f-959c-1418adcfd6d9",
+      "name": "Plan scan"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "97d9bc89-8332-557c-86e9-12ba98f19641",
+              "leftValue": "={{ $json.action === 'reuse' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        300
+      ],
+      "id": "7d297189-b82b-5d8f-aa91-c2983b8b3cad",
+      "name": "Reuse existing scan?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7ac10c66-0305-571f-b1a8-016ad66b3e0c",
+              "leftValue": "={{ $json.action === 'submit' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        520
+      ],
+      "id": "862e7e66-74c9-5b95-b759-80b87c6469eb",
+      "name": "Submit new scan?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://urlscan.io/api/v1/scan/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "={{ $('urlscan.io API TOKEN').first().json.data.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  url: `http://${String($('Claim next verdict').first().json.fqdn).replace(/[^A-Za-z0-9._-]/g, '')}/`,\n  visibility: Number($('Load recon configuration').first().json.settings.recon_private_scans) === 1 ? 'private' : 'unlisted',\n  tags: ['cyber-sentinel']\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        520
+      ],
+      "id": "9ca4e1a3-95f6-5689-9ddc-3fec188727bf",
+      "name": "Submit scan",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Accept submission\n// 200 -> scan queued at urlscan.io (counts against recon_daily_limit).\n// 400 \"DNS Error\" / \"could not resolve\" -> the domain no longer resolves\n//     publicly: page_status 'unreachable' (useful: the site is gone).\n// Anything else (quota 429, auth 401, blocked domain, ...) -> 'error'.\n// Mode: Run Once for Each Item.\n\nconst settings = $('Load recon configuration').first().json.settings;\nconst res = $json;\nlet body = res?.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = { message: body.slice(0, 200) }; } }\nbody = body || {};\n\nif (res?.statusCode === 200 && body.uuid) {\n  return { json: { ok: true, uuid: body.uuid, mode: 'submitted',\n    visibility: body.visibility || (Number(settings.recon_private_scans) === 1 ? 'private' : 'unlisted') } };\n}\n\nconst detail = [body.message, body.description].filter(Boolean).join(' - ').slice(0, 300)\n  || String(res?.error?.message || res?.error || 'no response').slice(0, 300);\nconst unreachable = res?.statusCode === 400 && /dns|resolve/i.test(detail);\nreturn { json: { ok: false, failure: {\n  page_status: unreachable ? 'unreachable' : 'error',\n  mode: null,\n  uuid: null,\n  message: `urlscan.io submit HTTP ${res?.statusCode ?? 'n/a'}: ${detail}`,\n} } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        520
+      ],
+      "id": "1dafe516-4799-575c-94bf-c8faf6cc0cc7",
+      "name": "Accept submission"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "11415a52-7d10-56e0-a640-cc7999071013",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2860,
+        520
+      ],
+      "id": "7a7bd7a1-304b-5ac3-a991-5395539ae246",
+      "name": "Submission accepted?"
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        520
+      ],
+      "id": "7c34e1f1-f86f-573e-88c9-cae17a717af2",
+      "name": "Wait for scan",
+      "webhookId": "c1d4e959-fefc-5094-a194-4db20c720cbd"
+    },
+    {
+      "parameters": {
+        "url": "=https://urlscan.io/api/v1/result/{{ $json.uuid }}/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "={{ $('urlscan.io API TOKEN').first().json.data.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        300
+      ],
+      "id": "7d7a757d-e907-5b15-b094-dd6d1bbd63ec",
+      "name": "Get scan result",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Check scan result\n// 200 -> ready. 404 -> scan still running: wait 10 s and poll again (this\n// node runs once per poll; $runIndex counts the polls). 410 -> scan deleted.\n// Gives up after MAX_POLLS (~30 s + 6 x 10 s).\n// Mode: Run Once for Each Item.\n\nconst MAX_POLLS = 6;\nconst planned = $('Plan scan').first().json;\nconst submitted = $('Accept submission').isExecuted ? $('Accept submission').first().json : null;\nconst scan = planned.action === 'reuse' ? planned : submitted;\nconst res = $json;\nconst attempt = $runIndex + 1;\n\nif (res?.statusCode === 200 && res.body && typeof res.body === 'object') {\n  return { json: { state: 'ready', uuid: scan.uuid, mode: scan.mode, visibility: scan.visibility || null, result: res.body } };\n}\nif (res?.statusCode === 404 && attempt < MAX_POLLS) {\n  return { json: { state: 'pending', uuid: scan.uuid, attempt } };\n}\nconst why = res?.statusCode === 404 ? `no result after ${attempt} polls`\n  : res?.statusCode === 410 ? 'scan was deleted at urlscan.io'\n  : `HTTP ${res?.statusCode ?? 'n/a'} ${String(res?.error?.message || res?.error || '').slice(0, 200)}`;\nreturn { json: { state: 'failed', failure: { page_status: 'error', mode: scan.mode, uuid: scan.uuid,\n  message: `urlscan.io result ${scan.uuid}: ${why}` } } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        300
+      ],
+      "id": "03e96b3a-9fb1-54e4-8154-9cecb68fb72f",
+      "name": "Check scan result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "275d1ed7-31de-5adf-8a21-ee855b263cd2",
+              "leftValue": "={{ $json.state === 'ready' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3740,
+        300
+      ],
+      "id": "7288870b-9718-5792-9767-035744520073",
+      "name": "Scan ready?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "478ae518-3dc5-58f0-aacb-fe9609fcce5c",
+              "leftValue": "={{ $json.state === 'pending' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3740,
+        520
+      ],
+      "id": "61d5f6b1-7980-58c3-835d-c9e026955cf4",
+      "name": "Still running?"
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3960,
+        640
+      ],
+      "id": "73c01d9c-3993-5eb4-ada0-5e815e1ced40",
+      "name": "Wait before next poll",
+      "webhookId": "67905d7c-aca5-5369-a4d1-f159aedf1e9c"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Keep scan result\n// Runs once, after the last poll: later nodes read the scan from here\n// (the polling nodes above may have run several times).\n// Mode: Run Once for Each Item.\n\nreturn { json: $json };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        300
+      ],
+      "id": "097f466e-46e6-5310-89e5-719370a673c9",
+      "name": "Keep scan result"
+    },
+    {
+      "parameters": {
+        "url": "=https://urlscan.io/dom/{{ $json.uuid }}/",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        300
+      ],
+      "id": "e9a9d75e-3192-5f1a-9e59-9d5bf2ac2fd7",
+      "name": "Get page DOM",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Data reduction - page\n// Turns the urlscan.io result (often several MB) and the page DOM into a\n// compact fact sheet. The page is attacker-controlled: its text is only ever\n// passed on as data, URLs are defanged, and everything is length-capped.\n// Mode: Run Once for Each Item.\n\nconst claim = $('Claim next verdict').first().json;\nconst kept = $('Keep scan result').first().json;\nconst r = kept.result || {};\nconst domRes = $json;\nconst fqdn = String(claim.fqdn).toLowerCase();\n\nconst defang = (url) => (url ? String(url).replace(/^http/i, 'hxxp').replace(/\\./g, '[.]') : null);\nconst cut = (s, n) => (s == null ? null : String(s).replace(/\\s+/g, ' ').trim().slice(0, n));\nconst arr = (a, n) => (Array.isArray(a) ? a.slice(0, n) : []);\nconst num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\n\nfunction decodeEntities(s) {\n  return s.replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')\n    .replace(/&quot;/gi, '\"').replace(/&#39;|&apos;/gi, \"'\")\n    .replace(/&#(\\d+);/g, (m, d) => { const c = Number(d); return c > 0 && c < 0x110000 ? String.fromCodePoint(c) : ' '; })\n    .replace(/&#x([0-9a-f]+);/gi, (m, h) => { const c = parseInt(h, 16); return c > 0 && c < 0x110000 ? String.fromCodePoint(c) : ' '; });\n}\nfunction hostOf(action, base) {\n  try { return new URL(action || '', base).hostname.toLowerCase(); } catch (e) { return null; }\n}\n\nconst MAX_HTML = 2_000_000;   // never scan more than ~2 MB of markup\nconst MAX_TEXT = 6000;        // characters of page text sent to the model\nlet dom = { dom_status: 'missing', text: '', text_truncated: false, forms: 0, password_field: false,\n  card_field: false, form_targets: [], external_form_targets: [] };\n\nif (domRes?.statusCode === 200 && typeof domRes.body === 'string' && domRes.body.length > 0) {\n  // Comments and script/style bodies first, so markup inside them\n  // (\"<form ...>\" in a JS string) is not counted as a real form.\n  const html = domRes.body.slice(0, MAX_HTML)\n    .replace(/<!--[\\s\\S]*?-->/g, ' ')\n    .replace(/<(script|style|noscript|svg|template|iframe|object)\\b[\\s\\S]*?<\\/\\1\\s*>/gi, ' ');\n  const forms = html.match(/<form\\b[^>]*>/gi) || [];\n  const baseUrl = r.page?.url || `http://${fqdn}/`;\n  const targets = [...new Set(forms\n    .map((f) => (f.match(/\\baction\\s*=\\s*[\"']?([^\"'\\s>]*)/i) || [])[1])\n    .map((a) => hostOf(a, baseUrl))\n    .filter(Boolean))];\n  const finalHost = hostOf(baseUrl, baseUrl);\n  const text = decodeEntities(html\n    .replace(/<(br|p|div|li|tr|h[1-6]|section|article|header|footer|form|label|button|option)\\b[^>]*>/gi, '\\n')\n    .replace(/<[^>]+>/g, ' '))\n    .replace(/[ \\t\\f\\v\\r]+/g, ' ')\n    .replace(/\\n\\s*/g, '\\n')\n    .replace(/\\n{2,}/g, '\\n')\n    .trim();\n  dom = {\n    dom_status: 'ok',\n    text: text.slice(0, MAX_TEXT),\n    text_truncated: text.length > MAX_TEXT,\n    forms: forms.length,\n    password_field: /<input\\b[^>]*\\btype\\s*=\\s*[\"']?password\\b/i.test(html),\n    card_field: /\\bautocomplete\\s*=\\s*[\"']?cc-(number|csc|exp)|<input\\b[^>]*\\bname\\s*=\\s*[\"'][^\"']*(card.?num|cvv|cvc)/i.test(html),\n    form_targets: targets.slice(0, 10),\n    external_form_targets: targets.filter((h) => h !== finalHost).slice(0, 10),\n  };\n} else if (domRes?.statusCode && domRes.statusCode !== 200) {\n  dom.dom_status = `http_${domRes.statusCode}`;\n}\n\nconst overall = r.verdicts?.overall || {};\nconst us = r.verdicts?.urlscan || {};\nconst brands = [...new Set([\n  ...arr(overall.brands, 10).map((b) => (typeof b === 'string' ? b : b?.name || b?.key)),\n  ...arr(us.brands, 10).map((b) => (typeof b === 'string' ? b : b?.name || b?.key)),\n].filter(Boolean))].slice(0, 10);\nconst finalDomain = (r.page?.domain || '').toLowerCase() || null;\n\n// TLS certificates the page used (urlscan lists.certificates: validFrom /\n// validTo are Unix seconds). The final domain's certificate comes first.\nconst toIso = (v) => { const n = Number(v); const t = Number.isFinite(n) && n > 0 ? n * 1000 : Date.parse(v); return Number.isNaN(t) || !t ? null : new Date(t).toISOString(); };\nconst certs = arr(r.lists?.certificates, 50).map((c) => {\n  const from = toIso(c.validFrom);\n  return {\n    subject: cut(c.subjectName, 120),\n    issuer: cut(c.issuer, 120),\n    valid_from: from,\n    valid_to: toIso(c.validTo),\n    age_days: from ? Math.floor((Date.now() - Date.parse(from)) / 86400000) : null,\n  };\n}).filter((c) => c.subject);\nconst ownCert = (c) => { const s = String(c.subject).toLowerCase().replace(/^\\*\\./, ''); return finalDomain && (finalDomain === s || finalDomain.endsWith(`.${s}`)); };\ncerts.sort((a, b) => ownCert(b) - ownCert(a));\n\nconst page = {\n  status: 'scanned',\n  mode: kept.mode,\n  scanned_at: r.task?.time || null,\n  submitted_url: defang(r.task?.url),\n  final_url: defang(r.page?.url),\n  final_domain: finalDomain,\n  redirected_to_other_domain: Boolean(finalDomain && finalDomain !== fqdn),\n  http_status: num(r.page?.status),\n  title: cut(r.page?.title, 200),\n  mime_type: cut(r.page?.mimeType, 80),\n  server: cut(r.page?.server, 100),\n  hosting: { ip: r.page?.ip || null, as_owner: cut(r.page?.asnname, 100), country: r.page?.country || null },\n  tls: { issuer: cut(r.page?.tlsIssuer, 100), age_days: num(r.page?.tlsAgeDays), valid_days: num(r.page?.tlsValidDays) },\n  urlscan: {\n    score: num(overall.score ?? us.score),\n    malicious: typeof overall.malicious === 'boolean' ? overall.malicious : (typeof us.malicious === 'boolean' ? us.malicious : null),\n    categories: [...new Set([...arr(overall.categories, 10), ...arr(us.categories, 10)].map(String))].slice(0, 10),\n    brands,\n  },\n  contacted_domains: arr(r.lists?.domains, 200).map((d) => String(d).toLowerCase()).filter((d) => d !== fqdn).slice(0, 25),\n  link_domains: arr(r.lists?.linkDomains, 100).map((d) => String(d).toLowerCase()).filter((d) => d !== fqdn).slice(0, 15),\n  requests: Array.isArray(r.data?.requests) ? r.data.requests.length : null,\n  certificates: certs.slice(0, 5),\n  downloads: arr(r.meta?.processors?.download?.data, 5).map((d) => ({\n    filename: cut(d.filename, 120), mime_type: cut(d.mimeType, 80), size: num(d.filesize), sha256: d.sha256 || null,\n  })),\n  ...dom,\n};\n\nreturn {\n  json: {\n    page,\n    scan: {\n      uuid: kept.uuid,\n      mode: kept.mode,\n      visibility: kept.visibility || r.task?.visibility || null,\n      scan_time: r.task?.time || null,\n      report_url: `https://urlscan.io/result/${kept.uuid}/`,\n      screenshot_url: `https://urlscan.io/screenshots/${kept.uuid}.png`,\n    },\n    // Trimmed raw payload for cyber_sentinel.threat_data_raw (no request log, no DOM).\n    raw: {\n      source: 'urlscan.io',\n      resource: fqdn,\n      payload: {\n        task: r.task || null,\n        page: r.page || null,\n        verdicts: r.verdicts || null,\n        stats: r.stats || null,\n        lists: Object.fromEntries(Object.entries(r.lists || {}).map(([k, v]) => [k, arr(v, 100)])),\n        downloads: arr(r.meta?.processors?.download?.data, 20),\n      },\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        300
+      ],
+      "id": "d6387b13-b587-5ffb-bc30-43c93647f689",
+      "name": "Data reduction - page"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// No page scan\n// The page could not be scanned (no urlscan key, submission refused, domain\n// does not resolve, no result in time). The analyst still re-assesses the\n// verdict with the domain and certificate context.\n// Mode: Run Once for Each Item.\n\nconst f = $json.failure || { page_status: 'error', message: 'unknown failure' };\nreturn {\n  json: {\n    page: { status: f.page_status, message: f.message },\n    scan: f.uuid ? { uuid: f.uuid, mode: f.mode, report_url: `https://urlscan.io/result/${f.uuid}/` } : null,\n    raw: null,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        860
+      ],
+      "id": "c42f66f8-1e54-5881-b7de-7b9020308855",
+      "name": "No page scan"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build recon prompt\n// System message = active row of cyber_sentinel_ai.recon_prompt_templates\n// with [[THREAT_SCALE]] and [[MAX_DEVIATION]] (= recon_max_deviation)\n// resolved. User message = the current verdict and everything Deep Recon\n// collected, as JSON. Page text is untrusted: data only, no tools.\n// Mode: Run Once for Each Item.\n\nconst config = $('Load recon configuration').first().json;\nconst claim = $('Claim next verdict').first().json;\nconst dom = $('Data reduction - domain').first().json;\nconst { page, scan, raw } = $json;\n\nif (!config.system_prompt) {\n  throw new Error('No active recon prompt: set is_active = true on one row of cyber_sentinel_ai.recon_prompt_templates');\n}\nconst maxDev = Math.max(0, Math.trunc(Number(config.settings.recon_max_deviation) || 0));\nconst systemMessage = config.system_prompt\n  .replaceAll('[[THREAT_SCALE]]', config.threat_scale || '')\n  .replaceAll('[[MAX_DEVIATION]]', String(maxDev));\n\nconst userMessage = {\n  verdict: {\n    domain: claim.fqdn,\n    ip: claim.observable_ip,\n    final_score: claim.original_score,\n    label: claim.original_label,\n    summary: claim.original_summary,\n    rule_score: claim.rule_score,\n    virustotal_malicious: claim.vt_malicious,\n    primary_evidence: claim.primary_evidence,\n    supporting_context: claim.supporting_context,\n    ai_deviation_reason: claim.deviation_reason || null,\n    shodan: claim.shodan || null,\n    urlscan_search: claim.urlscan_search || null,\n    analysed_at: claim.analyzed_at,\n  },\n  domain: dom.domain,\n  certificates: dom.certificates,\n  page,\n};\n\nreturn {\n  json: {\n    system_message: systemMessage,\n    user_message: JSON.stringify(userMessage, null, 2),\n    max_deviation: maxDev,\n    // Everything \"Save recon result\" stores, apart from the AI answer.\n    recon: {\n      recon_id: claim.recon_id,\n      analysis_result_id: claim.analysis_result_id,\n      fqdn: claim.fqdn,\n      original_score: claim.original_score,\n      registrable_domain: dom.domain.registrable_domain || null,\n      domain_registered_at: dom.domain.registered_at || null,\n      domain_age_days: dom.domain.age_days ?? null,\n      registrar: dom.domain.registrar || null,\n      cert_first_seen: dom.certificates.first_seen || null,\n      cert_count: dom.certificates.count ?? null,\n      page_status: page.status,\n      mode: scan?.mode || null,\n      visibility: scan?.visibility || null,\n      scan_uuid: scan?.uuid || null,\n      scan_time: scan?.scan_time || null,\n      report_url: scan?.report_url || null,\n      screenshot_url: page.status === 'scanned' ? scan?.screenshot_url || null : null,\n      final_url: page.final_url || null,\n      page_title: page.title || null,\n      urlscan_score: page.urlscan?.score ?? null,\n      urlscan_malicious: page.urlscan?.malicious ?? null,\n      message: page.status === 'scanned' ? null : page.message || null,\n      facts: {\n        domain: dom.domain,\n        certificates: dom.certificates,\n        same_ip_sites: claim.urlscan_search?.same_ip || null,\n        page: { ...page, text: undefined, text_excerpt: page.text ? page.text.slice(0, 2000) : undefined },\n      },\n      raw: [...dom.raw, ...(raw ? [raw] : [])],\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        300
+      ],
+      "id": "1644ced5-1661-5e47-81a2-ccd2e3c26c88",
+      "name": "Build recon prompt"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_message }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "={{ $json.system_message }}"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        4840,
+        300
+      ],
+      "id": "7953f046-237a-59cd-961b-009835e4e53c",
+      "name": "Recon analyst",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "maxOutputTokens": 1536,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        4760,
+        520
+      ],
+      "id": "b2520e5f-c0bf-5f89-8834-acc2e9102656",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JJXaAGWm6Kg1DmUJ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"page_type\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"phishing\",\n        \"scam\",\n        \"malware_delivery\",\n        \"fake_update\",\n        \"parked\",\n        \"legitimate\",\n        \"error_or_empty\",\n        \"unknown\"\n      ]\n    },\n    \"impersonated_brand\": {\n      \"type\": \"string\",\n      \"description\": \"Brand name or empty string\"\n    },\n    \"credential_harvesting\": {\n      \"type\": \"boolean\"\n    },\n    \"supports_verdict\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"confirms\",\n        \"contradicts\",\n        \"inconclusive\"\n      ]\n    },\n    \"confidence\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"low\",\n        \"medium\",\n        \"high\"\n      ]\n    },\n    \"proposed_score\": {\n      \"type\": \"integer\",\n      \"minimum\": 1,\n      \"maximum\": 5\n    },\n    \"score_reason\": {\n      \"type\": \"string\",\n      \"description\": \"One sentence\"\n    },\n    \"indicators\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      },\n      \"description\": \"Up to 6 short English phrases\"\n    },\n    \"summary_en\": {\n      \"type\": \"string\",\n      \"description\": \"One or two English sentences\"\n    },\n    \"analysis_pl\": {\n      \"type\": \"string\",\n      \"description\": \"2-4 sentences in Polish for the analyst\"\n    }\n  },\n  \"required\": [\n    \"page_type\",\n    \"impersonated_brand\",\n    \"credential_harvesting\",\n    \"supports_verdict\",\n    \"confidence\",\n    \"proposed_score\",\n    \"score_reason\",\n    \"indicators\",\n    \"summary_en\",\n    \"analysis_pl\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        4980,
+        520
+      ],
+      "id": "793bb285-aeb3-577e-a263-6a51e79d5ed5",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse recon analyst output\n// Validates the structured answer and enforces the limit itself: the\n// proposed score stays within recon_max_deviation of the verdict, whatever\n// the model says. If the model failed or answered outside the schema, the\n// collected facts are still saved with ai_status = 'failed' and no score.\n// Mode: Run Once for Each Item.\n\n// Keep in sync with the model selected in the \"Google Gemini Chat Model\" node.\nconst AI_MODEL = 'gemini-3.1-flash-lite';\n\nconst config = $('Load recon configuration').first().json;\nconst built = $('Build recon prompt').first().json;\nconst recon = built.recon;\nconst ai = $json; // { output: {...} } | { text: '...' } | { error: ... }\n\nconst PAGE_TYPES = ['phishing', 'scam', 'malware_delivery', 'fake_update', 'parked', 'legitimate', 'error_or_empty', 'unknown'];\nconst SUPPORTS = ['confirms', 'contradicts', 'inconclusive'];\nconst CONFIDENCE = ['low', 'medium', 'high'];\n\nfunction text(value, field, max, required = true) {\n  if (typeof value !== 'string') throw new Error(`\"${field}\" is not a string`);\n  const clean = value.replace(/\\s+/g, ' ').trim();\n  if (required && !clean) throw new Error(`\"${field}\" is empty`);\n  return clean.slice(0, max);\n}\nfunction oneOf(value, field, allowed) {\n  const v = String(value ?? '').trim().toLowerCase();\n  if (!allowed.includes(v)) throw new Error(`\"${field}\" must be one of ${allowed.join('/')}, got ${JSON.stringify(value)}`);\n  return v;\n}\n\nlet result = null;\nlet aiError = null;\ntry {\n  if (ai.error) throw new Error(`Recon analyst failed: ${typeof ai.error === 'string' ? ai.error : ai.error.message || JSON.stringify(ai.error)}`);\n  // Basic LLM Chain + Structured Output Parser returns { output: {...} };\n  // accept a bare object or a JSON string too.\n  let out = ai.output ?? ai.text ?? ai.response?.text ?? ('page_type' in ai ? ai : undefined);\n  if (typeof out === 'string') {\n    out = JSON.parse(out.replace(/^```(?:json)?\\s*|\\s*```$/g, ''));\n  }\n  if (out && typeof out === 'object' && out.output && typeof out.output === 'object') out = out.output;\n  if (!out || typeof out !== 'object') throw new Error('Recon analyst returned no structured output');\n  if (typeof out.credential_harvesting !== 'boolean') throw new Error('\"credential_harvesting\" is not a boolean');\n  const proposed = Number(out.proposed_score);\n  if (!Number.isInteger(proposed)) throw new Error(`\"proposed_score\" is not an integer: ${JSON.stringify(out.proposed_score)}`);\n\n  const original = Number(recon.original_score);\n  const maxDev = Number(built.max_deviation);\n  const clamped = Math.min(5, Math.max(1, Math.min(original + maxDev, Math.max(original - maxDev, proposed))));\n  let reason = text(out.score_reason, 'score_reason', 500);\n  if (clamped !== proposed) {\n    reason = `${reason} (model proposed ${proposed}, limited to ${clamped} by recon_max_deviation = ${maxDev})`;\n  }\n  result = {\n    page_type: oneOf(out.page_type, 'page_type', PAGE_TYPES),\n    impersonated_brand: text(out.impersonated_brand ?? '', 'impersonated_brand', 100, false) || null,\n    credential_harvesting: out.credential_harvesting,\n    supports_verdict: oneOf(out.supports_verdict, 'supports_verdict', SUPPORTS),\n    confidence: oneOf(out.confidence, 'confidence', CONFIDENCE),\n    proposed_score: clamped,\n    score_reason: reason,\n    indicators: (Array.isArray(out.indicators) ? out.indicators : [])\n      .filter((s) => typeof s === 'string' && s.trim())\n      .slice(0, 6)\n      .map((s) => s.replace(/\\s+/g, ' ').trim().slice(0, 150)),\n    summary_en: text(out.summary_en, 'summary_en', 1000),\n    analysis_pl: text(out.analysis_pl, 'analysis_pl', 1500),\n  };\n} catch (e) {\n  aiError = String(e.message).slice(0, 500);\n}\n\nreturn {\n  json: {\n    recon: {\n      ...recon,\n      ...(result || {}),\n      ai_status: result ? 'ok' : 'failed',\n      ai_error: aiError,\n      ai_model: AI_MODEL,\n      prompt_version: config.prompt_version,\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        300
+      ],
+      "id": "28c62ac4-f005-53b4-ad51-59441c1c8da0",
+      "name": "Parse recon analyst output"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Raw payloads (RDAP, urlscan.io) -> threat_data_raw, linked to the\n-- verdict's indicator in threat_indicator_details (a urlscan.io scan\n-- replaces the search payload the main workflow may have stored), then the\n-- recon row is closed.\nWITH rec AS (\n    SELECT $1::jsonb AS r\n), raw AS (\n    INSERT INTO cyber_sentinel.threat_data_raw (resource, source_provider, scan_date, raw_data)\n    SELECT p->>'resource', p->>'source', LOCALTIMESTAMP, p->'payload'\n    FROM rec, jsonb_array_elements(COALESCE(rec.r->'raw', '[]'::jsonb)) AS p\n    WHERE jsonb_typeof(p->'payload') = 'object'\n    RETURNING id, source_provider, raw_data\n), details AS (\n    INSERT INTO cyber_sentinel.threat_indicator_details (indicator_id, source_id, raw_data_id, raw_response_hash, fetched_at)\n    SELECT ti.id, sp.id, raw.id, encode(sha256(convert_to(raw.raw_data::text, 'UTF8')), 'hex'), LOCALTIMESTAMP\n    FROM rec, raw\n    JOIN cyber_sentinel.dic_source_providers sp ON sp.name = raw.source_provider\n    JOIN cyber_sentinel.threat_indicators ti ON TRUE\n    WHERE ti.analysis_result_id = (rec.r->>'analysis_result_id')::int\n    ON CONFLICT (indicator_id, source_id) DO UPDATE\n        SET raw_data_id = EXCLUDED.raw_data_id,\n            raw_response_hash = EXCLUDED.raw_response_hash,\n            fetched_at = EXCLUDED.fetched_at\n    RETURNING id\n)\nUPDATE cyber_sentinel_ai.deep_recon dr\nSET status                = 'done',\n    registrable_domain    = r->>'registrable_domain',\n    domain_registered_at  = (r->>'domain_registered_at')::timestamptz AT TIME ZONE current_setting('TimeZone'),\n    domain_age_days       = (r->>'domain_age_days')::int,\n    registrar             = LEFT(r->>'registrar', 200),\n    cert_first_seen       = (r->>'cert_first_seen')::timestamptz AT TIME ZONE current_setting('TimeZone'),\n    cert_count            = (r->>'cert_count')::int,\n    page_status           = r->>'page_status',\n    mode                  = r->>'mode',\n    visibility            = r->>'visibility',\n    scan_uuid             = r->>'scan_uuid',\n    scan_time             = (r->>'scan_time')::timestamptz AT TIME ZONE current_setting('TimeZone'),\n    report_url            = r->>'report_url',\n    screenshot_url        = r->>'screenshot_url',\n    final_url             = r->>'final_url',\n    page_title            = r->>'page_title',\n    urlscan_score         = (r->>'urlscan_score')::int,\n    urlscan_malicious     = (r->>'urlscan_malicious')::boolean,\n    page_type             = r->>'page_type',\n    impersonated_brand    = r->>'impersonated_brand',\n    credential_harvesting = (r->>'credential_harvesting')::boolean,\n    supports_verdict      = r->>'supports_verdict',\n    confidence            = r->>'confidence',\n    proposed_score        = (r->>'proposed_score')::int,\n    score_reason          = r->>'score_reason',\n    summary_en            = r->>'summary_en',\n    analysis_pl           = r->>'analysis_pl',\n    indicators            = COALESCE(ARRAY(SELECT jsonb_array_elements_text(r->'indicators')), '{}'),\n    ai_status             = r->>'ai_status',\n    ai_error              = r->>'ai_error',\n    ai_model              = r->>'ai_model',\n    prompt_version        = r->>'prompt_version',\n    facts                 = r->'facts',\n    message               = concat_ws(' · ', r->>'message', format('%s raw payload(s), %s indicator detail(s)',\n                                    (SELECT count(*) FROM raw), (SELECT count(*) FROM details))),\n    finished_at           = LOCALTIMESTAMP\nFROM rec\nWHERE dr.id = (rec.r->>'recon_id')::bigint\nRETURNING dr.id, dr.fqdn, dr.status, dr.original_score, dr.proposed_score, dr.score_changed, dr.supports_verdict;",
+        "options": {
+          "queryReplacement": "={{ [ $json.recon ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5280,
+        300
+      ],
+      "id": "a8a10c0f-fbb4-5d78-83bc-aee73225cb5b",
+      "name": "Save recon result",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1c2c5eb-2427-5d9c-969e-296e6d6e5e1c",
+              "leftValue": "={{ $json.score_changed === true && Number($('Load recon configuration').first().json.settings.recon_email_enabled) === 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5500,
+        300
+      ],
+      "id": "bf206700-3407-5aeb-bf73-72f9cb3964c9",
+      "name": "Score changed?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        5720,
+        300
+      ],
+      "id": "8f24edea-045a-56b5-8388-592d1b0d1f72",
+      "name": "Get Email Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build recon e-mail\n// Sent when Deep Recon proposes a different score than the verdict. Every\n// dynamic value is HTML-escaped: domains, page titles and AI text are\n// untrusted input. Links point only to urlscan.io.\n// Mode: Run Once for Each Item.\n\nconst r = $('Parse recon analyst output').first().json.recon;\nconst levels = $('Load recon configuration').first().json.threat_levels || {};\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\nconst link = (url, label) => (typeof url === 'string' && url.startsWith('https://urlscan.io/')\n  ? `<a style=\"color:#90caf9;\" href=\"${esc(url)}\">${esc(label)}</a>` : '');\n\nconst up = r.proposed_score > r.original_score;\nconst theme = up\n  ? { label: '🔺 SCORE RAISED', accent: '#f44336', text: '#ff5252', header: '#3a1f1f' }\n  : { label: '🔻 SCORE LOWERED', accent: '#4caf50', text: '#81c784', header: '#1b3320' };\nconst level = levels[r.proposed_score] || {};\n\nconst box = (title, body) => (body\n  ? `<p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">${title}</p>\n     <div style=\"background:#252525;padding:12px;border-radius:4px;font-size:14px;line-height:1.6;\">${body}</div>`\n  : '');\nconst f = r.facts || {};\nconst d = f.domain || {};\nconst c = f.certificates || {};\nconst p = f.page || {};\nconst pc = Array.isArray(p.certificates) ? p.certificates[0] : null;\nconst loads = Array.isArray(p.contacted_domains) ? p.contacted_domains : [];\n\nconst domainBody = d.status === 'ok'\n  ? `${esc(d.registrable_domain)} &middot; registered ${esc((d.registered_at || '?').slice(0, 10))} (${esc(d.age_days ?? '?')} days ago)` +\n    `${d.registrar ? ` &middot; ${esc(d.registrar)}` : ''}${d.shared_platform ? '<br>Shared platform: registration describes the platform, not the owner.' : ''}`\n  : `RDAP: ${esc(d.status)}`;\nconst certBody = c.status === 'ok'\n  ? `${esc(c.count)} certificate(s), first ${esc((c.first_seen || '?').slice(0, 10))}, latest ${esc((c.latest || '?').slice(0, 10))} &middot; ${esc(c.names_seen)} name(s)`\n  : `crt.sh: ${esc(c.status)}`;\nconst pageBody = p.status === 'scanned'\n  ? `${esc(r.page_type || 'unknown')}${r.impersonated_brand ? ` &middot; pretends to be <strong>${esc(r.impersonated_brand)}</strong>` : ''}` +\n    `${r.credential_harvesting ? ' &middot; <span style=\"color:#ff5252;\">asks for credentials</span>' : ''}` +\n    `<br>Title: ${esc(p.title || 'none')} &middot; HTTP ${esc(p.http_status ?? '?')}<br>Final URL: <span style=\"font-family:monospace;\">${esc(p.final_url || '?')}</span>` +\n    (pc ? `<br>TLS certificate: ${esc(pc.subject)} &middot; ${esc(pc.issuer || '?')} &middot; from ${esc((pc.valid_from || '?').slice(0, 10))}${pc.age_days !== null && pc.age_days <= 30 ? ` <span style=\"color:#ff5252;\">(${esc(pc.age_days)} day(s) ago)</span>` : ''}` : '') +\n    (loads.length ? `<br>Loads resources from: ${esc(loads.slice(0, 10).join(', '))}${loads.length > 10 ? ` +${esc(loads.length - 10)} more` : ''}` : '') +\n    `<br>${[link(r.report_url, 'urlscan.io report'), link(r.screenshot_url, 'screenshot')].filter(Boolean).join(' &middot; ')}`\n  : `Page not scanned: ${esc(p.status)}${p.message ? ` &middot; ${esc(p.message)}` : ''}`;\nconst si = f.same_ip_sites;\nconst relatedBody = si?.status === 'ok'\n  ? `${esc(si.other_sites)} other site(s) on the IP${si.malicious_sites ? `, <span style=\"color:#ff5252;\">${esc(si.malicious_sites)} malicious</span>` : ''}: ` +\n    si.sites.slice(0, 10).map((x) => `${esc(x.domain)}${x.malicious ? ' <span style=\"color:#ff5252;\">(malicious)</span>' : ''}`).join(', ') +\n    (si.other_sites > 10 ? ` +${esc(si.other_sites - 10)} more` : '')\n  : '';\n\nconst html = `<!DOCTYPE html><html><body style=\"margin:0;padding:20px;background:#121212;font-family:Arial,sans-serif;color:#e0e0e0;\">\n<div style=\"max-width:640px;margin:0 auto;background:#1e1e1e;border-top:4px solid ${theme.accent};border-radius:8px;overflow:hidden;\">\n  <div style=\"background:${theme.header};padding:15px;text-align:center;\">\n    <h2 style=\"margin:0;color:${theme.text};\">${theme.label}: Cyber Sentinel Deep Recon</h2>\n  </div>\n  <div style=\"padding:24px;\">\n    <div style=\"background:#2d2d2d;border:1px solid #444;border-radius:5px;padding:10px;text-align:center;margin-bottom:18px;\">\n      <div style=\"font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;\">Verdict &rarr; Deep Recon</div>\n      <div style=\"font-size:36px;font-weight:bold;color:${theme.text};\">${esc(r.original_score)}/5 &rarr; ${esc(r.proposed_score)}/5</div>\n      <div style=\"font-size:12px;color:#aaa;text-transform:uppercase;\">${esc(level.description)} &middot; ${esc(level.action)}</div>\n      <div style=\"font-size:12px;color:#bbb;margin-top:6px;\">${esc(r.score_reason)}</div>\n    </div>\n    <p><strong>Domena:</strong> <span style=\"color:#90caf9;\">${esc(r.fqdn)}</span></p>\n    <p><strong>Ocena strony:</strong> ${esc(r.supports_verdict)} (${esc(r.confidence)})</p>\n    <p style=\"color:#ffd54f;\">Werdykt w bazie nie został zmieniony - to propozycja do decyzji.</p>\n    ${box('Analiza (PL)', esc(r.analysis_pl))}\n    ${box('Summary (EN)', esc(r.summary_en))}\n    ${box('Page', pageBody)}\n    ${box('Domain', domainBody)}\n    ${box('Certificates', certBody)}\n    ${box('Same IP (urlscan.io)', relatedBody)}\n    ${r.indicators && r.indicators.length ? box('Indicators', `<ul style=\"margin:0;padding-left:18px;\">${r.indicators.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`) : ''}\n  </div>\n  <div style=\"text-align:center;font-size:11px;color:#777;padding:12px;\">\n    Cyber Sentinel Deep Recon &middot; recon #${esc(r.recon_id)} &middot; analysis #${esc(r.analysis_result_id)} &middot; prompt ${esc(r.prompt_version)}\n  </div>\n</div></body></html>`;\n\nreturn {\n  json: {\n    subject: `Cyber Sentinel Deep Recon ${r.original_score}/5 → ${r.proposed_score}/5 | ${r.fqdn}`,\n    html,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        300
+      ],
+      "id": "46a9ed48-324c-5759-bd04-716724e1c97e",
+      "name": "Build recon e-mail"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Get Email Pass').item.json.data.user }}",
+        "toEmail": "={{ $('Get Email Pass').item.json.data.to }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        6160,
+        300
+      ],
+      "id": "5168c275-3741-5d8c-8f77-c90789d2167e",
+      "name": "Send an Email",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      },
+      "webhookId": "eb4bad00-2361-5715-90b8-86058c71dc33"
+    },
+    {
+      "parameters": {
+        "content": "# Cyber Sentinel — Deep Recon\n\nRe-assesses verdicts scored >= `recon_min_score` with context the main workflow does not collect: domain registration (RDAP), certificate history (crt.sh) and the web page (urlscan.io loads it **from its own infrastructure**, never from this network). An AI analyst without tools proposes a score within `recon_max_deviation`. Nothing is changed automatically: the result goes to `cyber_sentinel_ai.deep_recon`, and an e-mail is sent when the proposed score differs.\n\nSettings: `recon_*` in `ai_settings`; prompt: `recon_prompt_templates` — both edited in the AI config UI.",
+        "height": 240,
+        "width": 880
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -280
+      ],
+      "id": "58c4cf78-28e0-55ee-a102-0d9a5a0a5096",
+      "name": "Note - overview"
+    },
+    {
+      "parameters": {
+        "content": "## Queue & budget\nOne verdict per run, hourly. The `running` row is written before any external call, so a failing domain is not retried in a loop.",
+        "height": 360,
+        "width": 1000,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        140
+      ],
+      "id": "18e87b4d-eac2-597e-afe6-8733d38288dc",
+      "name": "Note - queue"
+    },
+    {
+      "parameters": {
+        "content": "## Domain: RDAP (two candidates, longest registered wins) + crt.sh certificate history\nBoth free, no key. Failures are recorded, never fatal.",
+        "height": 360,
+        "width": 900,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        600,
+        140
+      ],
+      "id": "8b414649-e8c5-57ca-b1ad-57d15a855b1b",
+      "name": "Note - domain"
+    },
+    {
+      "parameters": {
+        "content": "## Page: reuse a recent urlscan.io scan, or submit a new one and poll for the result\nNo page (no key, refused, domain gone, timeout) → the analyst still runs with the domain context.",
+        "height": 920,
+        "width": 3100,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        140
+      ],
+      "id": "ab3f47bc-1956-5581-8f0d-b278d593c508",
+      "name": "Note - page"
+    },
+    {
+      "parameters": {
+        "content": "## Re-assessment (no tools) → database → e-mail if the score changed\nPage text is attacker-controlled: data only, length-capped, URLs defanged. Score limit enforced in code.",
+        "height": 520,
+        "width": 1700,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4600,
+        140
+      ],
+      "id": "a57c7e25-8dad-50b3-9693-7ff5fdd92825",
+      "name": "Note - analysis"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load recon configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load recon configuration": {
+      "main": [
+        [
+          {
+            "node": "Recon enabled and budget left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recon enabled and budget left?": {
+      "main": [
+        [
+          {
+            "node": "Claim next verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim next verdict": {
+      "main": [
+        [
+          {
+            "node": "Plan domain lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan domain lookups": {
+      "main": [
+        [
+          {
+            "node": "RDAP lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RDAP lookup": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - RDAP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - RDAP": {
+      "main": [
+        [
+          {
+            "node": "crt.sh lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "crt.sh lookup": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - domain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - domain": {
+      "main": [
+        [
+          {
+            "node": "urlscan.io API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "Search existing scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search existing scan": {
+      "main": [
+        [
+          {
+            "node": "Plan scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan scan": {
+      "main": [
+        [
+          {
+            "node": "Reuse existing scan?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reuse existing scan?": {
+      "main": [
+        [
+          {
+            "node": "Get scan result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Submit new scan?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit new scan?": {
+      "main": [
+        [
+          {
+            "node": "Submit scan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No page scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit scan": {
+      "main": [
+        [
+          {
+            "node": "Accept submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept submission": {
+      "main": [
+        [
+          {
+            "node": "Submission accepted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submission accepted?": {
+      "main": [
+        [
+          {
+            "node": "Wait for scan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No page scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for scan": {
+      "main": [
+        [
+          {
+            "node": "Get scan result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get scan result": {
+      "main": [
+        [
+          {
+            "node": "Check scan result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check scan result": {
+      "main": [
+        [
+          {
+            "node": "Scan ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan ready?": {
+      "main": [
+        [
+          {
+            "node": "Keep scan result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Still running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still running?": {
+      "main": [
+        [
+          {
+            "node": "Wait before next poll",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No page scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before next poll": {
+      "main": [
+        [
+          {
+            "node": "Get scan result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep scan result": {
+      "main": [
+        [
+          {
+            "node": "Get page DOM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get page DOM": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - page": {
+      "main": [
+        [
+          {
+            "node": "Build recon prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No page scan": {
+      "main": [
+        [
+          {
+            "node": "Build recon prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build recon prompt": {
+      "main": [
+        [
+          {
+            "node": "Recon analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Recon analyst",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Recon analyst",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recon analyst": {
+      "main": [
+        [
+          {
+            "node": "Parse recon analyst output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse recon analyst output": {
+      "main": [
+        [
+          {
+            "node": "Save recon result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save recon result": {
+      "main": [
+        [
+          {
+            "node": "Score changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score changed?": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Build recon e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build recon e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "114fa310-1c9c-5fb8-8e0c-e081a53b4cfb",
+  "meta": {
+    "instanceId": "4efa9d51e8a3979b61633a85e297802c7247ebfbaaec1d5e3e34069621598208"
+  },
+  "nodeGroups": [],
+  "id": "DpRecon2SentnlX1",
+  "tags": []
+}

@@ -284,11 +284,10 @@
     #
     # api-keys/* is granted as a whole subtree rather than one leaf
     # path per provider — CTI API keys are exactly the class of
-    # secret this workflow exists to consume, and a new provider
-    # (e.g. urlscan.io, already in dic_source_providers but not yet
-    # wired into the workflow) shouldn't require a policy change to
-    # start using. Narrow this to exact leaf paths if you want it
-    # tighter than that.
+    # secret the workflows exist to consume (urlscan.io is read by
+    # both the main workflow and Deep Recon), and a new provider
+    # shouldn't require a policy change to start using. Narrow this
+    # to exact leaf paths if you want it tighter than that.
     #
     # TOKEN LIFECYCLE:
     #   - Period is 1 year (8760h) by default — chosen so this needs

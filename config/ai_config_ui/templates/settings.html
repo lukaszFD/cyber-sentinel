@@ -19,6 +19,12 @@
   <section class="card" id="stage-{{ n }}">
     <h2>Step {{ n }} · {{ st.title }}</h2>
     <p class="muted small">{{ st.intro }}</p>
+    {% if n == 2 and vt_budget %}
+      <p class="small">VirusTotal today: <strong class="mono">{{ vt_budget.used_today }} / {{ vt_budget.daily_limit }}</strong> used
+        · {{ vt_budget.remaining_today }} left, {{ vt_budget.reserve }} of them kept for later
+        · resets {{ vt_budget.resets_local|dt }}
+        {% if vt_budget.remaining_today <= vt_budget.reserve %} · <span class="tag warn">paused</span> checks resume as the reserve shrinks toward the reset{% endif %}</p>
+    {% endif %}
     {% for r in st.rows %}
       <div class="setting">
         <div class="setting-head">
@@ -59,6 +65,9 @@
         </tbody>
       </table>
       {% else %}<p class="muted small">Nothing blocked yet.</p>{% endif %}
+    {% endif %}
+    {% if n == 7 %}
+      <p class="small"><a href="{{ url_for('recon_page') }}">Deep recon results →</a> · <a href="{{ url_for('recon_prompt_page') }}">Recon analyst prompt →</a></p>
     {% endif %}
   </section>
   {% endfor %}

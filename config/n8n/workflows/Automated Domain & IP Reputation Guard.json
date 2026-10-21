@@ -7,7 +7,7 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 3
+              "minutesInterval": 1
             }
           ]
         }
@@ -65,7 +65,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- One observable per run (VirusTotal free tier: 4 requests/min, 500/day).\nSELECT * FROM cyber_sentinel_ai.v_pending_observables LIMIT 1;",
+        "query": "-- One observable per run, only when the VirusTotal budget allows it\n-- (vt_daily_limit, vt_per_minute_limit, vt_reserve_per_hour in ai_settings).\n-- No row = queue empty or budget used up: the run ends here.\nSELECT * FROM cyber_sentinel_ai.claim_next_observable();",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -162,6 +162,94 @@
           },
           "conditions": [
             {
+              "id": "53c1a889-b849-52ea-861f-df3650363943",
+              "leftValue": "={{ Number($('Load AI configuration').first().json.settings.shodan_internetdb_enabled) === 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        352,
+        336
+      ],
+      "id": "4e8b198f-8b03-5ac6-98d6-9a194c4ffb50",
+      "name": "Shodan lookup enabled?"
+    },
+    {
+      "parameters": {
+        "url": "=https://internetdb.shodan.io/{{ $('Data reduction - VirusTotal').item.json.record.observable.observable_ip }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        256
+      ],
+      "id": "0fac3a89-0084-5ddf-8475-c26742ee7880",
+      "name": "Shodan InternetDB",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Data reduction - Shodan (SUPPORTING source, InternetDB)\n// What runs on the IP, from Shodan's free InternetDB (no API key, no quota,\n// weekly snapshot, non-commercial use): open ports, software (CPE), known\n// CVEs, tags and the hostnames Shodan saw on the IP. Checked for every\n// observable; it never changes the rule score, it is context for the AI\n// Agent, the audit record and the alert e-mail.\n// A failed lookup never stops the pipeline: it is recorded as status \"error\".\n// Mode: Run Once for Each Item.\n\nconst record = $('Data reduction - VirusTotal').item.json.record;\nconst res = $json; // Shodan InternetDB (full response)\nconst ip = record.observable.observable_ip;\nconst fqdn = String(record.observable.fqdn).toLowerCase();\n\n// Ports worth naming for the analyst; everything else is listed as a number.\nconst NOTABLE_PORTS = {\n  21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 135: 'MS-RPC', 139: 'NetBIOS', 445: 'SMB',\n  1080: 'SOCKS proxy', 1433: 'MSSQL', 1723: 'PPTP VPN', 3128: 'HTTP proxy', 3306: 'MySQL',\n  3389: 'RDP', 4444: 'Metasploit default', 5432: 'PostgreSQL', 5900: 'VNC', 5985: 'WinRM',\n  6379: 'Redis', 9050: 'Tor SOCKS', 27017: 'MongoDB', 50050: 'Cobalt Strike default',\n};\n\nlet body = res?.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }\n\nlet shodan;\nif (res?.statusCode === 404) {\n  shodan = { status: 'no_data' }; // Shodan saw no open ports on this IP\n} else if (res?.statusCode !== 200 || !body || typeof body !== 'object') {\n  shodan = { status: 'error', error: res?.statusCode ? `HTTP ${res.statusCode}` : String(res?.error?.message || res?.error || 'request failed') };\n} else {\n  const arr = (a) => (Array.isArray(a) ? a : []);\n  const ports = [...new Set(arr(body.ports).map(Number).filter(Number.isFinite))].sort((a, b) => a - b);\n  const hostnames = [...new Set(arr(body.hostnames).map((h) => String(h).toLowerCase()))];\n  // \"cpe:/a:nginx:nginx:1.18.0\" or \"cpe:2.3:a:nginx:nginx:1.18.0:...\" -> \"nginx 1.18.0\"\n  const software = [...new Set(arr(body.cpes).map((c) => {\n    const p = String(c).replace(/^cpe:(2\\.3:|\\/)/, '').split(':');\n    return [p[2], p[3]].filter((x) => x && x !== '*' && x !== '-').join(' ');\n  }).filter(Boolean))];\n  // Newest CVEs first: compare year, then number.\n  const cveKey = (v) => { const m = String(v).match(/CVE-(\\d+)-(\\d+)/i); return m ? Number(m[1]) * 1e7 + Number(m[2]) : 0; };\n  const vulns = [...new Set(arr(body.vulns).map(String))].sort((a, b) => cveKey(b) - cveKey(a));\n  shodan = {\n    status: 'ok',\n    open_ports: ports.slice(0, 50),\n    notable_services: ports.filter((p) => NOTABLE_PORTS[p]).map((p) => `${p} ${NOTABLE_PORTS[p]}`),\n    software: software.slice(0, 15),\n    tags: arr(body.tags).map(String).slice(0, 15),\n    known_cves: vulns.length,\n    cve_sample: vulns.slice(0, 10),\n    hostnames_on_ip: hostnames.length,\n    hostname_sample: hostnames.slice(0, 10),\n    // The domain itself, a parent or a subdomain of it is among the hostnames.\n    domain_seen_on_ip: hostnames.some((h) => h === fqdn || fqdn.endsWith(`.${h}`) || h.endsWith(`.${fqdn}`)),\n    data_age: 'weekly snapshot',\n  };\n}\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      shodan,\n      raw: shodan.status === 'ok'\n        ? [...record.raw, { source: 'Shodan_InternetDB', resource: ip, payload: body }]\n        : record.raw,\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        256
+      ],
+      "id": "944718dd-7815-5376-ac86-159479295687",
+      "name": "Data reduction - Shodan"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Shodan not checked\n// shodan_internetdb_enabled = 0 in ai_settings: the record gets the same\n// shape as on the lookup path, with status \"disabled\".\n// Mode: Run Once for Each Item.\n\nreturn { json: { record: { ...$json.record, shodan: { status: 'disabled' } } } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        664,
+        448
+      ],
+      "id": "ac17fab5-5cde-5a36-b3ac-e2d724d7fa15",
+      "name": "Shodan not checked"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
               "id": "4199a388-514e-53a3-bd07-438c138c8a60",
               "leftValue": "={{ $json.record.vt.malicious }}",
               "rightValue": "={{ $('Load AI configuration').first().json.settings.vt_gate_min_malicious }}",
@@ -178,7 +266,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        352,
+        1012,
         336
       ],
       "id": "0d0a154b-3439-588e-ab53-6d431fb9904b",
@@ -192,7 +280,7 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        544,
+        1204,
         176
       ],
       "id": "7372b70a-91a8-5c22-9011-0631d1885155",
@@ -233,7 +321,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        752,
+        1412,
         176
       ],
       "id": "e4a6e6e8-31dc-5bb7-ad6c-9909c5fefaf0",
@@ -278,7 +366,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        960,
+        1620,
         176
       ],
       "id": "c3884334-cf4a-512e-ab41-56cd8891b93a",
@@ -290,12 +378,12 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Data reduction - abuse.ch (SUPPORTING sources: ThreatFox + URLhaus)\n// Adds compact ThreatFox and URLhaus evidence to the record and builds the\n// `features` object consumed by cyber_sentinel_ai.compute_threat_score().\n// A failed lookup never stops the pipeline: it is recorded as status \"error\"\n// and the scoring trace shows it.\n// Mode: Run Once for Each Item.\n\nconst record = $('Data reduction - VirusTotal').item.json.record;\nconst settings = $('Load AI configuration').first().json.settings;\nconst tfRes = $('Abuse.CH_ThreatFox request').item.json;\nconst uhRes = $json; // Abuse.CH_URLHaus request\nconst obs = record.observable;\n\n// Normalises an HTTP node result (full response, or the error output).\nfunction httpOutcome(res) {\n  if (!res || res.error) return { ok: false, error: String(res?.error?.message || res?.error || 'request failed') };\n  if (res.statusCode !== 200) return { ok: false, error: `HTTP ${res.statusCode}` };\n  let body = res.body;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch (e) { return { ok: false, error: 'non-JSON response' }; }\n  }\n  return body && typeof body === 'object' ? { ok: true, body } : { ok: false, error: 'empty response' };\n}\n\n// Host part of any ThreatFox IOC type: \"ip:port\", domain or URL.\nfunction iocHost(ioc) {\n  try {\n    return new URL(String(ioc).includes('://') ? ioc : `http://${ioc}`).hostname.toLowerCase();\n  } catch (e) {\n    return null;\n  }\n}\n\n// abuse.ch timestamps look like \"2026-09-01 10:11:12 UTC\".\nfunction parseAbuseDate(value) {\n  if (typeof value !== 'string' || !value) return null;\n  const d = new Date(value.replace(' UTC', 'Z').replace(' ', 'T'));\n  return Number.isNaN(d.getTime()) ? null : d;\n}\n\n// URLs are untrusted data: defang them for the prompt and the e-mail.\nconst defang = (url) => String(url).replace(/^http/i, 'hxxp').replace(/\\./g, '[.]');\n\nfunction countTop(values, limit) {\n  const counts = {};\n  for (const v of values) {\n    const key = String(v || '').trim().toLowerCase();\n    if (key) counts[key] = (counts[key] || 0) + 1;\n  }\n  return Object.entries(counts)\n    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))\n    .slice(0, limit)\n    .map(([value, count]) => ({ value, count }));\n}\n\n// ---------- ThreatFox (searched by IP) ----------\nconst tfHttp = httpOutcome(tfRes);\nlet threatfox;\nif (!tfHttp.ok) {\n  threatfox = { status: 'error', error: tfHttp.error };\n} else if (tfHttp.body.query_status === 'no_result') {\n  threatfox = { status: 'no_data' };\n} else if (tfHttp.body.query_status !== 'ok') {\n  threatfox = { status: 'error', error: `query_status=${tfHttp.body.query_status}` };\n} else {\n  // The search matches substrings (1.2.3.4 also finds 1.2.3.45:80), and an exact\n  // search would miss \"ip:port\" C2 entries - so keep IOCs whose host is the IP.\n  const iocs = (Array.isArray(tfHttp.body.data) ? tfHttp.body.data : [])\n    .filter((d) => iocHost(d.ioc) === String(obs.observable_ip).toLowerCase());\n  if (iocs.length === 0) {\n    threatfox = { status: 'no_data' };\n  } else {\n    const cutoff = Date.now() - Number(settings.tf_active_days) * 86400000;\n    const seen = iocs.map((d) => parseAbuseDate(d.last_seen) || parseAbuseDate(d.first_seen)).filter(Boolean);\n    threatfox = {\n      status: 'ok',\n      ioc_count: iocs.length,\n      active: seen.some((d) => d.getTime() >= cutoff),\n      // \"Unknown malware\" is a ThreatFox placeholder, not an identified family.\n      malware_families: [...new Set(iocs.map((d) => d.malware_printable).filter((m) => m && !/^unknown/i.test(m)))],\n      threat_types: [...new Set(iocs.map((d) => d.threat_type).filter(Boolean))],\n      max_confidence: Math.max(...iocs.map((d) => Number(d.confidence_level) || 0)),\n      last_seen: seen.length ? new Date(Math.max(...seen)).toISOString() : null,\n      tags: countTop(iocs.flatMap((d) => d.tags || []), 10),\n      iocs: iocs.slice(0, 10).map((d) => ({\n        ioc: defang(d.ioc),\n        threat_type: d.threat_type || null,\n        malware: d.malware_printable || null,\n        confidence: Number(d.confidence_level) || 0,\n        first_seen: d.first_seen || null,\n        last_seen: d.last_seen || null,\n      })),\n    };\n  }\n}\n\n// ---------- URLhaus (searched by domain - URLs are hosted on names) ----------\nconst uhHttp = httpOutcome(uhRes);\nlet urlhaus;\nif (!uhHttp.ok) {\n  urlhaus = { status: 'error', error: uhHttp.error };\n} else if (uhHttp.body.query_status === 'no_results') {\n  urlhaus = { status: 'no_data' };\n} else if (uhHttp.body.query_status !== 'ok') {\n  urlhaus = { status: 'error', error: `query_status=${uhHttp.body.query_status}` };\n} else {\n  const urls = Array.isArray(uhHttp.body.urls) ? uhHttp.body.urls : [];\n  const online = urls.filter((u) => u.url_status === 'online');\n  urlhaus = {\n    status: 'ok',\n    url_count: Number(uhHttp.body.url_count) || urls.length,\n    urls_online: online.length,\n    threats: countTop(urls.map((u) => u.threat), 5),\n    tags: countTop(urls.flatMap((u) => u.tags || []), 10),\n    blacklists: uhHttp.body.blacklists || null,\n    online_samples: online.slice(0, 5).map((u) => ({ url: defang(u.url), threat: u.threat || null })),\n    reference: uhHttp.body.urlhaus_reference || null,\n  };\n}\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      threatfox,\n      urlhaus,\n      features: {\n        fqdn: obs.fqdn,\n        vt_status: record.vt.status,\n        vt_malicious: record.vt.malicious,\n        vt_as_owner: record.vt.as_owner,\n        tf_status: threatfox.status,\n        tf_ioc_count: threatfox.ioc_count || 0,\n        tf_active: threatfox.active === true,\n        tf_malware_families: threatfox.malware_families || [],\n        uh_status: urlhaus.status,\n        uh_urls_online: urlhaus.urls_online || 0,\n      },\n      raw: [\n        ...record.raw,\n        { source: 'Abuse_ThreatFox', resource: obs.observable_ip, payload: tfHttp.ok ? tfHttp.body : null },\n        { source: 'Abuse_URLhaus', resource: obs.fqdn, payload: uhHttp.ok ? uhHttp.body : null },\n      ],\n    },\n  },\n};\n"
+        "jsCode": "// Data reduction - abuse.ch (SUPPORTING sources: ThreatFox + URLhaus)\n// Adds compact ThreatFox and URLhaus evidence to the record and builds the\n// `features` object consumed by cyber_sentinel_ai.compute_threat_score().\n// A failed lookup never stops the pipeline: it is recorded as status \"error\"\n// and the scoring trace shows it.\n// Mode: Run Once for Each Item.\n\nconst record = $('VirusTotal detections ≥ threshold?').item.json.record;\nconst settings = $('Load AI configuration').first().json.settings;\nconst tfRes = $('Abuse.CH_ThreatFox request').item.json;\nconst uhRes = $json; // Abuse.CH_URLHaus request\nconst obs = record.observable;\n\n// Normalises an HTTP node result (full response, or the error output).\nfunction httpOutcome(res) {\n  if (!res || res.error) return { ok: false, error: String(res?.error?.message || res?.error || 'request failed') };\n  if (res.statusCode !== 200) return { ok: false, error: `HTTP ${res.statusCode}` };\n  let body = res.body;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch (e) { return { ok: false, error: 'non-JSON response' }; }\n  }\n  return body && typeof body === 'object' ? { ok: true, body } : { ok: false, error: 'empty response' };\n}\n\n// Host part of any ThreatFox IOC type: \"ip:port\", domain or URL.\nfunction iocHost(ioc) {\n  try {\n    return new URL(String(ioc).includes('://') ? ioc : `http://${ioc}`).hostname.toLowerCase();\n  } catch (e) {\n    return null;\n  }\n}\n\n// abuse.ch timestamps look like \"2026-09-01 10:11:12 UTC\".\nfunction parseAbuseDate(value) {\n  if (typeof value !== 'string' || !value) return null;\n  const d = new Date(value.replace(' UTC', 'Z').replace(' ', 'T'));\n  return Number.isNaN(d.getTime()) ? null : d;\n}\n\n// URLs are untrusted data: defang them for the prompt and the e-mail.\nconst defang = (url) => String(url).replace(/^http/i, 'hxxp').replace(/\\./g, '[.]');\n\nfunction countTop(values, limit) {\n  const counts = {};\n  for (const v of values) {\n    const key = String(v || '').trim().toLowerCase();\n    if (key) counts[key] = (counts[key] || 0) + 1;\n  }\n  return Object.entries(counts)\n    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))\n    .slice(0, limit)\n    .map(([value, count]) => ({ value, count }));\n}\n\n// ---------- ThreatFox (searched by IP) ----------\nconst tfHttp = httpOutcome(tfRes);\nlet threatfox;\nif (!tfHttp.ok) {\n  threatfox = { status: 'error', error: tfHttp.error };\n} else if (tfHttp.body.query_status === 'no_result') {\n  threatfox = { status: 'no_data' };\n} else if (tfHttp.body.query_status !== 'ok') {\n  threatfox = { status: 'error', error: `query_status=${tfHttp.body.query_status}` };\n} else {\n  // The search matches substrings (1.2.3.4 also finds 1.2.3.45:80), and an exact\n  // search would miss \"ip:port\" C2 entries - so keep IOCs whose host is the IP.\n  const iocs = (Array.isArray(tfHttp.body.data) ? tfHttp.body.data : [])\n    .filter((d) => iocHost(d.ioc) === String(obs.observable_ip).toLowerCase());\n  if (iocs.length === 0) {\n    threatfox = { status: 'no_data' };\n  } else {\n    const cutoff = Date.now() - Number(settings.tf_active_days) * 86400000;\n    const seen = iocs.map((d) => parseAbuseDate(d.last_seen) || parseAbuseDate(d.first_seen)).filter(Boolean);\n    threatfox = {\n      status: 'ok',\n      ioc_count: iocs.length,\n      active: seen.some((d) => d.getTime() >= cutoff),\n      // \"Unknown malware\" is a ThreatFox placeholder, not an identified family.\n      malware_families: [...new Set(iocs.map((d) => d.malware_printable).filter((m) => m && !/^unknown/i.test(m)))],\n      threat_types: [...new Set(iocs.map((d) => d.threat_type).filter(Boolean))],\n      max_confidence: Math.max(...iocs.map((d) => Number(d.confidence_level) || 0)),\n      last_seen: seen.length ? new Date(Math.max(...seen)).toISOString() : null,\n      tags: countTop(iocs.flatMap((d) => d.tags || []), 10),\n      iocs: iocs.slice(0, 10).map((d) => ({\n        ioc: defang(d.ioc),\n        threat_type: d.threat_type || null,\n        malware: d.malware_printable || null,\n        confidence: Number(d.confidence_level) || 0,\n        first_seen: d.first_seen || null,\n        last_seen: d.last_seen || null,\n      })),\n    };\n  }\n}\n\n// ---------- URLhaus (searched by domain - URLs are hosted on names) ----------\nconst uhHttp = httpOutcome(uhRes);\nlet urlhaus;\nif (!uhHttp.ok) {\n  urlhaus = { status: 'error', error: uhHttp.error };\n} else if (uhHttp.body.query_status === 'no_results') {\n  urlhaus = { status: 'no_data' };\n} else if (uhHttp.body.query_status !== 'ok') {\n  urlhaus = { status: 'error', error: `query_status=${uhHttp.body.query_status}` };\n} else {\n  const urls = Array.isArray(uhHttp.body.urls) ? uhHttp.body.urls : [];\n  const online = urls.filter((u) => u.url_status === 'online');\n  urlhaus = {\n    status: 'ok',\n    url_count: Number(uhHttp.body.url_count) || urls.length,\n    urls_online: online.length,\n    threats: countTop(urls.map((u) => u.threat), 5),\n    tags: countTop(urls.flatMap((u) => u.tags || []), 10),\n    blacklists: uhHttp.body.blacklists || null,\n    online_samples: online.slice(0, 5).map((u) => ({ url: defang(u.url), threat: u.threat || null })),\n    reference: uhHttp.body.urlhaus_reference || null,\n  };\n}\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      threatfox,\n      urlhaus,\n      features: {\n        fqdn: obs.fqdn,\n        vt_status: record.vt.status,\n        vt_malicious: record.vt.malicious,\n        vt_as_owner: record.vt.as_owner,\n        tf_status: threatfox.status,\n        tf_ioc_count: threatfox.ioc_count || 0,\n        tf_active: threatfox.active === true,\n        tf_malware_families: threatfox.malware_families || [],\n        uh_status: urlhaus.status,\n        uh_urls_online: urlhaus.urls_online || 0,\n      },\n      raw: [\n        ...record.raw,\n        { source: 'Abuse_ThreatFox', resource: obs.observable_ip, payload: tfHttp.ok ? tfHttp.body : null },\n        { source: 'Abuse_URLhaus', resource: obs.fqdn, payload: uhHttp.ok ? uhHttp.body : null },\n      ],\n    },\n  },\n};\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1168,
+        1828,
         176
       ],
       "id": "99f74541-5fc9-59dc-9cba-438108dd2219",
@@ -303,13 +391,192 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4786b5f8-88e3-546d-9702-958b0df58364",
+              "leftValue": "={{ Number($('Load AI configuration').first().json.settings.urlscan_search_enabled) === 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2036,
+        176
+      ],
+      "id": "88e406de-9e32-5714-a22f-a1244d11c727",
+      "name": "urlscan.io lookup enabled?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/urlscanio/api-key",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        2244,
+        96
+      ],
+      "id": "d59a5af9-95e1-560a-a19e-e954fb4ac78e",
+      "name": "urlscan.io API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://urlscan.io/api/v1/search/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ `page.domain:\"${String($('Data reduction - abuse.ch').item.json.record.observable.fqdn).replace(/[^A-Za-z0-9._-]/g, '')}\" AND date:>now-${Number($('Load AI configuration').first().json.settings.urlscan_search_days)}d` }}"
+            },
+            {
+              "name": "size",
+              "value": "10"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "={{ $json.data.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2452,
+        96
+      ],
+      "id": "61aef942-d2a8-5627-af35-4505ee675ff5",
+      "name": "urlscan.io search",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://urlscan.io/api/v1/search/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ `page.ip:\"${String($('Data reduction - abuse.ch').item.json.record.observable.observable_ip).replace(/[^0-9a-fA-F.:]/g, '')}\" AND date:>now-${Number($('Load AI configuration').first().json.settings.urlscan_search_days)}d` }}"
+            },
+            {
+              "name": "size",
+              "value": "100"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "={{ $('urlscan.io API TOKEN').item.json.data.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2660,
+        96
+      ],
+      "id": "d46c8e91-1c60-59ef-b85a-0c138a9d28fc",
+      "name": "urlscan.io search by IP",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Supporting sources not checked\n// VirusTotal detections are below the gate, so ThreatFox and URLhaus are not\n// queried. The record gets the same `features` shape as the enriched path,\n// so \"Compute rule-based score\" works identically for both branches.\n// Mode: Run Once for Each Item.\n\nconst record = $json.record;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      threatfox: { status: 'not_checked' },\n      urlhaus: { status: 'not_checked' },\n      features: {\n        fqdn: record.observable.fqdn,\n        vt_status: record.vt.status,\n        vt_malicious: record.vt.malicious,\n        vt_as_owner: record.vt.as_owner,\n        tf_status: 'not_checked',\n        uh_status: 'not_checked',\n      },\n    },\n  },\n};\n"
+        "jsCode": "// Data reduction - urlscan.io (SUPPORTING source, search only)\n// Two searches, nothing is submitted (no page is loaded on our behalf; new\n// scans are the job of the Deep Recon workflow):\n//   * earlier scans of the domain's page: title, final URL, HTTP status,\n//     TLS certificate issuer and age, urlscan's verdict\n//   * other sites urlscan saw on the same IP: many unrelated sites = shared\n//     hosting or CDN; look-alike names or malicious verdicts = attacker\n//     infrastructure\n// A failed lookup never stops the pipeline: it is recorded as status \"error\".\n// Mode: Run Once for Each Item.\n\nconst record = $('Data reduction - abuse.ch').item.json.record;\nconst domainRes = $('urlscan.io search').item.json;\nconst ipRes = $json; // urlscan.io search by IP\nconst fqdn = String(record.observable.fqdn).toLowerCase();\n\nconst MAX_SITES = 15;\n\nfunction httpOutcome(r) {\n  if (!r || r.error) return { ok: false, error: String(r?.error?.message || r?.error || 'request failed') };\n  if (r.statusCode === 429) return { ok: false, error: 'HTTP 429 (urlscan.io quota)' };\n  if (r.statusCode !== 200) return { ok: false, error: `HTTP ${r.statusCode}` };\n  let body = r.body;\n  if (typeof body === 'string') {\n    try { body = JSON.parse(body); } catch (e) { return { ok: false, error: 'non-JSON response' }; }\n  }\n  return body && typeof body === 'object' ? { ok: true, body } : { ok: false, error: 'empty response' };\n}\n\n// URLs and page titles are untrusted data: defang URLs, cap lengths.\nconst defang = (url) => (url ? String(url).replace(/^http/i, 'hxxp').replace(/\\./g, '[.]') : null);\nconst cut = (s, n) => (s == null ? null : String(s).replace(/\\s+/g, ' ').trim().slice(0, n));\nconst num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\n// Search results carry the verdict either flat or under \"overall\".\nconst verdictOf = (r) => r?.verdicts?.overall ?? r?.verdicts ?? {};\nconst newestFirst = (a, b) => String(b?.task?.time || '').localeCompare(String(a?.task?.time || ''));\nconst results = (http) => (http.ok && Array.isArray(http.body.results) ? http.body.results : []);\n\n// ---------- earlier scans of this domain ----------\nconst dHttp = httpOutcome(domainRes);\nlet urlscan;\nlet domainScans = [];\nif (!dHttp.ok) {\n  urlscan = { status: 'error', error: dHttp.error };\n} else {\n  domainScans = results(dHttp).filter((r) => String(r?.page?.domain || '').toLowerCase() === fqdn).sort(newestFirst);\n  if (domainScans.length === 0) {\n    urlscan = { status: 'no_data' };\n  } else {\n    const latest = domainScans[0];\n    const uuid = latest._id || latest.task?.uuid || null;\n    const v = verdictOf(latest);\n    urlscan = {\n      status: 'ok',\n      scans_found: domainScans.length,\n      malicious_scans: domainScans.filter((r) => verdictOf(r).malicious === true).length,\n      latest: {\n        uuid,\n        time: latest.task?.time || null,\n        submitted_url: defang(latest.task?.url),\n        final_url: defang(latest.page?.url),\n        title: cut(latest.page?.title, 200),\n        http_status: latest.page?.status ?? null,\n        server: cut(latest.page?.server, 100),\n        ip: latest.page?.ip || null,\n        as_owner: cut(latest.page?.asnname, 100),\n        country: latest.page?.country || null,\n        tls_issuer: cut(latest.page?.tlsIssuer, 100),\n        tls_age_days: num(latest.page?.tlsAgeDays),\n        tls_valid_days: num(latest.page?.tlsValidDays),\n        tls_valid_from: latest.page?.tlsValidFrom || null,\n        malicious: typeof v.malicious === 'boolean' ? v.malicious : null,\n        score: num(v.score),\n      },\n      report_url: uuid ? `https://urlscan.io/result/${uuid}/` : null,\n    };\n  }\n}\n\n// ---------- other sites on the same IP ----------\nconst iHttp = httpOutcome(ipRes);\nlet sameIp;\nif (!iHttp.ok) {\n  sameIp = { status: 'error', error: iHttp.error };\n} else {\n  const bySite = new Map();\n  for (const r of results(iHttp).sort(newestFirst)) {\n    const domain = String(r?.page?.domain || '').toLowerCase();\n    if (!domain || domain === fqdn) continue;\n    const site = bySite.get(domain) || { domain, scans: 0, malicious: false, last_seen: r.task?.time || null,\n      title: cut(r.page?.title, 120) };\n    site.scans += 1;\n    site.malicious = site.malicious || verdictOf(r).malicious === true;\n    bySite.set(domain, site);\n  }\n  // Malicious first, then the most often scanned.\n  const sites = [...bySite.values()].sort((a, b) => (b.malicious - a.malicious) || (b.scans - a.scans));\n  sameIp = sites.length === 0\n    ? { status: 'no_data' }\n    : {\n        status: 'ok',\n        scans_on_ip: num(iHttp.body.total) ?? results(iHttp).length,\n        other_sites: sites.length, // distinct sites in the newest 100 scans of the IP\n        malicious_sites: sites.filter((s) => s.malicious).length,\n        sites: sites.slice(0, MAX_SITES),\n      };\n}\nurlscan.same_ip = sameIp;\n\nconst rawPayload = (urlscan.status === 'ok' || sameIp.status === 'ok')\n  ? { domain_scans: domainScans.slice(0, 10), same_ip: sameIp }\n  : null;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      urlscan,\n      raw: rawPayload\n        ? [...record.raw, { source: 'urlscan.io', resource: fqdn, payload: rawPayload }]\n        : record.raw,\n    },\n  },\n};\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        848,
+        2868,
+        96
+      ],
+      "id": "bc3e3ef3-919a-5f3a-9bb2-1797909e04de",
+      "name": "Data reduction - urlscan.io"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// urlscan.io not checked\n// urlscan_search_enabled = 0 in ai_settings: the record gets the same\n// shape as on the lookup path, with status \"disabled\".\n// Mode: Run Once for Each Item.\n\nreturn { json: { record: { ...$json.record, urlscan: { status: 'disabled' } } } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2452,
+        304
+      ],
+      "id": "744c481a-9112-51a3-ae11-dd16f67488fd",
+      "name": "urlscan.io not checked"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Supporting sources not checked\n// VirusTotal detections are below the gate, so ThreatFox, URLhaus and\n// urlscan.io are not queried. The record gets the same `features` shape as the enriched path,\n// so \"Compute rule-based score\" works identically for both branches.\n// Mode: Run Once for Each Item.\n\nconst record = $json.record;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      threatfox: { status: 'not_checked' },\n      urlhaus: { status: 'not_checked' },\n      urlscan: { status: 'not_checked' },\n      features: {\n        fqdn: record.observable.fqdn,\n        vt_status: record.vt.status,\n        vt_malicious: record.vt.malicious,\n        vt_as_owner: record.vt.as_owner,\n        tf_status: 'not_checked',\n        uh_status: 'not_checked',\n      },\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1508,
         512
       ],
       "id": "39d7d52b-4de8-5342-9e68-be2b2b1b7121",
@@ -326,7 +593,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1360,
+        3108,
         336
       ],
       "id": "8cb1cf9b-93a5-58d9-8368-4dd9abac3235",
@@ -366,7 +633,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1616,
+        3364,
         336
       ],
       "id": "53d12288-49a6-51d4-b030-f5e3632f97ef",
@@ -380,7 +647,7 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        1824,
+        3572,
         176
       ],
       "id": "811f9fa4-23b0-5e7e-a8fd-f68a7dc128d5",
@@ -395,12 +662,12 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Build AI prompt\n// Prepares both messages for the AI Agent. Everything comes from the database\n// or from this run's evidence - nothing is hard-coded in the workflow:\n//   system message -> active row of cyber_sentinel_ai.prompt_templates\n//   threat scale   -> cyber_sentinel.v_threat_scale_for_agent\n//   rule_engine    -> cyber_sentinel_ai.compute_threat_score()\n//   evidence       -> VirusTotal / ThreatFox / URLhaus (raw payloads excluded)\n// Mode: Run Once for Each Item.\n\nconst config = $('Load AI configuration').first().json;\nconst record = $('Compute rule-based score').item.json.record;\n\nif (!config.system_prompt) {\n  throw new Error('No active prompt: set is_active = true on one row of cyber_sentinel_ai.prompt_templates');\n}\n\nconst systemMessage = config.system_prompt\n  .replaceAll('[[THREAT_SCALE]]', config.threat_scale)\n  .replaceAll('[[MAX_DEVIATION]]', String(config.settings.ai_max_deviation));\n\n// Refuse to send a prompt with an unresolved placeholder.\nconst leftover = systemMessage.match(/\\[\\[[A-Z_]+\\]\\]/);\nif (leftover) {\n  throw new Error(`Unresolved placeholder ${leftover[0]} in prompt version ${config.prompt_version}`);\n}\n\nconst userMessage = {\n  observable: {\n    domain: record.observable.fqdn,\n    ip: record.observable.observable_ip,\n    dns_query_count: record.observable.query_count,\n    first_seen: record.observable.first_seen,\n    last_seen: record.observable.last_seen,\n  },\n  evidence: {\n    virustotal: record.vt,\n    threatfox: record.threatfox,\n    urlhaus: record.urlhaus,\n  },\n  rule_engine: record.rule,\n};\n\nreturn {\n  json: {\n    system_message: systemMessage,\n    user_message: JSON.stringify(userMessage, null, 2),\n    record,\n  },\n};\n"
+        "jsCode": "// Build AI prompt\n// Prepares both messages for the AI Agent. Everything comes from the database\n// or from this run's evidence - nothing is hard-coded in the workflow:\n//   system message -> active row of cyber_sentinel_ai.prompt_templates\n//   threat scale   -> cyber_sentinel.v_threat_scale_for_agent\n//   rule_engine    -> cyber_sentinel_ai.compute_threat_score()\n//   evidence       -> VirusTotal / ThreatFox / URLhaus / urlscan.io / Shodan (raw payloads excluded)\n// Mode: Run Once for Each Item.\n\nconst config = $('Load AI configuration').first().json;\nconst record = $('Compute rule-based score').item.json.record;\n\nif (!config.system_prompt) {\n  throw new Error('No active prompt: set is_active = true on one row of cyber_sentinel_ai.prompt_templates');\n}\n\nconst systemMessage = config.system_prompt\n  .replaceAll('[[THREAT_SCALE]]', config.threat_scale)\n  .replaceAll('[[MAX_DEVIATION]]', String(config.settings.ai_max_deviation));\n\n// Refuse to send a prompt with an unresolved placeholder.\nconst leftover = systemMessage.match(/\\[\\[[A-Z_]+\\]\\]/);\nif (leftover) {\n  throw new Error(`Unresolved placeholder ${leftover[0]} in prompt version ${config.prompt_version}`);\n}\n\nconst userMessage = {\n  observable: {\n    domain: record.observable.fqdn,\n    ip: record.observable.observable_ip,\n    dns_query_count: record.observable.query_count,\n    first_seen: record.observable.first_seen,\n    last_seen: record.observable.last_seen,\n  },\n  evidence: {\n    virustotal: record.vt,\n    threatfox: record.threatfox,\n    urlhaus: record.urlhaus,\n    urlscan: record.urlscan,\n    shodan: record.shodan,\n  },\n  rule_engine: record.rule,\n};\n\nreturn {\n  json: {\n    system_message: systemMessage,\n    user_message: JSON.stringify(userMessage, null, 2),\n    record,\n  },\n};\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2016,
+        3764,
         176
       ],
       "id": "5105373f-2574-58d6-a429-547bbd9e802d",
@@ -419,7 +686,7 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        2240,
+        3988,
         176
       ],
       "id": "ae780cfb-46df-588c-846d-552399ada6b4",
@@ -440,7 +707,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        2112,
+        3860,
         352
       ],
       "id": "16166117-61fd-5838-8064-3f2f275178a5",
@@ -466,7 +733,7 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
       "typeVersion": 1.2,
       "position": [
-        2224,
+        3972,
         416
       ],
       "id": "21a328a8-5e53-5c1e-b294-d4719fe21eee",
@@ -483,7 +750,7 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
       "typeVersion": 1,
       "position": [
-        2224,
+        3972,
         544
       ],
       "id": "f446d55c-a260-5c6c-b5b9-bf42b28eb590",
@@ -503,7 +770,7 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        2512,
+        4260,
         368
       ],
       "id": "4f283f27-39d3-5b12-a3a4-09ae818f1a9d",
@@ -512,12 +779,12 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Parse AI Agent output\n// Validates the structured answer of the AI Agent and turns it into the\n// verdict that is persisted. Safety rules applied here:\n//   - the final score may differ from the rule score by at most\n//     ai_max_deviation (ai_settings), whatever the model proposes;\n//   - if the agent failed or returned something invalid, the rule-based\n//     verdict is stored and ai_status = 'failed' (nothing is lost).\n// Mode: Run Once for Each Item.\n\n// Keep in sync with the model selected in the \"Google Gemini Chat Model\" node.\nconst AI_MODEL = 'gemini-3.1-flash-lite';\n\nconst config = $('Load AI configuration').first().json;\nconst record = $('Build AI prompt').item.json.record;\nconst agent = $json; // { output: {...} } or { error: ... } (node continues on error)\n\nconst ruleScore = Number(record.rule.rule_score);\nconst maxDeviation = Number(config.settings.ai_max_deviation);\nconst levels = config.threat_levels;\n\n// Single-line, trimmed text with a length limit.\nfunction text(value, field, { required = true, max = 2000 } = {}) {\n  if (typeof value !== 'string') throw new Error(`\"${field}\" is not a string`);\n  const clean = value.replace(/\\s+/g, ' ').trim();\n  if (required && !clean) throw new Error(`\"${field}\" is empty`);\n  return clean.slice(0, max);\n}\n\nlet ai = null;\nlet aiError = null;\ntry {\n  if (agent.error) throw new Error(`AI Agent failed: ${agent.error.message || JSON.stringify(agent.error)}`);\n  const out = typeof agent.output === 'string' ? JSON.parse(agent.output) : agent.output;\n  if (!out || typeof out !== 'object') throw new Error('AI Agent returned no structured output');\n\n  const proposed = Number(out.proposed_score);\n  if (!Number.isInteger(proposed) || proposed < 1 || proposed > 5) {\n    throw new Error(`proposed_score must be an integer 1-5, got ${JSON.stringify(out.proposed_score)}`);\n  }\n\n  ai = {\n    verdict_label: text(out.verdict_label, 'verdict_label', { max: 50 }),\n    summary_en: text(out.summary_en, 'summary_en'),\n    primary_evidence: text(out.primary_evidence, 'primary_evidence'),\n    supporting_context: text(out.supporting_context ?? '', 'supporting_context', { required: false }),\n    analysis_pl: text(out.analysis_pl, 'analysis_pl'),\n    proposed_score: proposed,\n    deviation_reason: text(out.deviation_reason ?? '', 'deviation_reason', { required: false, max: 500 }),\n    // Existence of cited ids is checked again in \"Insert AI audit\".\n    historical_match_ids: (Array.isArray(out.historical_match_ids) ? out.historical_match_ids : [])\n      .map(Number)\n      .filter(Number.isInteger),\n  };\n} catch (e) {\n  aiError = e.message;\n}\n\n// Clamp the AI proposal to the allowed window around the rule score.\nconst finalScore = ai\n  ? Math.min(5, Math.max(1, Math.min(ruleScore + maxDeviation, Math.max(ruleScore - maxDeviation, ai.proposed_score))))\n  : ruleScore;\nconst deviated = finalScore !== ruleScore;\n\nconst verdict = ai\n  ? {\n      threat_score: finalScore,\n      threat_label: ai.verdict_label,\n      summary_en: ai.summary_en,\n      analysis_pl: ai.analysis_pl,\n    }\n  : {\n      threat_score: ruleScore,\n      threat_label: levels[ruleScore].description.slice(0, 50),\n      summary_en: `Rule-based verdict (AI unavailable): ${record.rule.trace.join('; ')}`,\n      analysis_pl: null,\n    };\n\n// Text stored in vector memory: what the feeds saw plus the verdict.\n// Domain and IP are kept in metadata, not in the text, so similarity is\n// about threat characteristics rather than identity.\nconst list = (a, fallback = 'none') => (a && a.length ? a.join(', ') : fallback);\nconst engineVerdicts = [...new Set(record.vt.flagged_by.map((f) => f.result).filter(Boolean))];\nconst vectorDocument = ai\n  ? [\n      `Verdict: ${ai.verdict_label} (score ${finalScore}/5). ${ai.summary_en}`,\n      `VirusTotal: ${record.vt.malicious} malicious of ${record.vt.engines_total} engines; verdicts: ${list(engineVerdicts)}.`,\n      `Hosting: ${record.vt.as_owner || 'unknown owner'}, country ${record.vt.country || 'unknown'}.`,\n      record.threatfox.status === 'ok'\n        ? `ThreatFox: malware ${list(record.threatfox.malware_families, 'unidentified')}, threat types ${list(record.threatfox.threat_types)}, ${record.threatfox.active ? 'active' : 'inactive'}.`\n        : 'ThreatFox: not listed.',\n      record.urlhaus.status === 'ok'\n        ? `URLhaus: ${record.urlhaus.url_count} URL(s), ${record.urlhaus.urls_online} online, threats ${list(record.urlhaus.threats.map((t) => t.value))}.`\n        : 'URLhaus: not listed.',\n    ].join('\\n')\n  : null;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      verdict,\n      audit: {\n        vt_malicious: record.vt.malicious,\n        rule_score: ruleScore,\n        final_score: finalScore,\n        ai_status: ai ? 'ok' : 'failed',\n        deviation_reason: deviated ? ai.deviation_reason || 'not given' : null,\n        primary_evidence: ai ? ai.primary_evidence : null,\n        supporting_context: ai ? ai.supporting_context : null,\n        historical_match_ids: ai ? ai.historical_match_ids : [],\n        rule_trace: record.rule,\n        evidence: { virustotal: record.vt, threatfox: record.threatfox, urlhaus: record.urlhaus },\n        ai_error: aiError,\n        ai_model: AI_MODEL,\n        prompt_version: config.prompt_version,\n      },\n      vector: vectorDocument ? { document: vectorDocument } : null,\n    },\n  },\n};\n"
+        "jsCode": "// Parse AI Agent output\n// Validates the structured answer of the AI Agent and turns it into the\n// verdict that is persisted. Safety rules applied here:\n//   - the final score may differ from the rule score by at most\n//     ai_max_deviation (ai_settings), whatever the model proposes;\n//   - if the agent failed or returned something invalid, the rule-based\n//     verdict is stored and ai_status = 'failed' (nothing is lost).\n// Mode: Run Once for Each Item.\n\n// Keep in sync with the model selected in the \"Google Gemini Chat Model\" node.\nconst AI_MODEL = 'gemini-3.1-flash-lite';\n\nconst config = $('Load AI configuration').first().json;\nconst record = $('Build AI prompt').item.json.record;\nconst agent = $json; // { output: {...} } or { error: ... } (node continues on error)\n\nconst ruleScore = Number(record.rule.rule_score);\nconst maxDeviation = Number(config.settings.ai_max_deviation);\nconst levels = config.threat_levels;\n\n// Single-line, trimmed text with a length limit.\nfunction text(value, field, { required = true, max = 2000 } = {}) {\n  if (typeof value !== 'string') throw new Error(`\"${field}\" is not a string`);\n  const clean = value.replace(/\\s+/g, ' ').trim();\n  if (required && !clean) throw new Error(`\"${field}\" is empty`);\n  return clean.slice(0, max);\n}\n\nlet ai = null;\nlet aiError = null;\ntry {\n  if (agent.error) throw new Error(`AI Agent failed: ${agent.error.message || JSON.stringify(agent.error)}`);\n  const out = typeof agent.output === 'string' ? JSON.parse(agent.output) : agent.output;\n  if (!out || typeof out !== 'object') throw new Error('AI Agent returned no structured output');\n\n  const proposed = Number(out.proposed_score);\n  if (!Number.isInteger(proposed) || proposed < 1 || proposed > 5) {\n    throw new Error(`proposed_score must be an integer 1-5, got ${JSON.stringify(out.proposed_score)}`);\n  }\n\n  ai = {\n    verdict_label: text(out.verdict_label, 'verdict_label', { max: 50 }),\n    summary_en: text(out.summary_en, 'summary_en'),\n    primary_evidence: text(out.primary_evidence, 'primary_evidence'),\n    supporting_context: text(out.supporting_context ?? '', 'supporting_context', { required: false }),\n    analysis_pl: text(out.analysis_pl, 'analysis_pl'),\n    proposed_score: proposed,\n    deviation_reason: text(out.deviation_reason ?? '', 'deviation_reason', { required: false, max: 500 }),\n    // Existence of cited ids is checked again in \"Insert AI audit\".\n    historical_match_ids: (Array.isArray(out.historical_match_ids) ? out.historical_match_ids : [])\n      .map(Number)\n      .filter(Number.isInteger),\n  };\n} catch (e) {\n  aiError = e.message;\n}\n\n// Clamp the AI proposal to the allowed window around the rule score.\nconst finalScore = ai\n  ? Math.min(5, Math.max(1, Math.min(ruleScore + maxDeviation, Math.max(ruleScore - maxDeviation, ai.proposed_score))))\n  : ruleScore;\nconst deviated = finalScore !== ruleScore;\n\nconst verdict = ai\n  ? {\n      threat_score: finalScore,\n      threat_label: ai.verdict_label,\n      summary_en: ai.summary_en,\n      analysis_pl: ai.analysis_pl,\n    }\n  : {\n      threat_score: ruleScore,\n      threat_label: levels[ruleScore].description.slice(0, 50),\n      summary_en: `Rule-based verdict (AI unavailable): ${record.rule.trace.join('; ')}`,\n      analysis_pl: null,\n    };\n\n// Text stored in vector memory: what the feeds saw plus the verdict.\n// Domain and IP are kept in metadata, not in the text, so similarity is\n// about threat characteristics rather than identity.\nconst list = (a, fallback = 'none') => (a && a.length ? a.join(', ') : fallback);\nconst engineVerdicts = [...new Set(record.vt.flagged_by.map((f) => f.result).filter(Boolean))];\nconst vectorDocument = ai\n  ? [\n      `Verdict: ${ai.verdict_label} (score ${finalScore}/5). ${ai.summary_en}`,\n      `VirusTotal: ${record.vt.malicious} malicious of ${record.vt.engines_total} engines; verdicts: ${list(engineVerdicts)}.`,\n      `Hosting: ${record.vt.as_owner || 'unknown owner'}, country ${record.vt.country || 'unknown'}.`,\n      record.threatfox.status === 'ok'\n        ? `ThreatFox: malware ${list(record.threatfox.malware_families, 'unidentified')}, threat types ${list(record.threatfox.threat_types)}, ${record.threatfox.active ? 'active' : 'inactive'}.`\n        : 'ThreatFox: not listed.',\n      record.urlhaus.status === 'ok'\n        ? `URLhaus: ${record.urlhaus.url_count} URL(s), ${record.urlhaus.urls_online} online, threats ${list(record.urlhaus.threats.map((t) => t.value))}.`\n        : 'URLhaus: not listed.',\n      record.urlscan?.status === 'ok'\n        ? `urlscan.io: ${record.urlscan.scans_found} scan(s), ${record.urlscan.malicious_scans} marked malicious; latest page title \"${record.urlscan.latest.title || 'none'}\", HTTP ${record.urlscan.latest.http_status ?? 'unknown'}.`\n        : 'urlscan.io: no recent scan.',\n      record.urlscan?.same_ip?.status === 'ok'\n        ? `urlscan.io same IP: ${record.urlscan.same_ip.other_sites} other site(s), ${record.urlscan.same_ip.malicious_sites} malicious.`\n        : 'urlscan.io same IP: no other sites seen.',\n      record.shodan?.status === 'ok'\n        ? `Shodan: ports ${record.shodan.open_ports.join(', ') || 'none'}; ${record.shodan.hostnames_on_ip} hostname(s) on the IP${record.shodan.tags.length ? `; tags ${record.shodan.tags.join(', ')}` : ''}.`\n        : 'Shodan: no data.',\n    ].join('\\n')\n  : null;\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      verdict,\n      audit: {\n        vt_malicious: record.vt.malicious,\n        rule_score: ruleScore,\n        final_score: finalScore,\n        ai_status: ai ? 'ok' : 'failed',\n        deviation_reason: deviated ? ai.deviation_reason || 'not given' : null,\n        primary_evidence: ai ? ai.primary_evidence : null,\n        supporting_context: ai ? ai.supporting_context : null,\n        historical_match_ids: ai ? ai.historical_match_ids : [],\n        rule_trace: record.rule,\n        evidence: { virustotal: record.vt, threatfox: record.threatfox, urlhaus: record.urlhaus, urlscan: record.urlscan, shodan: record.shodan },\n        ai_error: aiError,\n        ai_model: AI_MODEL,\n        prompt_version: config.prompt_version,\n      },\n      vector: vectorDocument ? { document: vectorDocument } : null,\n    },\n  },\n};\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2624,
+        4372,
         176
       ],
       "id": "c81d5aec-cf59-5322-a294-3d02392444dc",
@@ -526,12 +793,12 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Build clean scan verdict\n// Observable below the VirusTotal gate: the rule-based score is the verdict.\n// No AI call, no vector memory, no e-mail. It is still persisted, so the\n// same domain + IP pair is not looked up again within cache_ttl_days.\n// Mode: Run Once for Each Item.\n\nconst config = $('Load AI configuration').first().json;\nconst record = $json.record; // from \"Compute rule-based score\"\nconst score = Number(record.rule.rule_score);\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      verdict: {\n        threat_score: score,\n        threat_label: config.threat_levels[score].description.slice(0, 50),\n        summary_en: `Rule-based verdict (below VirusTotal gate, AI not called): ${record.rule.trace.join('; ')}`,\n        analysis_pl: null,\n      },\n      audit: {\n        vt_malicious: record.vt.malicious,\n        rule_score: score,\n        final_score: score,\n        ai_status: 'skipped',\n        deviation_reason: null,\n        primary_evidence: null,\n        supporting_context: null,\n        historical_match_ids: [],\n        rule_trace: record.rule,\n        evidence: { virustotal: record.vt, threatfox: record.threatfox, urlhaus: record.urlhaus },\n        ai_error: null,\n        ai_model: null,\n        prompt_version: null,\n      },\n      vector: null,\n    },\n  },\n};\n"
+        "jsCode": "// Build clean scan verdict\n// Observable below the VirusTotal gate: the rule-based score is the verdict.\n// No AI call, no vector memory, no e-mail. It is still persisted, so the\n// same domain + IP pair is not looked up again within cache_ttl_days.\n// Mode: Run Once for Each Item.\n\nconst config = $('Load AI configuration').first().json;\nconst record = $json.record; // from \"Compute rule-based score\"\nconst score = Number(record.rule.rule_score);\n\nreturn {\n  json: {\n    record: {\n      ...record,\n      verdict: {\n        threat_score: score,\n        threat_label: config.threat_levels[score].description.slice(0, 50),\n        summary_en: `Rule-based verdict (below VirusTotal gate, AI not called): ${record.rule.trace.join('; ')}`,\n        analysis_pl: null,\n      },\n      audit: {\n        vt_malicious: record.vt.malicious,\n        rule_score: score,\n        final_score: score,\n        ai_status: 'skipped',\n        deviation_reason: null,\n        primary_evidence: null,\n        supporting_context: null,\n        historical_match_ids: [],\n        rule_trace: record.rule,\n        evidence: { virustotal: record.vt, threatfox: record.threatfox, urlhaus: record.urlhaus, urlscan: record.urlscan, shodan: record.shodan },\n        ai_error: null,\n        ai_model: null,\n        prompt_version: null,\n      },\n      vector: null,\n    },\n  },\n};\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2160,
+        3908,
         768
       ],
       "id": "bd42cb73-99dc-504d-917e-a1c2515432b1",
@@ -548,7 +815,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        2928,
+        4676,
         112
       ],
       "id": "2a46d21e-1b71-5ea3-aaf7-03f0acb185e1",
@@ -571,7 +838,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3136,
+        4884,
         112
       ],
       "id": "a4a513df-58c0-508a-b7b1-5a07f9354811",
@@ -594,7 +861,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3344,
+        5092,
         112
       ],
       "id": "a6f31845-cca6-58ae-ba99-4f0ff8beb2dc",
@@ -634,7 +901,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3552,
+        5300,
         112
       ],
       "id": "5fac1ca3-52ca-5421-a99e-3ab497f50621",
@@ -649,7 +916,7 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
       "typeVersion": 1.2,
       "position": [
-        3824,
+        5572,
         96
       ],
       "id": "9dd38b79-9037-5491-80a2-297ef85bd4c2",
@@ -700,7 +967,7 @@
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
       "position": [
-        3968,
+        5716,
         272
       ],
       "id": "3474153c-2325-5c2a-975e-6ee8a2d86f02",
@@ -711,7 +978,7 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
       "typeVersion": 1,
       "position": [
-        3712,
+        5460,
         272
       ],
       "id": "3d51f6c4-7dfe-5557-8401-5327b90f087c",
@@ -751,7 +1018,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2928,
+        4676,
         544
       ],
       "id": "6525fd9a-c7ea-5d9e-ae96-19336bce3a03",
@@ -765,7 +1032,7 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        3136,
+        4884,
         544
       ],
       "id": "48e1a5eb-1a9a-56e5-bb13-2ea6271e2790",
@@ -780,12 +1047,12 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Build alert e-mail\n// Renders the persisted verdict as a severity-coloured HTML e-mail (same\n// look as the original Cyber Sentinel report). Every dynamic value is\n// HTML-escaped: domains, URLs and AI text are untrusted input.\n// Mode: Run Once for Each Item.\n\nconst record = $('Insert AI audit').item.json.record;\nconst level = $('Load AI configuration').first().json.threat_levels[record.verdict.threat_score];\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst score = Number(record.verdict.threat_score);\nconst theme = score >= 4\n  ? { label: '🚨 ALERT', accent: '#f44336', text: '#ff5252', header: '#3a1f1f' }\n  : score === 3\n    ? { label: '⚠️ REVIEW', accent: '#ffb300', text: '#ffd54f', header: '#332a13' }\n    : { label: '✅ INFO', accent: '#4caf50', text: '#81c784', header: '#1b3320' };\n\nconst audit = record.audit;\nconst scoreNote = audit.deviation_reason\n  ? `Rule engine ${esc(audit.rule_score)}/5 &rarr; AI adjusted: ${esc(audit.deviation_reason)}`\n  : `Rule engine score ${esc(audit.rule_score)}/5 confirmed`;\n\nconst section = (title, body) => (body\n  ? `<p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">${title}</p>\n     <div style=\"background:#252525;padding:12px;border-radius:4px;font-size:14px;line-height:1.6;\">${esc(body)}</div>`\n  : '');\n\nconst sources = ['VirusTotal', record.threatfox.status === 'ok' && 'ThreatFox', record.urlhaus.status === 'ok' && 'URLhaus']\n  .filter(Boolean)\n  .map((s) => `<span style=\"display:inline-block;background:#37474f;color:#cfd8dc;padding:2px 8px;border-radius:3px;font-size:11px;margin-right:5px;\">${s}</span>`)\n  .join('');\n\nconst html = `<!DOCTYPE html>\n<html><body style=\"font-family:'Segoe UI',Tahoma,sans-serif;background:#121212;color:#e0e0e0;margin:0;padding:20px;\">\n<div style=\"max-width:640px;margin:auto;background:#1e1e1e;border:1px solid #333;border-top:4px solid ${theme.accent};border-radius:8px;overflow:hidden;\">\n  <div style=\"background:${theme.header};padding:15px;text-align:center;\">\n    <h2 style=\"margin:0;color:${theme.text};\">${theme.label}: Cyber Sentinel</h2>\n  </div>\n  <div style=\"padding:24px;\">\n    <div style=\"background:#2d2d2d;border:1px solid #444;border-radius:5px;padding:10px;text-align:center;margin-bottom:18px;\">\n      <div style=\"font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;\">Threat Severity Score</div>\n      <div style=\"font-size:36px;font-weight:bold;color:${theme.text};\">${esc(score)}/5</div>\n      <div style=\"font-size:12px;color:#aaa;text-transform:uppercase;\">${esc(level.description)} &middot; ${esc(level.action)}</div>\n      <div style=\"font-size:11px;color:#999;margin-top:6px;\">${scoreNote}</div>\n    </div>\n    <p><strong>Obiekt (IP):</strong> <span style=\"font-family:'Courier New',monospace;color:#64ffda;font-size:18px;font-weight:bold;\">${esc(record.observable.observable_ip)}</span></p>\n    <p><strong>Powiązana domena:</strong> <span style=\"color:#90caf9;\">${esc(record.observable.fqdn)}</span></p>\n    <p><strong>Werdykt:</strong> ${esc(record.verdict.threat_label)}</p>\n    <p><strong>Klienci:</strong> ${esc(record.observable.source_ips)} &middot; <strong>Zapytania DNS:</strong> ${esc(record.observable.query_count)}</p>\n    <p><strong>Aktywne źródła danych:</strong><br>${sources}</p>\n    ${audit.ai_status === 'ok' ? '' : '<p style=\"color:#ffd54f;\">AI analysis unavailable - rule-based verdict only.</p>'}\n    ${section('Analiza (PL)', record.verdict.analysis_pl)}\n    ${section('Summary (EN)', record.verdict.summary_en)}\n    ${section('Primary evidence', audit.primary_evidence)}\n    ${section('Supporting context', audit.supporting_context)}\n    <p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">Scoring trace</p>\n    <ol style=\"font-size:12px;color:#bbb;line-height:1.5;padding-left:18px;\">${record.rule.trace.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>\n  </div>\n  <div style=\"text-align:center;font-size:11px;color:#777;padding:12px;\">\n    Raport wygenerowany przez system Cyber Sentinel &middot; analysis #${esc(record.analysis_result_id)} &middot; indicator #${esc(record.indicator_id)}\n  </div>\n</div></body></html>`;\n\nreturn {\n  json: {\n    subject: `Cyber Sentinel ${theme.label} ${score}/5 | ${record.observable.fqdn} (${record.observable.observable_ip})`,\n    html,\n  },\n};\n"
+        "jsCode": "// Build alert e-mail\n// Renders the persisted verdict as a severity-coloured HTML e-mail (same\n// look as the original Cyber Sentinel report). Every dynamic value is\n// HTML-escaped: domains, URLs and AI text are untrusted input.\n// Mode: Run Once for Each Item.\n\nconst record = $('Insert AI audit').item.json.record;\nconst level = $('Load AI configuration').first().json.threat_levels[record.verdict.threat_score];\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst score = Number(record.verdict.threat_score);\nconst theme = score >= 4\n  ? { label: '🚨 ALERT', accent: '#f44336', text: '#ff5252', header: '#3a1f1f' }\n  : score === 3\n    ? { label: '⚠️ REVIEW', accent: '#ffb300', text: '#ffd54f', header: '#332a13' }\n    : { label: '✅ INFO', accent: '#4caf50', text: '#81c784', header: '#1b3320' };\n\nconst audit = record.audit;\nconst scoreNote = audit.deviation_reason\n  ? `Rule engine ${esc(audit.rule_score)}/5 &rarr; AI adjusted: ${esc(audit.deviation_reason)}`\n  : `Rule engine score ${esc(audit.rule_score)}/5 confirmed`;\n\nconst section = (title, body) => (body\n  ? `<p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">${title}</p>\n     <div style=\"background:#252525;padding:12px;border-radius:4px;font-size:14px;line-height:1.6;\">${esc(body)}</div>`\n  : '');\n\nconst sources = ['VirusTotal', record.threatfox.status === 'ok' && 'ThreatFox', record.urlhaus.status === 'ok' && 'URLhaus',\n  record.urlscan?.status === 'ok' && 'urlscan.io', record.shodan?.status === 'ok' && 'Shodan']\n  .filter(Boolean)\n  .map((s) => `<span style=\"display:inline-block;background:#37474f;color:#cfd8dc;padding:2px 8px;border-radius:3px;font-size:11px;margin-right:5px;\">${s}</span>`)\n  .join('');\n\n// Lists of names: first `max`, then \"+N more\". Every name is escaped.\nconst nameList = (names, total, max = 10) => esc(names.slice(0, max).join(', ')) +\n  (total > Math.min(names.length, max) ? ` <span style=\"color:#888;\">+${esc(total - Math.min(names.length, max))} more</span>` : '');\nconst red = (s) => `<span style=\"color:#ff5252;\">${s}</span>`;\n\n// urlscan.io: earlier scans of the page and other sites on the same IP\n// (titles and names are untrusted text, escaped).\nconst us = record.urlscan;\nconst usRows = [];\nif (us?.status === 'ok') {\n  const l = us.latest;\n  usRows.push(`${esc(us.scans_found)} scan(s) of this domain, ${us.malicious_scans ? red(`${esc(us.malicious_scans)} marked malicious`) : '0 marked malicious'} &middot; latest: ${esc(l.title || 'no title')} (HTTP ${esc(l.http_status ?? '?')})`);\n  if (l.tls_issuer) {\n    usRows.push(`TLS certificate: ${esc(l.tls_issuer)}${l.tls_age_days !== null ? `, issued ${l.tls_age_days <= 30 ? red(`${esc(l.tls_age_days)} day(s) ago`) : `${esc(l.tls_age_days)} day(s) ago`}` : ''}${l.tls_valid_days !== null ? `, valid ${esc(l.tls_valid_days)} days` : ''}`);\n  }\n  if (us.report_url) usRows.push(`<a style=\"color:#90caf9;\" href=\"${esc(us.report_url)}\">urlscan.io report</a>`);\n}\nconst si = us?.same_ip;\nif (si?.status === 'ok') {\n  const sites = si.sites.map((s) => `${esc(s.domain)}${s.malicious ? ` ${red('(malicious)')}` : ''}`);\n  usRows.push(`Other sites on this IP (${esc(si.other_sites)}${si.malicious_sites ? `, ${red(`${esc(si.malicious_sites)} malicious`)}` : ''}): ` +\n    sites.slice(0, 10).join(', ') + (si.other_sites > 10 ? ` <span style=\"color:#888;\">+${esc(si.other_sites - 10)} more</span>` : ''));\n}\nconst urlscanBlock = usRows.length\n  ? `<p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">urlscan.io</p>\n     <div style=\"background:#252525;padding:12px;border-radius:4px;font-size:14px;line-height:1.6;\">${usRows.join('<br>')}</div>`\n  : '';\n\n// Shodan InternetDB: what runs on the IP.\nconst sh = record.shodan;\nconst shodanBlock = sh?.status === 'ok'\n  ? `<p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">Shodan</p>\n     <div style=\"background:#252525;padding:12px;border-radius:4px;font-size:14px;line-height:1.6;\">\n       Open ports: ${esc(sh.open_ports.join(', ') || 'none')}${sh.notable_services.length ? ` (${esc(sh.notable_services.join(', '))})` : ''}<br>\n       ${sh.hostnames_on_ip ? `Hostnames on the IP (${esc(sh.hostnames_on_ip)}${sh.domain_seen_on_ip ? ', this domain among them' : ''}): ${nameList(sh.hostname_sample, sh.hostnames_on_ip)}<br>` : 'No other hostnames known on the IP<br>'}\n       ${sh.software.length ? `Software: ${esc(sh.software.slice(0, 5).join(', '))}` : ''}\n       ${sh.tags.length ? `<br>Tags: ${esc(sh.tags.join(', '))}` : ''}\n     </div>`\n  : '';\n\nconst html = `<!DOCTYPE html>\n<html><body style=\"font-family:'Segoe UI',Tahoma,sans-serif;background:#121212;color:#e0e0e0;margin:0;padding:20px;\">\n<div style=\"max-width:640px;margin:auto;background:#1e1e1e;border:1px solid #333;border-top:4px solid ${theme.accent};border-radius:8px;overflow:hidden;\">\n  <div style=\"background:${theme.header};padding:15px;text-align:center;\">\n    <h2 style=\"margin:0;color:${theme.text};\">${theme.label}: Cyber Sentinel</h2>\n  </div>\n  <div style=\"padding:24px;\">\n    <div style=\"background:#2d2d2d;border:1px solid #444;border-radius:5px;padding:10px;text-align:center;margin-bottom:18px;\">\n      <div style=\"font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;\">Threat Severity Score</div>\n      <div style=\"font-size:36px;font-weight:bold;color:${theme.text};\">${esc(score)}/5</div>\n      <div style=\"font-size:12px;color:#aaa;text-transform:uppercase;\">${esc(level.description)} &middot; ${esc(level.action)}</div>\n      <div style=\"font-size:11px;color:#999;margin-top:6px;\">${scoreNote}</div>\n    </div>\n    <p><strong>Obiekt (IP):</strong> <span style=\"font-family:'Courier New',monospace;color:#64ffda;font-size:18px;font-weight:bold;\">${esc(record.observable.observable_ip)}</span></p>\n    <p><strong>Powiązana domena:</strong> <span style=\"color:#90caf9;\">${esc(record.observable.fqdn)}</span></p>\n    <p><strong>Werdykt:</strong> ${esc(record.verdict.threat_label)}</p>\n    <p><strong>Klienci:</strong> ${esc(record.observable.source_ips)} &middot; <strong>Zapytania DNS:</strong> ${esc(record.observable.query_count)}</p>\n    <p><strong>Aktywne źródła danych:</strong><br>${sources}</p>\n    ${audit.ai_status === 'ok' ? '' : '<p style=\"color:#ffd54f;\">AI analysis unavailable - rule-based verdict only.</p>'}\n    ${section('Analiza (PL)', record.verdict.analysis_pl)}\n    ${section('Summary (EN)', record.verdict.summary_en)}\n    ${section('Primary evidence', audit.primary_evidence)}\n    ${section('Supporting context', audit.supporting_context)}\n    ${urlscanBlock}\n    ${shodanBlock}\n    <p style=\"margin:14px 0 4px;color:#888;font-size:12px;text-transform:uppercase;\">Scoring trace</p>\n    <ol style=\"font-size:12px;color:#bbb;line-height:1.5;padding-left:18px;\">${record.rule.trace.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>\n  </div>\n  <div style=\"text-align:center;font-size:11px;color:#777;padding:12px;\">\n    Raport wygenerowany przez system Cyber Sentinel &middot; analysis #${esc(record.analysis_result_id)} &middot; indicator #${esc(record.indicator_id)}\n  </div>\n</div></body></html>`;\n\nreturn {\n  json: {\n    subject: `Cyber Sentinel ${theme.label} ${score}/5 | ${record.observable.fqdn} (${record.observable.observable_ip})`,\n    html,\n  },\n};\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3344,
+        5092,
         544
       ],
       "id": "a8dff11a-9846-58f9-9ae8-fb9eb40d11cc",
@@ -802,7 +1069,7 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        3552,
+        5300,
         544
       ],
       "id": "621f571c-a241-5f0c-bdb0-e88633e12691",
@@ -824,7 +1091,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        672,
+        1332,
         -464
       ],
       "id": "64e0139b-fe03-5459-861a-178fb64403de",
@@ -848,9 +1115,9 @@
     },
     {
       "parameters": {
-        "content": "## Multi-Source Threat Intelligence Enrichment\n\n",
+        "content": "## Multi-Source Threat Intelligence Enrichment\n\nVirusTotal (primary) + Shodan InternetDB (every observable) → ThreatFox + URLhaus + urlscan.io search by domain and by IP (supporting, only above the VirusTotal gate)\n",
         "height": 736,
-        "width": 1728,
+        "width": 3476,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
@@ -872,7 +1139,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1584,
+        3332,
         0
       ],
       "id": "b3c027dc-bd89-5cd6-a820-db4884fb2c42",
@@ -888,7 +1155,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        2848,
+        4596,
         0
       ],
       "id": "76c26e0e-6fc3-5b27-883f-bdd641d60b9a",
@@ -922,7 +1189,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2928,
+        4676,
         736
       ],
       "id": "7cfc9f18-b3aa-466a-afeb-69c2099546de",
@@ -936,7 +1203,7 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        3136,
+        4884,
         736
       ],
       "id": "40f3f21f-42f6-47a5-abae-15cefce9e448",
@@ -969,7 +1236,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3344,
+        5092,
         736
       ],
       "id": "63e4e278-3613-436d-9a43-0fb544c39718",
@@ -1008,7 +1275,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3552,
+        5300,
         736
       ],
       "id": "6116b117-89c0-485a-af52-c98280843490",
@@ -1041,7 +1308,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3760,
+        5508,
         736
       ],
       "id": "b71103f5-e631-42b0-8183-e45a7786c774",
@@ -1056,7 +1323,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3968,
+        5716,
         736
       ],
       "id": "441f869b-a094-41b8-9660-f96a679977a3",
@@ -1073,7 +1340,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        4176,
+        5924,
         736
       ],
       "id": "84ee3af0-8952-42c5-95b7-d3cefd8156f4",
@@ -1096,7 +1363,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        2848,
+        4596,
         464
       ],
       "id": "8ba9497b-5ade-469a-8b84-4b2056389eb9",
@@ -1175,7 +1442,7 @@
       "main": [
         [
           {
-            "node": "VirusTotal detections ≥ threshold?",
+            "node": "Shodan lookup enabled?",
             "type": "main",
             "index": 0
           }
@@ -1219,7 +1486,7 @@
       "main": [
         [
           {
-            "node": "Compute rule-based score",
+            "node": "urlscan.io lookup enabled?",
             "type": "main",
             "index": 0
           }
@@ -1552,6 +1819,130 @@
         [
           {
             "node": "Log Pi-hole block",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io lookup enabled?": {
+      "main": [
+        [
+          {
+            "node": "urlscan.io API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "urlscan.io not checked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "urlscan.io search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io search": {
+      "main": [
+        [
+          {
+            "node": "urlscan.io search by IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - urlscan.io": {
+      "main": [
+        [
+          {
+            "node": "Compute rule-based score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io not checked": {
+      "main": [
+        [
+          {
+            "node": "Compute rule-based score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan lookup enabled?": {
+      "main": [
+        [
+          {
+            "node": "Shodan InternetDB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shodan not checked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan InternetDB": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - Shodan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - Shodan": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal detections ≥ threshold?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan not checked": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal detections ≥ threshold?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io search by IP": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - urlscan.io",
             "type": "main",
             "index": 0
           }

@@ -5,7 +5,8 @@
 # Purpose:    Runs all "after-the-fact" configuration that requires
 #             containers to be running. Sets passwords, populates
 #             Pi-hole adlists, initializes admin accounts for
-#             Portainer and n8n, and imports the n8n workflow JSON.
+#             Portainer and n8n, and imports the n8n workflow JSON files
+#             (main pipeline + Deep Recon).
 #
 # Depends on: - Playbook 04.2 (all containers running)
 #             - Playbook 04.3 (Postgres AI schema — the imported workflow
@@ -20,7 +21,7 @@
 #               gravity database refreshed
 #             - Portainer owner account created
 #             - n8n owner account created
-#             - n8n workflow imported and ready to be enabled
+#             - n8n workflows imported and ready to be enabled
 #
 # ============================================================
 
@@ -29,9 +30,12 @@
   become: yes
 
   vars:
-    # Exact file name under config/n8n/workflows/ on the control host.
-    # Override per environment with n8n_workflow_file_name (group_vars).
+    # Exact file names under config/n8n/workflows/ on the control host.
+    # Override the main one per environment with n8n_workflow_file_name (group_vars).
     n8n_workflow_file: "{{ n8n_workflow_file_name | default('Automated Domain & IP Reputation Guard.json') }}"
+    n8n_workflow_files_to_import:
+      - "{{ n8n_workflow_file }}"
+      - "Deep Recon.json"
 
   tasks:
     # ============================================================
@@ -267,7 +271,7 @@
       changed_when: n8n_init.status == 200
 
     # ============================================================
-    # SECTION 4 — Import n8n workflow
+    # SECTION 4 — Import n8n workflows
     # ------------------------------------------------------------
     # Multi-step workflow import:
     #   1. Read workflow JSON locally
@@ -280,13 +284,13 @@
     # with admin privileges by default.
     # ============================================================
 
-    # File name has spaces and "&" — it is always passed quoted/as a
-    # lookup path, never through a shell. Set via n8n_workflow_file
-    # (play vars above).
+    # File names have spaces and "&" — they are only ever used as lookup
+    # paths; the staged copies get fixed names (workflow_to_import_<n>.json).
     #
-    # The JSON keeps the id of the original workflow (ILhKRbyvF5NaIRYL), so
-    # a re-import updates it in place instead of adding a second copy.
-    # The CLI import leaves it INACTIVE — publish it in the n8n UI.
+    # Each JSON keeps its workflow id (main: ILhKRbyvF5NaIRYL, Deep Recon:
+    # DpRecon2SentnlX1), so a re-import updates it in place instead of
+    # adding a second copy. The CLI import leaves workflows INACTIVE —
+    # publish them in the n8n UI.
     # Requires config/postgres/db_ai_pipeline.sql (playbook 04.3 [04.3.1.4]).
     #
     # Pre-check on the control host: fails with the list of files that DO
@@ -302,46 +306,51 @@
       run_once: true
       register: n8n_workflow_files
 
-    - name: "[04.6.4.2] Fail with the list of available workflow files if the expected one is missing"
+    - name: "[04.6.4.2] Fail with the list of available workflow files if an expected one is missing"
       ansible.builtin.assert:
         that:
-          - n8n_workflow_file in (n8n_workflow_files.files | map(attribute='path') | map('basename') | list)
+          - item in (n8n_workflow_files.files | map(attribute='path') | map('basename') | list)
         fail_msg: >-
-          '{{ n8n_workflow_file }}' not found in {{ main_repo_source_dir }}/config/n8n/workflows.
+          '{{ item }}' not found in {{ main_repo_source_dir }}/config/n8n/workflows.
           Files present: {{ n8n_workflow_files.files | map(attribute='path') | map('basename') | list }}.
           Copy the workflow JSON there under exactly this name, or set n8n_workflow_file_name.
         quiet: true
+      loop: "{{ n8n_workflow_files_to_import }}"
       run_once: true
 
-    - name: "[04.6.4.3] Read workflow JSON from repo into memory"
-      set_fact:
-        workflow_content: "{{ lookup('file', main_repo_source_dir ~ '/config/n8n/workflows/' ~ n8n_workflow_file) | from_json }}"
-
-    # Re-serializes the parsed JSON. This normalizes formatting and
-    # validates that the source file is parseable JSON before we
-    # bother trying to import it.
-    - name: "[04.6.4.4] Stage workflow JSON on host filesystem"
+    # from_json | to_json re-serializes each file: it normalizes formatting
+    # and validates that the source is parseable JSON before the import.
+    - name: "[04.6.4.3] Stage workflow JSON files on host filesystem"
       ansible.builtin.copy:
-        content: "{{ workflow_content | to_json }}"
-        dest: "/tmp/workflow_to_import.json"
+        content: "{{ lookup('file', main_repo_source_dir ~ '/config/n8n/workflows/' ~ item) | from_json | to_json }}"
+        dest: "/tmp/workflow_to_import_{{ idx }}.json"
         mode: '0644'
+      loop: "{{ n8n_workflow_files_to_import }}"
+      loop_control:
+        index_var: idx
 
-    - name: "[04.6.4.5] Copy workflow file from host into n8n container"
-      ansible.builtin.shell:
-        cmd: "docker cp /tmp/workflow_to_import.json n8n-server:/tmp/workflow_to_import.json"
+    - name: "[04.6.4.4] Copy workflow files from host into n8n container"
+      ansible.builtin.command:
+        cmd: "docker cp /tmp/workflow_to_import_{{ idx }}.json n8n-server:/tmp/workflow_to_import_{{ idx }}.json"
+      loop: "{{ n8n_workflow_files_to_import }}"
+      loop_control:
+        index_var: idx
 
     # `-u node` runs as the n8n process user inside the container.
     # The CLI prints "Successfully imported X workflow(s)" on success.
-    - name: "[04.6.4.6] Import workflow via n8n CLI"
-      ansible.builtin.shell:
-        cmd: "docker exec -u node n8n-server n8n import:workflow --input=/tmp/workflow_to_import.json"
+    - name: "[04.6.4.5] Import workflows via n8n CLI"
+      ansible.builtin.command:
+        cmd: "docker exec -u node n8n-server n8n import:workflow --input=/tmp/workflow_to_import_{{ idx }}.json"
       register: cli_result
       changed_when: "'Successfully imported' in cli_result.stdout"
+      loop: "{{ n8n_workflow_files_to_import }}"
+      loop_control:
+        index_var: idx
 
     # Removes the staged workflow JSON from both host and container.
     # changed_when: false because cleanup is best-effort and shouldn't
     # mark the play as "changed" just for tidying up.
-    - name: "[04.6.4.7] Remove staged workflow files (host + container)"
+    - name: "[04.6.4.6] Remove staged workflow files (host + container)"
       ansible.builtin.shell:
-        cmd: "rm -f /tmp/workflow_to_import.json && docker exec -u root n8n-server rm -f /tmp/workflow_to_import.json"
+        cmd: "rm -f /tmp/workflow_to_import_*.json && docker exec -u root n8n-server sh -c 'rm -f /tmp/workflow_to_import_*.json'"
       changed_when: false

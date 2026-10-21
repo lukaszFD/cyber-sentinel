@@ -214,3 +214,7 @@ ol.path li.path-muted { opacity: .75; }
 .kv dt { color: var(--muted, #888); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 .bad-text { color: var(--bad, #d33); }
+
+/* Deep recon — detail row under each result */
+tr.detail-row td { border-top: 0; padding-top: 0; }
+tr.detail-row details > p { margin: .4rem 0; }

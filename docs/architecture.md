@@ -17,16 +17,18 @@ client → pihole → passive_dns → unbound → internet
 
 ## 2. Decision Pipeline (n8n)
 
-One workflow, *Automated Domain & IP Reputation Guard*, runs every 3 minutes and handles one observable (domain + IP) per run.
+One workflow, *Automated Domain & IP Reputation Guard*, runs every minute and handles one observable (domain + IP) per run, as long as the VirusTotal budget (500 calls/day, 4/min) allows it.
 
 1. **Load configuration** — all thresholds, the active prompt and the threat scale are read from the database at the start of each run. Nothing is hard-coded in the workflow.
-2. **Pick work** — the next observable from `v_pending_observables`. Allow-listed domains (Tranco, manual) and pairs analysed in the last `cache_ttl_days` never get here.
+2. **Pick work** — the next observable from `v_pending_observables`, through `claim_next_observable()`, which also enforces the VirusTotal budget. Allow-listed domains (Tranco, manual) and pairs analysed in the last `cache_ttl_days` never get here.
 3. **VirusTotal gate** — VirusTotal checks the IP. Below `vt_gate_min_malicious` the observable is closed as clean without spending further API calls or AI tokens.
-4. **Enrich** — ThreatFox (IP) and URLhaus (domain) add context.
+4. **Enrich** — Shodan InternetDB (every IP: open ports, software, CVEs, hostnames). Above the gate also ThreatFox (IP), URLhaus (domain) and earlier urlscan.io scans of the domain's page.
 5. **Rule score** — `compute_threat_score()` in PostgreSQL returns a 1–5 score from fixed, auditable rules.
 6. **AI agent** — a Gemini agent reviews the evidence and the rule score. It has one tool, `historical_verdicts`: a pgvector search over earlier verdicts. It can move the score by at most `ai_max_deviation` points and must answer in a fixed JSON schema (score, label, rationale in English and Polish).
 7. **Persist** — raw CTI payloads (JSONB), the verdict and an audit record of what the agent changed and why. Successful verdicts are embedded and stored back into vector memory.
 8. **Act** — an email for scores ≥ `email_min_score`; an automatic Pi-hole denylist entry when VirusTotal detections reach `pihole_block_min_vt_malicious` and the IP is not trusted infrastructure. Every block attempt is logged.
+
+A second workflow, *Deep Recon*, runs hourly and re-assesses verdicts scored ≥ `recon_min_score` with context the main workflow does not collect: domain registration (RDAP), certificate history (crt.sh) and the web page, which urlscan.io loads from its own infrastructure. An AI analyst without tools says whether this confirms the verdict and may propose a score within `recon_max_deviation`. Verdicts are not changed automatically: the result is stored in `deep_recon` and e-mailed when the proposed score differs.
 
 ## 3. AI Configuration
 
