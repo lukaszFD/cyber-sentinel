@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_name_providers ON cyber_sentinel.dic_source_provi
 CREATE INDEX IF NOT EXISTS idx_active ON cyber_sentinel.dic_source_providers (is_active);
 
 INSERT INTO cyber_sentinel.dic_source_providers (name) VALUES
-                                                           ('VirusTotal'), ('Abuse_ThreatFox'), ('Abuse_URLhaus'), ('urlscan.io')
+                                                           ('VirusTotal'), ('Abuse_ThreatFox'), ('Abuse_URLhaus'), ('urlscan.io'), ('Shodan_InternetDB'), ('RDAP')
     ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS cyber_sentinel.dic_threat_levels (

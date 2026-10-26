@@ -3,10 +3,11 @@ Cyber Sentinel — AI config editor.
 
 Small server-rendered web UI for the data that drives the n8n AI pipeline
 (schema cyber_sentinel_ai): pipeline/scoring settings, versioned AI Agent
-prompt, trusted infrastructure, manual domain allow-list + exclusions and the
-threat-scale wording. Connects to Postgres as a dedicated least-privilege role
-(see config/postgres/db_ai_config_editor.sql) — never as postgres or as the
-n8n app role.
+prompt, trusted infrastructure, manual domain allow-list + exclusions, the
+threat-scale wording, and the Deep Recon results and prompt. Connects to
+Postgres as a dedicated least-privilege role (see
+config/postgres/db_ai_config_editor.sql) — never as postgres or as the n8n
+app role.
 
 Every write transaction sets `cyber_sentinel_ai.actor` to the logged-in UI
 user, so the audit trigger records who changed what.
@@ -154,6 +155,34 @@ SETTING_HELP = {
         "lower": "Verdicts stay fresher, at the cost of more lookups. Very short periods can use up the daily "
                  "budget on a busy network.",
     },
+    "vt_daily_limit": {
+        "min": 1, "max": 100000, "integer": True, "stage": 2,
+        "label": "Antivirus checks per day",
+        "what": "Your VirusTotal daily quota (free account: 500). Every check uses one. When they are used up, "
+                "checking stops until the quota resets at 02:00 (summer) / 01:00 (winter) Polish time.",
+        "raise": "Only with a paid VirusTotal plan — above your real quota the checks fail.",
+        "lower": "Leaves part of the quota for other use, e.g. the live lookups in the Simulator.",
+    },
+    "vt_per_minute_limit": {
+        "min": 1, "max": 1000, "integer": True, "stage": 2,
+        "label": "Antivirus checks per minute",
+        "what": "How many checks may start within one minute (free account: 4). The workflow runs every minute "
+                "and checks one domain per run, so with the default schedule this only matters when runs overlap "
+                "or when the schedule is set to run more often.",
+        "raise": "A backlog is cleared faster, if the schedule runs often enough. Above your plan's limit "
+                 "VirusTotal refuses checks.",
+        "lower": "Slower and steadier use of the quota.",
+    },
+    "vt_reserve_per_hour": {
+        "min": 0, "max": 100, "integer": True, "stage": 2,
+        "label": "Keep for later (checks per remaining hour)",
+        "what": "When there is a backlog, checks run as fast as the per-minute limit allows, but this many "
+                "checks per hour left until the quota resets are kept back for domains your devices visit "
+                "later. Example: 5 at 18:00 keeps 40 checks for the 8 hours until 02:00.",
+        "raise": "More checks stay free for the evening and night — a big backlog is cleared more slowly.",
+        "lower": "0 — the whole quota is spent as soon as there is work; domains visited late in the day may "
+                 "wait until the next day.",
+    },
     "vt_gate_min_malicious": {
         "min": 0, "max": 100, "integer": True, "stage": 2,
         "label": "Deep analysis from (antivirus detections)",
@@ -164,6 +193,34 @@ SETTING_HELP = {
                  "few engines recognise yet are judged on the quick check alone.",
         "lower": "More domains get deep analysis and an e-mail. Higher AI cost and more noise from domains that "
                  "only one or two engines flag.",
+    },
+    "shodan_internetdb_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 2, "switch": True,
+        "label": "Check what runs on the server (Shodan)",
+        "what": "Every domain's IP is looked up in Shodan's free database: open ports, server software, known "
+                "vulnerabilities and how many other websites share the server. Free and without a daily limit; "
+                "the data is refreshed weekly. It helps the AI analyst — e.g. a detection on a server shared by "
+                "hundreds of sites may belong to a neighbour — and is shown in the alert e-mail. It does not "
+                "change the score.",
+        "raise": "On — the AI analyst and the e-mail see what runs on the server.",
+        "lower": "Off — no Shodan lookups.",
+    },
+    "urlscan_search_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 2, "switch": True,
+        "label": "Look up earlier page scans (urlscan.io)",
+        "what": "During deep analysis, the system also asks urlscan.io whether anyone scanned the domain's web "
+                "page recently: page title, final address, server and whether urlscan.io found it malicious. "
+                "Nothing is visited — only existing scans are read. The result helps the AI analyst and is "
+                "shown in the alert e-mail; it does not change the score.",
+        "raise": "On — the AI analyst and the e-mail see what the page looked like when it was scanned.",
+        "lower": "Off — no urlscan.io lookups in the main check.",
+    },
+    "urlscan_search_days": {
+        "min": 1, "max": 365, "integer": True, "stage": 2,
+        "label": "Use page scans not older than (days)",
+        "what": "Earlier urlscan.io scans older than this are ignored during deep analysis.",
+        "raise": "Older scans count too — more domains have some page information, but it may be out of date.",
+        "lower": "Only fresh scans count — the information is current, but fewer domains have any.",
     },
     "vt_low_max": {
         "min": 0, "max": 100, "integer": True, "stage": 3,
@@ -243,6 +300,75 @@ SETTING_HELP = {
         "raise": "Only domains many engines agree on are blocked — fewer sites blocked by mistake.",
         "lower": "Blocking starts earlier — more protection, but a legitimate site may be blocked now and then.",
     },
+    "recon_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 7, "switch": True,
+        "label": "Take a second look at high-scored domains",
+        "what": "Once an hour, a domain that received a high score gets a second look with information the first "
+                "check does not collect: when the domain was registered, its certificate history, and what its "
+                "web page shows (urlscan.io opens it from its own servers — never from your network). An AI "
+                "analyst then says whether this confirms the score and may propose a different one. Nothing is "
+                "changed or blocked automatically; results are on the Deep recon page.",
+        "raise": "On — every high-scored domain gets a second opinion within about an hour.",
+        "lower": "Off — no second look; the Deep recon page stops filling up.",
+    },
+    "recon_min_score": {
+        "min": 1, "max": 5, "integer": True, "stage": 7,
+        "label": "Second look from score",
+        "what": "Domains whose final score reached at least this value get the second look.",
+        "raise": "4 — only malicious and critical domains. Fewer page scans, the daily limit lasts longer.",
+        "lower": "3 — also domains that need a manual review, where extra context helps most to decide.",
+    },
+    "recon_max_deviation": {
+        "min": 0, "max": 4, "integer": True, "stage": 7,
+        "label": "How far the second look may move the score (points)",
+        "what": "The AI analyst may propose a score at most this many points away from the verdict. The verdict "
+                "itself is not changed — the proposal is shown on the Deep recon page and e-mailed.",
+        "raise": "The second look can disagree more strongly, e.g. turn a 3 into a 5 when the page is a clear "
+                 "phishing site.",
+        "lower": "0 — the analyst only confirms or contradicts; it never proposes another score and no e-mail "
+                 "is sent.",
+    },
+    "recon_email_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 7, "switch": True,
+        "label": "E-mail when the second look changes the score",
+        "what": "An e-mail with the old and the proposed score, the reason, the page and the domain history is "
+                "sent when the AI analyst proposes a different score than the verdict.",
+        "raise": "On — you hear about every disagreement.",
+        "lower": "Off — check the Deep recon page yourself.",
+    },
+    "recon_lookback_days": {
+        "min": 1, "max": 90, "integer": True, "stage": 7,
+        "label": "Only verdicts from the last (days)",
+        "what": "Older verdicts are not queued. Keeps the first run after switching this on (or after lowering "
+                "the score threshold) from going through months of history.",
+        "raise": "Older verdicts get a second look too — more history, more of the daily limit used at once.",
+        "lower": "Only recent verdicts get a second look.",
+    },
+    "recon_reuse_days": {
+        "min": 0, "max": 90, "integer": True, "stage": 7,
+        "label": "Reuse an existing page scan for (days)",
+        "what": "When urlscan.io already has a scan of the domain younger than this, it is used instead of "
+                "a new one, and the domain gets no second look again during this period.",
+        "raise": "Fewer new scans — but a page that changed in the meantime is described as it was.",
+        "lower": "0 — always a new scan; uses more of the daily limit.",
+    },
+    "recon_daily_limit": {
+        "min": 0, "max": 1000, "integer": True, "stage": 7,
+        "label": "New page scans per day (at most)",
+        "what": "When this many new page scans were made today, the second look pauses until midnight. Reused "
+                "scans do not count. The urlscan.io free plan allows 1000 unlisted or 50 private scans per day.",
+        "raise": "More domains get a second look on busy days.",
+        "lower": "Keeps the urlscan.io quota free for other use; the queue waits for the next day sooner.",
+    },
+    "recon_private_scans": {
+        "min": 0, "max": 1, "integer": True, "stage": 7, "switch": True,
+        "label": "Private page scans",
+        "what": "Unlisted scans are not shown in urlscan.io's public feed, but urlscan.io and its security "
+                "partners can still see them. Private scans are visible only to your account. The free plan "
+                "allows 50 private scans per day.",
+        "raise": "On — private scans. Keep the daily limit at 50 or lower.",
+        "lower": "Off — unlisted scans (up to 1000 per day on the free plan).",
+    },
 }
 
 # The n8n AI workflow, in the order a domain goes through it.
@@ -255,12 +381,16 @@ PIPELINE_STEPS = {
     4: ("AI analyst", "An AI analyst explains the score in English and Polish and may correct it slightly."),
     5: ("Alerts", "Every verdict is stored for the Grafana dashboards; serious ones are e-mailed."),
     6: ("Automatic blocking", "Domains that are clearly malicious are blocked in Pi-hole for the whole network."),
+    7: ("Deep recon", "A separate hourly workflow takes a second look at high-scored domains: domain age, "
+                      "certificate history and the web page. An AI analyst may propose a different score; "
+                      "nothing is changed automatically."),
 }
 
 TF_UH_STATUSES = ["ok", "no_data", "not_checked", "error"]
 AUDITED_TABLES = [
     "cyber_sentinel_ai.ai_settings",
     "cyber_sentinel_ai.prompt_templates",
+    "cyber_sentinel_ai.recon_prompt_templates",
     "cyber_sentinel_ai.trusted_infrastructure",
     "cyber_sentinel_ai.domain_allowlist",
     "cyber_sentinel_ai.domain_allowlist_exclusions",
@@ -534,6 +664,10 @@ def _validate_settings(values):
             and values["vt_big_player_noise_max"] > values["vt_medium_max"]:
         errors.append(f"'{setting_label('vt_big_player_noise_max')}' must not exceed "
                       f"'{setting_label('vt_medium_max')}'")
+    if {"vt_reserve_per_hour", "vt_daily_limit"} <= values.keys() \
+            and values["vt_reserve_per_hour"] * 24 >= values["vt_daily_limit"]:
+        errors.append(f"'{setting_label('vt_reserve_per_hour')}' × 24 hours must stay below "
+                      f"'{setting_label('vt_daily_limit')}' — otherwise no check would ever run")
     return errors
 
 
@@ -588,6 +722,12 @@ def settings_page():
             "SELECT key, value, category, description, updated_at FROM ai_settings "
             "ORDER BY key").fetchall()
         # The log table arrives with db_ai_pipeline.sql v2.2 — tolerate an older database.
+        vt_budget = None
+        if conn.execute("SELECT to_regclass('cyber_sentinel_ai.v_vt_budget') IS NOT NULL "
+                        "AND has_table_privilege('cyber_sentinel_ai.v_vt_budget', 'SELECT') AS ok").fetchone()["ok"]:
+            # Reset time shown in Polish time (the quota resets at 00:00 UTC).
+            vt_budget = conn.execute("SELECT *, resets_at AT TIME ZONE 'Europe/Warsaw' AS resets_local "
+                                     "FROM v_vt_budget").fetchone()
         blocks = []
         if conn.execute("SELECT to_regclass('cyber_sentinel_ai.pihole_block_log') IS NOT NULL "
                         "AND has_table_privilege('cyber_sentinel_ai.pihole_block_log', 'SELECT') AS ok"
@@ -602,7 +742,7 @@ def settings_page():
     for r in sorted(rows, key=lambda r: order.get(r["key"], len(order))):
         r["help"] = SETTING_HELP.get(r["key"])
         (stages[r["help"]["stage"]]["rows"] if r["help"] else other).append(r)
-    return render_template("settings.html", stages=stages, other=other, blocks=blocks)
+    return render_template("settings.html", stages=stages, other=other, blocks=blocks, vt_budget=vt_budget)
 
 
 # ============================================================
@@ -1252,6 +1392,140 @@ def _sim_fetch_live(form):
     log.info("simulator live lookup by %s: fqdn=%s ip=%s vt=%s/%s cached=%s",
              session.get("user"), fqdn, ip, vt["status"], vt["malicious"], vt.get("cached"))
     return {"ip": ip, "resolved": resolved, "resolver": live_lookup.RESOLVER, "vt": vt, "tf": tf, "uh": uh, "gate_open": gate_open}
+
+
+# ============================================================
+# Routes — deep recon (results of the Deep Recon workflow)
+# ============================================================
+
+RECON_STATUSES = ["running", "done", "error"]
+RECON_FILTERS = RECON_STATUSES + ["changed"]   # "changed" = proposed score differs from the verdict
+RECON_STUCK_MINUTES = 30
+URLSCAN_PREFIX = "https://urlscan.io/"
+
+
+def _urlscan_link(url):
+    """Only ever link to urlscan.io (the values come from the workflow, not from the page)."""
+    return url if isinstance(url, str) and url.startswith(URLSCAN_PREFIX) else None
+
+
+app.jinja_env.filters["urlscan_link"] = _urlscan_link
+
+
+@app.route("/recon", methods=["GET", "POST"])
+@login_required
+def recon_page():
+    if request.method == "POST":
+        try:
+            recon_id = int(request.form["id"])
+            with db() as conn:
+                fqdn = conn.execute("SELECT recon_requeue(%s) AS fqdn", (recon_id,)).fetchone()["fqdn"]
+            if fqdn:
+                flash(f"{fqdn}: queued again. The workflow picks it up on its next run if the verdict is still "
+                      f"within the look-back period.", "ok")
+            else:
+                flash("That entry no longer exists.", "info")
+        except (KeyError, ValueError):
+            flash("A required field is missing.", "error")
+        except psycopg.Error as exc:
+            flash(f"Database error: {db_error(exc)}", "error")
+        return redirect(url_for("recon_page", status=request.args.get("status", "")))
+
+    status = request.args.get("status", "")
+    if status not in RECON_FILTERS:
+        status = ""
+    with db(readonly=True) as conn:
+        s = {r["key"]: r["value"] for r in conn.execute(
+            "SELECT key, value FROM ai_settings WHERE starts_with(key, 'recon_')").fetchall()}
+        today = conn.execute(
+            "SELECT count(*) AS n FROM deep_recon WHERE mode = 'submitted' AND started_at >= CURRENT_DATE"
+        ).fetchone()["n"]
+        pending = conn.execute("SELECT count(*) AS n FROM v_pending_recon").fetchone()["n"]
+        counts = {r["status"]: r["n"] for r in conn.execute(
+            "SELECT status, count(*) AS n FROM deep_recon GROUP BY status").fetchall()}
+        counts["changed"] = conn.execute("SELECT count(*) AS n FROM deep_recon WHERE score_changed").fetchone()["n"]
+        prompt = conn.execute("SELECT version FROM recon_prompt_templates WHERE is_active").fetchone()
+        rows = conn.execute(
+            "SELECT *, (status = 'running' AND started_at < LOCALTIMESTAMP - make_interval(mins => %s)) AS stuck "
+            "FROM deep_recon WHERE (%s = '' OR status = %s OR (%s = 'changed' AND score_changed)) "
+            "ORDER BY started_at DESC, id DESC LIMIT 100",
+            (RECON_STUCK_MINUTES, status, status, status)).fetchall()
+    return render_template("recon.html", rows=rows, settings=s, today=today, pending=pending, counts=counts,
+                           prompt=prompt, status=status, statuses=RECON_FILTERS,
+                           stuck_minutes=RECON_STUCK_MINUTES)
+
+
+def _get_recon_prompt(conn, version):
+    row = conn.execute("SELECT * FROM recon_prompt_templates WHERE version = %s", (version,)).fetchone()
+    if row is None:
+        abort(404, f"Recon prompt version '{version}' does not exist.")
+    return row
+
+
+@app.route("/recon/prompt", methods=["GET", "POST"])
+@login_required
+def recon_prompt_page():
+    if request.method == "POST":
+        action = request.form.get("action")
+        version = request.form.get("version", "").strip()
+        created = False
+        try:
+            with db() as conn:
+                if action == "new":
+                    text = request.form.get("system_prompt", "").replace("\r\n", "\n")
+                    notes = request.form.get("notes", "").strip() or None
+                    if not VERSION_RE.match(version):
+                        raise ValueError("Version name: 1–20 characters, letters, digits, dot, hyphen, underscore only.")
+                    if not text.strip():
+                        raise ValueError("Prompt text must not be empty.")
+                    conn.execute("INSERT INTO recon_prompt_templates (version, system_prompt, is_active, notes) "
+                                 "VALUES (%s, %s, FALSE, %s)", (version, text, notes))
+                    created = True
+                elif action == "activate":
+                    row = _get_recon_prompt(conn, version)
+                    # Same placeholder rules as the AI Agent prompt: the workflow
+                    # resolves exactly these two, anything else reaches the model raw.
+                    report = _placeholder_report(row["system_prompt"])
+                    if report["missing"] or report["unknown"]:
+                        raise ValueError("Not activated — " + "; ".join(filter(None, [
+                            report["missing"] and "missing placeholders: " + ", ".join(report["missing"]),
+                            report["unknown"] and "unknown placeholders: " + ", ".join(f"[[{p}]]" for p in report["unknown"]),
+                        ])))
+                    # Same order as prompt_activate(): unique index forbids two
+                    # active rows, the deferred trigger forbids zero at COMMIT.
+                    conn.execute("UPDATE recon_prompt_templates SET is_active = FALSE WHERE is_active")
+                    conn.execute("UPDATE recon_prompt_templates SET is_active = TRUE WHERE version = %s", (version,))
+                    flash(f"Active recon prompt: {version}. The Deep Recon workflow uses it from its next run.", "ok")
+                elif action == "delete":
+                    _get_recon_prompt(conn, version)
+                    conn.execute("DELETE FROM recon_prompt_templates WHERE version = %s", (version,))
+                    flash(f"Deleted recon prompt version {version}.", "ok")
+                else:
+                    abort(400)
+        except ValueError as exc:
+            flash(str(exc), "error")
+        except psycopg.errors.UniqueViolation:
+            flash(f"Version '{version}' already exists.", "error")
+        except psycopg.Error as exc:
+            flash(f"Database error: {db_error(exc)}", "error")
+            created = False
+        if created:
+            flash(f"Created recon prompt version {version} (not active yet).", "ok")
+        return redirect(url_for("recon_prompt_page", v=version if created else None))
+
+    with db(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT version, is_active, notes, created_at, length(system_prompt) AS chars "
+            "FROM recon_prompt_templates ORDER BY is_active DESC, created_at DESC, version DESC").fetchall()
+        active = conn.execute("SELECT * FROM recon_prompt_templates WHERE is_active").fetchone()
+        shown = _get_recon_prompt(conn, request.args["v"]) if request.args.get("v") else active
+        existing = {r["version"] for r in rows}
+    base = active["version"] if active else "1.0"
+    m = re.match(r"^(.*?)(\d+)$", base)
+    suggestion = next((f"{m.group(1)}{i}" for i in range(int(m.group(2)) + 1, int(m.group(2)) + 1000)
+                       if f"{m.group(1)}{i}" not in existing), "") if m else ""
+    return render_template("recon_prompt.html", rows=rows, shown=shown, active=active, suggestion=suggestion,
+                           report=_placeholder_report(shown["system_prompt"]) if shown else None)
 
 
 # ============================================================

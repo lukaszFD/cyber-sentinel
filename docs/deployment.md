@@ -61,7 +61,7 @@ vault_ai_ui_users:                 # password (>= 12 chars) or werkzeug hash
 vault_virus_total_token: ""
 vault_abuse_api_key: ""            # abuse.ch: ThreatFox + URLhaus
 vault_gemini_api_key: ""
-vault_urlscanio_api_key: ""
+vault_urlscanio_api_key: ""        # urlscan.io: search (main workflow) + page scans (Deep Recon)
 vault_grafana_api_key: ""
 
 # Email alerts (Gmail)

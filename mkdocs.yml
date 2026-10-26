@@ -48,7 +48,7 @@ nav:
   - Architecture: architecture.md
   - Deployment: deployment.md
   - "Docker Compose": docker-compose.md
-  - "n8n Workflow": n8n.md
+  - "n8n Workflows": n8n.md
 #  - "Grafana Dashboards": grafana.md
   - Database: database.md
   - Project Releases: releases.md

@@ -40,7 +40,23 @@ FROM cyber_sentinel.threat_indicator_details tid
 WHERE tid.indicator_id IN (SELECT id FROM tmp_indicators)
   AND tid.raw_data_id IS NOT NULL;
 
+-- Deep Recon rows of these verdicts (removed by ON DELETE CASCADE below;
+-- counted here for the verification). The new verdict gets a new recon.
+CREATE TEMP TABLE tmp_recon ON COMMIT DROP AS
+SELECT dr.id
+FROM cyber_sentinel_ai.deep_recon dr
+WHERE dr.analysis_result_id IN (SELECT id FROM tmp_results);
+
 -- 4. Delete (child -> parent order)
+-- VirusTotal claims younger than 15 minutes hide the pair from
+-- claim_next_observable() (a run that failed is retried after 15 min).
+-- Releasing them lowers today's VirusTotal count in v_vt_budget by the
+-- number of rows removed (at most one per pair).
+DELETE FROM cyber_sentinel_ai.vt_lookup_log l
+USING tmp_pairs p
+WHERE l.fqdn = p.fqdn AND l.observable_ip = p.observable_ip
+  AND l.claimed_at > now() - interval '15 minutes';
+
 -- network_events.threat_indicator_id has no FK (partitioned target) - detach manually
 UPDATE cyber_sentinel.network_events
 SET threat_indicator_id = NULL
@@ -68,15 +84,24 @@ WHERE r.id IN (SELECT id FROM tmp_raw)
   AND NOT EXISTS (SELECT 1 FROM cyber_sentinel.threat_indicator_details d WHERE d.raw_data_id = r.id);
 
 -- 5. Verification (sees the uncommitted deletes of this transaction)
+-- blocked_in_pihole = an earlier verdict auto-blocked the domain. The
+-- reset does not touch Pi-hole: unblock it there if the new verdict
+-- should decide (Domains -> Denylist), otherwise DNS answers 0.0.0.0
+-- and the domain never reaches the queue again.
+-- vt_budget_left = 0 or below the reserve: n8n waits (v_vt_budget).
 SELECT
     p.fqdn,
     p.observable_ip,
     (SELECT count(*) FROM tmp_results)    AS verdicts_deleted,
     (SELECT count(*) FROM tmp_indicators) AS indicators_deleted,
     (SELECT count(*) FROM tmp_raw)        AS raw_payloads_deleted,
+    (SELECT count(*) FROM tmp_recon)      AS deep_recon_deleted,
     EXISTS (SELECT 1 FROM cyber_sentinel_ai.v_pending_observables v
             WHERE v.fqdn = p.fqdn AND v.observable_ip = p.observable_ip) AS back_in_queue,
-    cyber_sentinel_ai.is_allowlisted(p.fqdn) AS allowlisted
+    cyber_sentinel_ai.is_allowlisted(p.fqdn) AS allowlisted,
+    EXISTS (SELECT 1 FROM cyber_sentinel_ai.pihole_block_log b
+            WHERE b.fqdn = p.fqdn AND b.status IN ('blocked', 'already_blocked')) AS blocked_in_pihole,
+    (SELECT remaining_today - reserve FROM cyber_sentinel_ai.v_vt_budget) AS vt_budget_left
 FROM tmp_pairs p;
 
 COMMIT;   -- change to ROLLBACK; for a dry run

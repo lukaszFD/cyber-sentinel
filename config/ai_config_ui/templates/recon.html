@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Deep recon{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Deep recon</h1>
+  <a class="btn ghost" href="{{ url_for('recon_prompt_page') }}">Recon analyst prompt →</a>
+</div>
+<p class="muted">Domains scored {{ settings.recon_min_score|num }} or higher get a second look: when the domain was registered, its certificate history and its web page (opened by urlscan.io from its own servers). An AI analyst says whether this confirms the verdict and may propose a score up to {{ settings.recon_max_deviation|num }} point(s) away. Verdicts are never changed automatically. Thresholds are in <a href="{{ url_for('settings_page') }}#stage-7">Settings</a>.</p>
+
+<div class="grid">
+  <section class="card">
+    <h2>Status</h2>
+    {% if settings.recon_enabled == 1 %}<p class="stat-sm"><span class="tag ok">ON</span> · runs hourly</p>{% else %}<p class="stat-sm"><span class="tag bad">OFF</span> — nothing is queued</p>{% endif %}
+    <dl class="kv">
+      <dt>New page scans today</dt><dd class="mono">{{ today }} / {{ settings.recon_daily_limit|num }}</dd>
+      <dt>Waiting in the queue</dt><dd class="mono">{{ pending }}</dd>
+      <dt>Scan visibility</dt><dd>{{ 'private' if settings.recon_private_scans == 1 else 'unlisted' }}</dd>
+      <dt>E-mail on score change</dt><dd>{{ 'on' if settings.recon_email_enabled == 1 else 'off' }}</dd>
+      <dt>Active prompt</dt><dd class="mono">{% if prompt %}<a href="{{ url_for('recon_prompt_page') }}">{{ prompt.version }}</a>{% else %}<span class="tag bad">none</span>{% endif %}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Results</h2>
+    <dl class="kv">
+      {% for st in statuses %}<dt><a href="{{ url_for('recon_page', status=st) }}">{{ 'score changed' if st == 'changed' else st }}</a></dt><dd class="mono">{{ counts.get(st, 0) }}</dd>{% endfor %}
+    </dl>
+    {% if status %}<p><a href="{{ url_for('recon_page') }}">Show all</a></p>{% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>Latest {{ ('score changed' if status == 'changed' else status) ~ ' ' if status }}results (up to 100)</h2>
+  <table class="list">
+    <thead><tr><th>When</th><th>Domain</th><th>Score</th><th>Second look</th><th>Domain age</th><th>Page</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="{{ 'row-active' if r.score_changed }}">
+        <td class="nowrap small">{{ r.started_at|dt }}</td>
+        <td class="mono">{{ r.fqdn }}<div class="muted small">{{ r.observable_ip or '' }}</div></td>
+        <td class="mono nowrap">
+          {% if r.proposed_score is not none and r.score_changed %}{{ r.original_score }} → <strong class="{{ 'bad-text' if r.proposed_score > r.original_score }}">{{ r.proposed_score }}</strong>
+          {% else %}{{ r.original_score or '—' }}{% endif %}
+        </td>
+        <td>
+          {% if r.stuck %}<span class="tag warn" title="running for more than {{ stuck_minutes }} minutes — the workflow run probably failed">stuck</span>
+          {% elif r.status != 'done' %}<span class="tag {{ 'bad' if r.status == 'error' }}">{{ r.status }}</span>
+          {% elif r.ai_status == 'failed' %}<span class="tag warn">AI failed</span><div class="muted small">facts only</div>
+          {% else %}<span class="tag {{ {'confirms': 'bad', 'contradicts': 'ok'}.get(r.supports_verdict, '') }}">{{ r.supports_verdict }}</span>
+            {% if r.confidence %}<div class="muted small">{{ r.confidence }}</div>{% endif %}{% endif %}
+        </td>
+        <td class="small nowrap">
+          {% if r.domain_age_days is not none %}<span class="{{ 'bad-text' if r.domain_age_days < 30 }}">{{ r.domain_age_days }} days</span>
+            <div class="muted small">{{ r.registrable_domain or '' }}</div>
+          {% elif r.status == 'done' %}<span class="muted">unknown</span>{% endif %}
+        </td>
+        <td>
+          {% if r.page_type %}<span class="tag {{ 'bad' if r.page_type in ['phishing', 'scam', 'malware_delivery', 'fake_update'] }}">{{ r.page_type }}</span>{% endif %}
+          {% if r.impersonated_brand %}<div class="small">as <strong>{{ r.impersonated_brand }}</strong></div>{% endif %}
+          {% if r.credential_harvesting %}<div class="small bad-text">asks for credentials</div>{% endif %}
+          {% if r.page_status and r.page_status != 'scanned' %}<div class="muted small">page {{ r.page_status | replace('_', ' ') }}</div>{% endif %}
+        </td>
+        <td><div class="row-actions">
+          {% if r.report_url|urlscan_link %}<a class="btn small ghost" href="{{ r.report_url|urlscan_link }}" target="_blank" rel="noopener noreferrer">Report</a>{% endif %}
+          {% if r.screenshot_url|urlscan_link %}<a class="btn small ghost" href="{{ r.screenshot_url|urlscan_link }}" target="_blank" rel="noopener noreferrer">Screenshot</a>{% endif %}
+          {% if r.status != 'running' or r.stuck %}
+          <form method="post" action="{{ url_for('recon_page', status=status) }}" data-confirm="Queue {{ r.fqdn }} again? This result is removed and the domain gets a new second look on the next run.">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <input type="hidden" name="id" value="{{ r.id }}">
+            <button class="btn small {{ 'primary' if r.status in ['error', 'running'] else 'ghost' }}" type="submit">{{ 'Retry' if r.status in ['error', 'running'] else 'Run again' }}</button>
+          </form>
+          {% endif %}
+        </div></td>
+      </tr>
+      {% if r.summary_en or r.analysis_pl or r.message or r.facts %}
+      <tr class="detail-row">
+        <td></td>
+        <td colspan="6">
+          <details>
+            <summary>{{ r.score_reason or r.page_title or r.message or 'details' }}</summary>
+            {% if r.analysis_pl %}<p>{{ r.analysis_pl }}</p>{% endif %}
+            {% if r.summary_en %}<p class="muted">{{ r.summary_en }}</p>{% endif %}
+            {% if r.indicators %}<ul class="flags">{% for i in r.indicators %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+            <dl class="kv">
+              <dt>Verdict</dt><dd>{{ r.original_score }} · {{ r.original_label or '' }}</dd>
+              {% if r.proposed_score is not none %}<dt>Proposed</dt><dd>{{ r.proposed_score }}{% if r.score_reason %} — {{ r.score_reason }}{% endif %}</dd>{% endif %}
+              {% if r.domain_registered_at %}<dt>Registered</dt><dd class="small">{{ r.domain_registered_at|dt }}{% if r.registrar %} · {{ r.registrar }}{% endif %}</dd>{% endif %}
+              {% if r.cert_count is not none %}<dt>Certificates</dt><dd class="small">{{ r.cert_count }}{% if r.cert_first_seen %}, first {{ r.cert_first_seen|dt }}{% endif %}</dd>{% endif %}
+              {% if r.final_url %}<dt>Final URL</dt><dd class="mono small">{{ r.final_url }}</dd>{% endif %}
+              {% if r.page_title %}<dt>Page title</dt><dd class="small">{{ r.page_title }}</dd>{% endif %}
+              {% set pc = (r.facts.page.certificates or [none])[0] if r.facts and r.facts.page else none %}
+              {% if pc %}<dt>Page certificate</dt><dd class="small">{{ pc.subject }} · {{ pc.issuer }} · from {{ (pc.valid_from or '?')[:10] }}</dd>{% endif %}
+              {% if r.facts and r.facts.page and r.facts.page.contacted_domains %}<dt>Loads from</dt><dd class="small mono">{{ r.facts.page.contacted_domains[:10]|join(', ') }}</dd>{% endif %}
+              {% set si = r.facts.same_ip_sites if r.facts else none %}
+              {% if si and si.status == 'ok' %}<dt>Same IP</dt><dd class="small mono">{% for x in si.sites[:10] %}{{ x.domain }}{% if x.malicious %} <span class="bad-text">(malicious)</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% if si.other_sites > 10 %} +{{ si.other_sites - 10 }}{% endif %}</dd>{% endif %}
+              {% if r.urlscan_score is not none %}<dt>urlscan.io score</dt><dd class="mono">{{ r.urlscan_score }}{% if r.urlscan_malicious %} · malicious{% endif %}</dd>{% endif %}
+              {% if r.message %}<dt>Message</dt><dd class="small">{{ r.message }}</dd>{% endif %}
+              {% if r.ai_error %}<dt>AI error</dt><dd class="small">{{ r.ai_error }}</dd>{% endif %}
+              {% if r.prompt_version %}<dt>Prompt</dt><dd class="mono small">{{ r.prompt_version }} · {{ r.ai_model }}</dd>{% endif %}
+              {% if r.finished_at %}<dt>Finished</dt><dd class="small">{{ r.finished_at|dt }}</dd>{% endif %}
+            </dl>
+            {% if r.facts %}<details><summary>All collected facts</summary><pre class="json">{{ r.facts|tojson(indent=2) }}</pre></details>{% endif %}
+          </details>
+        </td>
+      </tr>
+      {% endif %}
+    {% else %}
+      <tr><td colspan="7" class="muted">Nothing yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

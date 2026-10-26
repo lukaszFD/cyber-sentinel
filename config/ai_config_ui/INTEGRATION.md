@@ -1,8 +1,8 @@
 # AI Config Editor (`ai-config-ui`)
 
 Web UI for everything the n8n AI pipeline reads from Postgres: settings, the versioned
-AI Agent prompt, trusted infrastructure, manual allow-list + exclusions and the threat-scale
-wording. Runs as its own container (`10.10.10.8`) behind `nginx-proxy` and connects as a
+AI Agent prompt, trusted infrastructure, manual allow-list + exclusions, the threat-scale
+wording, and the Deep Recon results and recon analyst prompt. Runs as its own container (`10.10.10.8`) behind `nginx-proxy` and connects as a
 dedicated least-privilege role — never as `postgres` and never as the n8n role.
 
 | Piece | Where |
@@ -100,6 +100,10 @@ the other service names.
 | `dic_threat_levels` | `SELECT`, `UPDATE(description, action_recommended, is_malicious_flag)` — no INSERT/DELETE; malicious levels must stay a contiguous top range (deferred trigger) |
 | `config_change_log` | `SELECT` only; append-only for everyone except superusers |
 | `pihole_block_log` | `SELECT` only (written by n8n) — shown under Settings → Automatic blocking |
+| `recon_prompt_templates` | full DML; same guards as `prompt_templates` (active version read-only, exactly one active) |
+| `deep_recon`, `v_pending_recon` | `SELECT` only (written by n8n) — Deep recon page |
+| `v_vt_budget` | `SELECT` — VirusTotal calls today (Settings, step 2) |
+| `recon_requeue(id)` | `EXECUTE`; the only way to remove a `deep_recon` row (retry / run again) |
 | `dns_queries`, `verdict_audit`, `threat_*`, everything else | no access |
 | `CREATE` in any schema | no |
 
@@ -129,3 +133,15 @@ Pi-hole comment.
 - Pi-hole API base URL defaults to `http://10.10.10.4` (`pihole_api_base_url` in group_vars).
 - Every attempt — `blocked`, `already_blocked` or `error` with the reason — is written to
   `cyber_sentinel_ai.pihole_block_log`. To unblock, remove the domain in Pi-hole (Domains → Denylist).
+
+## Deep recon
+
+The Deep recon page lists the results of the Deep Recon workflow (`deep_recon`): verdict score and
+the score the recon analyst proposes, whether the second look confirms or contradicts the verdict,
+domain age, page type, impersonated brand, whether the page asks for credentials, and links to the
+urlscan.io report and screenshot. Links are rendered only when they point to `https://urlscan.io/`.
+The *score changed* filter shows the results that were e-mailed. *Retry* / *Run again* calls
+`recon_requeue()`; the verdict gets a new second look on the next hourly run if it is still within
+`recon_lookback_days`. A row that stays `running` for more than 30 minutes is shown as *stuck*.
+The recon analyst prompt is versioned like the AI Agent prompt (Deep recon → Recon analyst prompt);
+a version without `[[THREAT_SCALE]]` and `[[MAX_DEVIATION]]` cannot be activated.
