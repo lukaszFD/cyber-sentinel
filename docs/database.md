@@ -13,7 +13,7 @@ The SQL lives in [`config/postgres/`](https://github.com/lukaszFD/cyber-sentinel
 |---|---|---|---|
 | 1 | `db_deployment.sql` | 04.3 | `cyber_sentinel` schema, app role, tables, views |
 | 2 | `db_partitioning_retention.sql` | 04.3 | partitions, retention functions, pg_cron jobs |
-| 3 | `db_ai_pipeline.sql` | 04.3 | `cyber_sentinel_ai` schema, scoring, allow-list, work queue |
+| 3 | `db_ai_pipeline.sql` | 04.3 | `cyber_sentinel_ai` schema, scoring, allow-list, work queue, VirusTotal budget, Deep Recon |
 | 4 | `db_ai_config_editor.sql` | 04.5 | AI Config UI role, audit log, guard triggers |
 
 ## Schema `cyber_sentinel`

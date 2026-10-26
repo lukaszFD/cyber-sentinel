@@ -4,11 +4,65 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
+| [v2.1.0](#v210) | Stable | 26 October 2026 | VirusTotal budget, urlscan.io and Shodan context, Deep Recon |
 | [v2.0.0](#v200) | Stable | 7 October 2026 | PostgreSQL as the only database, AI agent pipeline, AI Config UI |
 | [v1.0.3](#v103) | Release | 5 September 2026 | Local inference on Hailo-10H (removed in v2.0.0) |
 | [v1.0.2-rc1](#v102-rc1) | Release candidate | 5 May 2026 | 1–5 threat scale, partitioning, unified Vault playbook |
 | [v1.0.1](#v101) | Release | — | Ansible deployment |
 | [v1.0.0](#v100) | Release | — | First version |
+
+---
+
+## v2.1.0
+
+More context for each verdict and a second look at high-scored domains. Upgrades v2.0.0 in place; no data is lost.
+
+### VirusTotal Budget
+
+The main workflow runs every minute instead of every 3 minutes, and `claim_next_observable()` decides whether a run may call VirusTotal.
+
+- Daily limit (500), per-minute limit (4) and a reserve kept per hour until the 00:00 UTC reset — `vt_daily_limit`, `vt_per_minute_limit`, `vt_reserve_per_hour`.
+- A backlog is cleared at up to 60 observables per hour instead of 20.
+- Every call is logged in `vt_lookup_log`; overlapping runs never take the same pair, and a failed run is retried after 15 minutes.
+- Calls used and left today are shown in the AI Config UI settings.
+
+### More Context in the Main Workflow
+
+- **Shodan InternetDB** for every IP (free, no key): open ports, software, known CVEs, tags and the hostnames seen on the IP.
+- **urlscan.io search** for observables above the VirusTotal gate: earlier scans of the domain's page (title, HTTP status, TLS issuer and certificate age, urlscan verdict) and other sites seen on the same IP.
+- Both are context for the AI agent and the e-mail; the rule score is unchanged. Prompt version 1.2 (inactive draft) describes the new evidence.
+- E-mail shows hostnames on the IP, related sites and the certificate; CVEs stay in the data for the AI only.
+
+### Deep Recon
+
+New hourly workflow that re-assesses verdicts scored ≥ `recon_min_score` (default 3).
+
+- Sources: RDAP (domain age, registrar), crt.sh (certificate history), urlscan.io page scan (page text, forms, certificate, domains the page loads from).
+- AI analyst without tools: confirms or contradicts the verdict and may propose a score within `recon_max_deviation`. Verdicts are never changed automatically.
+- E-mail when the proposed score differs from the verdict.
+- Page content is treated as untrusted: data only, scripts and comments stripped, URLs defanged.
+- New table `deep_recon`, queue `v_pending_recon`, versioned prompt in `recon_prompt_templates`.
+
+### AI Config UI
+
+- **Deep recon** page: results, filters, re-queue, links to urlscan.io reports.
+- Recon prompt editor with versions.
+- Settings for the VirusTotal budget, urlscan.io, Shodan and Deep Recon with plain descriptions.
+
+### Upgrading from v2.0.0
+
+The SQL scripts are idempotent; existing data stays.
+
+```bash
+cd ansible
+ansible-playbook 04_3_db_postgres.yml     --limit rpi5-prod
+ansible-playbook 04_5_ai_config_editor.yml --limit rpi5-prod
+ansible-playbook 04_6_post_config.yml      --limit rpi5-prod
+```
+
+- Set `vault_urlscanio_api_key` in `vault.yml`; if it was empty before, also run `06_1_initialize_provision_vault.yml`.
+- In n8n: publish *Deep Recon* and the re-imported main workflow; delete *Site Recon* if it was ever imported.
+- In the AI Config UI: activate prompt version 1.2.
 
 ---
 

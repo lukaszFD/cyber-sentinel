@@ -38,7 +38,9 @@ The pipeline's behaviour lives in the `cyber_sentinel_ai` schema and is changed 
 - prompts — versioned, with diff; exactly one version is active,
 - trusted infrastructure, manual allow-list and exclusions,
 - threat level wording,
-- simulator — runs live lookups and shows the score without touching the n8n queue.
+- simulator — runs live lookups and shows the score without touching the n8n queue,
+- Deep Recon — results, re-queue and the versioned recon prompt,
+- VirusTotal calls used and left today.
 
 The UI connects with its own least-privilege role; every change is written to `config_change_log`. Details: [AI Config UI integration](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/ai_config_ui/INTEGRATION.md).
 

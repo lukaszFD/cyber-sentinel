@@ -3,7 +3,7 @@
 Two workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), both imported by playbook 04.6:
 
 - **Automated Domain & IP Reputation Guard** — the main pipeline. Runs every minute and analyses one observable — a domain and the IP it resolved to — per run, as long as the VirusTotal budget allows it (see [VirusTotal Budget](#virustotal-budget)).
-- **Deep Recon** — runs hourly after the verdict: domain age, certificate history and the web page of high-scored domains, then an AI re-assessment. See [Deep Recon](#deep-recon).
+- **Deep Recon** — runs hourly (at :20) after the verdict: domain age, certificate history and the web page of high-scored domains, then an AI re-assessment. See [Deep Recon](#deep-recon).
 
 An earlier version is published in the n8n library: [Score DNS Threats with VirusTotal, Abuse.ch, HashiCorp Vault, and Gemini](https://n8n.io/workflows/14127-score-dns-threats-with-virustotal-abusech-hashicorp-vault-and-gemini/).
 
@@ -98,7 +98,7 @@ The workflow logs in with a Pi-hole application password, adds the domain with a
 
 ## Deep Recon
 
-Runs hourly. For verdicts with a final score ≥ `recon_min_score` (from the last `recon_lookback_days`) it collects what the main workflow does not, and lets an AI analyst re-assess the verdict. Verdicts are never changed automatically.
+Runs hourly at minute 20. For verdicts with a final score ≥ `recon_min_score` (from the last `recon_lookback_days`) it collects what the main workflow does not, and lets an AI analyst re-assess the verdict. Verdicts are never changed automatically.
 
 ```mermaid
 flowchart TD
