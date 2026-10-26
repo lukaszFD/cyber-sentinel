@@ -10,7 +10,7 @@
     Project
   </p>
   <p style="margin: 0 0 1.2rem; line-height: 1.9;">
-    <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v2.0.0" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v2.0.0&color=ff9800&style=flat-square"></a>
+    <a href="https://github.com/lukaszFD/cyber-sentinel/releases/tag/v2.1.0" target="_blank"><img alt="version" src="https://img.shields.io/static/v1?label=version&message=v2.1.0&color=ff9800&style=flat-square"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/blob/main/LICENSE" target="_blank"><img alt="license" src="https://img.shields.io/github/license/lukaszFD/cyber-sentinel?style=flat-square&color=blue" style="margin-left:6px;"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/commits/main" target="_blank"><img alt="last commit" src="https://img.shields.io/github/last-commit/lukaszFD/cyber-sentinel?style=flat-square&color=brightgreen" style="margin-left:6px;"></a>
     <a href="https://github.com/lukaszFD/cyber-sentinel/stargazers" target="_blank"><img alt="stars" src="https://img.shields.io/github/stars/lukaszFD/cyber-sentinel?style=flat-square&logo=github" style="margin-left:6px;"></a>
@@ -77,14 +77,15 @@ Cyber Sentinel turns raw DNS traffic into decisions. Every new domain seen on th
 ### 🛡️ Problems Solved
 
 * **Analysis fatigue:** thousands of DNS queries a day are filtered and scored automatically; only real threats reach a human.
-* **Scattered CTI:** VirusTotal, ThreatFox and URLhaus results are combined into one 1–5 score with a rationale in English and Polish.
+* **Scattered CTI:** VirusTotal, ThreatFox and URLhaus results are combined into one 1–5 score with a rationale in English and Polish; Shodan InternetDB and urlscan.io add context (open ports, hostnames, the page, other sites on the same IP).
 * **Slow response:** confirmed malicious domains are added to the Pi-hole denylist and reported by email straight away.
 * **Exposed secrets:** all API keys and credentials live in [**HashiCorp Vault**](https://www.hashicorp.com/en/products/vault), not in containers or the repo.
 
 ### ⚙️ How It Works
 
 * **Rules first, AI second:** a rule-based score is computed in PostgreSQL; a **Gemini** AI agent in **n8n** reviews it, using past verdicts from **pgvector** memory, within limits set in the database.
-* **Noise filtering:** Tranco top domains, a manual allow-list and trusted infrastructure are skipped before any API call.
+* **Noise filtering:** Tranco top domains, a manual allow-list and trusted infrastructure are skipped before any API call; the VirusTotal free quota is paced in the database.
+* **Second look:** *Deep Recon* re-assesses high-scored verdicts with domain age (RDAP), certificate history (crt.sh) and a urlscan.io page scan, and e-mails when the score should change.
 * **Configuration outside the workflow:** thresholds, prompts (versioned), allow-lists and threat levels are edited in the **AI Config** web UI and stored in the database — the workflow only reads them. Every change is audited.
 * **Hardened infrastructure:** Raspberry Pi 5, Docker images pinned by digest, Nginx with TLS in front of every service, deployed end-to-end with Ansible.
 
@@ -111,7 +112,7 @@ Cyber Sentinel turns raw DNS traffic into decisions. Every new domain seen on th
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">
     <strong>🤖 <a href="n8n/">n8n Workflows</a></strong><br>
-    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI agent pipeline: enrichment, scoring, alerts, auto-block</span>
+    <span style="font-size: 0.875rem; color: var(--md-default-fg-color--light);">AI agent pipeline and Deep Recon: enrichment, scoring, alerts, auto-block</span>
   </div>
 
   <div style="padding: 1rem 1.1rem; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px;">

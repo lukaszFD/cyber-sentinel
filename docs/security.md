@@ -6,7 +6,7 @@ Security fixes are provided only for the current major version:
 
 | Version | Status |
 |---------|--------|
-| 2.0.x   | ✅ Supported |
+| 2.x (2.0, 2.1) | ✅ Supported — latest: 2.1.0 |
 | 1.x (including 1.0.2-rc1, 1.0.3) | ❌ Not supported — upgrade to 2.0 |
 
 ## Reporting a Vulnerability
