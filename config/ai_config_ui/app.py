@@ -4,7 +4,8 @@ Cyber Sentinel — AI config editor.
 Small server-rendered web UI for the data that drives the n8n AI pipeline
 (schema cyber_sentinel_ai): pipeline/scoring settings, versioned AI Agent
 prompt, trusted infrastructure, manual domain allow-list + exclusions, the
-threat-scale wording, and the Deep Recon results and prompt. Connects to
+threat-scale wording, the Deep Recon results and prompt, and the own
+blocklists (review queue, name patterns, classifier prompt). Connects to
 Postgres as a dedicated least-privilege role (see
 config/postgres/db_ai_config_editor.sql) — never as postgres or as the n8n
 app role.
@@ -369,6 +370,68 @@ SETTING_HELP = {
         "raise": "On — private scans. Keep the daily limit at 50 or lower.",
         "lower": "Off — unlisted scans (up to 1000 per day on the free plan).",
     },
+    "blocklist_publish_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 8, "switch": True,
+        "label": "Publish the lists to GitHub",
+        "what": "Once a day the lists are compared with the sentinel-blocklists repository. When they differ, one "
+                "pull request is opened or updated; you merge it on GitHub and Pi-hole picks the change up on its "
+                "next list update. The publish log on the Blocklists page shows every run.",
+        "raise": "On — a pull request appears whenever the lists change. Keep it off on the dev server.",
+        "lower": "Off — dry run: nothing is sent to GitHub, the log still shows what would change.",
+    },
+    "blocklist_malicious_ttl_days": {
+        "min": 1, "max": 3650, "integer": True, "stage": 8,
+        "label": "Keep malicious domains on the list for (days)",
+        "what": "A domain that Pi-hole blocked automatically stays on the public malicious list this long after its "
+                "last block. Every new block starts the period again.",
+        "raise": "Old threats stay blocked longer, also on the backup Pi-hole.",
+        "lower": "The list stays short and current; a domain that returns is listed again after its next detection.",
+    },
+    "blocklist_ai_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 8, "switch": True,
+        "label": "Look for telemetry and tracking with AI",
+        "what": "Once a day, domains your devices reached whose name looks like telemetry or tracking (see Name "
+                "patterns on the Blocklists page) are shown to the AI, without any antivirus lookups. Likely "
+                "telemetry and tracking domains wait for your approval; nothing is blocked before that.",
+        "raise": "On — new candidates appear on the Blocklists page and you get an e-mail about them.",
+        "lower": "Off — only the malicious list and domains you add yourself are published.",
+    },
+    "blocklist_ai_daily_limit": {
+        "min": 1, "max": 2000, "integer": True, "stage": 8,
+        "label": "Domains checked by AI per day (at most)",
+        "what": "Caps the AI work per day. Domains that do not fit wait for the next day, most queried first.",
+        "raise": "A backlog is cleared faster; more AI requests per day.",
+        "lower": "Fewer AI requests; new domains take longer to be proposed.",
+    },
+    "blocklist_ai_batch_size": {
+        "min": 1, "max": 100, "integer": True, "stage": 8,
+        "label": "Domains per AI request",
+        "what": "How many domains the AI looks at in one request.",
+        "raise": "Fewer requests (helps with the free plan's per-minute limit); a failed request delays more domains.",
+        "lower": "More, smaller requests; a failure affects fewer domains.",
+    },
+    "blocklist_lookback_days": {
+        "min": 1, "max": 90, "integer": True, "stage": 8,
+        "label": "Consider domains from the last (days)",
+        "what": "Only domains your devices reached within this period are considered.",
+        "raise": "Rarely used domains are found too.",
+        "lower": "Only current traffic counts.",
+    },
+    "blocklist_min_queries": {
+        "min": 1, "max": 100000, "integer": True, "stage": 8,
+        "label": "Queried at least (times)",
+        "what": "Telemetry calls home again and again; a domain asked for only once or twice is skipped. Answers "
+                "Pi-hole serves from its cache are not counted, so real numbers are higher.",
+        "raise": "Only the chattiest domains are checked — fewer AI requests.",
+        "lower": "Occasional domains are checked too.",
+    },
+    "blocklist_ai_min_confidence": {
+        "min": 1, "max": 3, "integer": True, "stage": 8,
+        "label": "Propose from AI confidence (1 low · 2 medium · 3 high)",
+        "what": "AI answers below this confidence are kept for reference but not proposed for review.",
+        "raise": "3 — only well-known telemetry and tracking endpoints reach the review queue.",
+        "lower": "1 — every guess is proposed; more to review.",
+    },
 }
 
 # The n8n AI workflow, in the order a domain goes through it.
@@ -384,6 +447,9 @@ PIPELINE_STEPS = {
     7: ("Deep recon", "A separate hourly workflow takes a second look at high-scored domains: domain age, "
                       "certificate history and the web page. An AI analyst may propose a different score; "
                       "nothing is changed automatically."),
+    8: ("Own blocklists", "Malicious domains plus telemetry and tracking you approved go to your public "
+                          "sentinel-blocklists repository, which Pi-hole downloads. Every change waits for "
+                          "your merge on GitHub."),
 }
 
 TF_UH_STATUSES = ["ok", "no_data", "not_checked", "error"]
@@ -391,6 +457,8 @@ AUDITED_TABLES = [
     "cyber_sentinel_ai.ai_settings",
     "cyber_sentinel_ai.prompt_templates",
     "cyber_sentinel_ai.recon_prompt_templates",
+    "cyber_sentinel_ai.blocklist_prompt_templates",
+    "cyber_sentinel_ai.blocklist_name_patterns",
     "cyber_sentinel_ai.trusted_infrastructure",
     "cyber_sentinel_ai.domain_allowlist",
     "cyber_sentinel_ai.domain_allowlist_exclusions",
@@ -1526,6 +1594,231 @@ def recon_prompt_page():
                        if f"{m.group(1)}{i}" not in existing), "") if m else ""
     return render_template("recon_prompt.html", rows=rows, shown=shown, active=active, suggestion=suggestion,
                            report=_placeholder_report(shown["system_prompt"]) if shown else None)
+
+
+# ============================================================
+# Routes — own blocklists (sentinel-blocklists)
+# ============================================================
+# Review queue and list contents (blocklist_entries), name patterns and the
+# classifier prompt. Rows are never deleted: "Remove" = rejected, which
+# also keeps the AI and the malicious sync from adding the domain again.
+
+BLOCKLISTS = ["malicious", "tracking", "telemetry"]
+BLOCKLIST_STATUSES = ["candidate", "approved", "expired", "rejected"]
+BLOCKLIST_PAGE_SIZE = 200
+PATTERN_RE = re.compile(r"^[a-z0-9.-]{3,50}$")
+
+
+def _blocklist_ids(form):
+    try:
+        ids = sorted({int(v) for v in form.getlist("id")})
+    except ValueError as exc:
+        raise ValueError("Invalid selection.") from exc
+    if not ids:
+        raise ValueError("Select at least one domain.")
+    return ids
+
+
+@app.route("/blocklists", methods=["GET", "POST"])
+@login_required
+def blocklists_page():
+    list_name = request.args.get("list", "")
+    if list_name not in BLOCKLISTS:
+        list_name = ""
+    status = request.args.get("status", "candidate")
+    if status not in BLOCKLIST_STATUSES:
+        status = "candidate"
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        user = session.get("user")
+        try:
+            with db() as conn:
+                if action in ("approve", "reject"):
+                    ids = _blocklist_ids(request.form)
+                    new = "approved" if action == "approve" else "rejected"
+                    rows = conn.execute(
+                        "UPDATE blocklist_entries SET status = %s, reviewed_by = %s, reviewed_at = LOCALTIMESTAMP "
+                        "WHERE id = ANY (%s) AND status <> %s RETURNING fqdn",
+                        (new, user, ids, new)).fetchall()
+                    if rows:
+                        names = ", ".join(r["fqdn"] for r in rows[:5]) + (f" and {len(rows) - 5} more" if len(rows) > 5 else "")
+                        flash(f"{'Approved' if new == 'approved' else 'Rejected'}: {names}. "
+                              f"The next daily run puts the change into the pull request.", "ok")
+                    else:
+                        flash("No changes.", "info")
+                elif action == "add":
+                    fqdn = _normalize_domain(request.form.get("domain"))
+                    target = request.form.get("list_name", "")
+                    if target not in BLOCKLISTS:
+                        raise ValueError("Choose a list.")
+                    note = request.form.get("note", "").strip()[:200] or None
+                    existing = conn.execute("SELECT status FROM blocklist_entries WHERE fqdn = %s AND list_name = %s",
+                                            (fqdn, target)).fetchone()
+                    if existing:
+                        raise ValueError(f"{fqdn} is already on the {target} list (status: {existing['status']}). "
+                                         f"Use Approve on that row instead.")
+                    if conn.execute("SELECT blocklist_is_protected(%s) AS v", (fqdn,)).fetchone()["v"]:
+                        raise ValueError(f"{fqdn} is covered by a manual allow-list entry and would never be published. "
+                                         f"Remove the allow-list entry first.")
+                    conn.execute("INSERT INTO blocklist_entries (fqdn, list_name, status, source, note, reviewed_by, reviewed_at) "
+                                 "VALUES (%s, %s, 'approved', 'manual', %s, %s, LOCALTIMESTAMP)",
+                                 (fqdn, target, note, user))
+                    flash(f"Added {fqdn} to the {target} list. It goes into the next daily pull request.", "ok")
+                else:
+                    abort(400)
+        except (ValueError, KeyError) as exc:
+            flash(str(exc) if isinstance(exc, ValueError) else "A required field is missing.", "error")
+        except psycopg.Error as exc:
+            flash(f"Database error: {db_error(exc)}", "error")
+        return redirect(url_for("blocklists_page", list=list_name or None, status=status))
+
+    with db(readonly=True) as conn:
+        s = {r["key"]: r["value"] for r in conn.execute(
+            "SELECT key, value FROM ai_settings WHERE starts_with(key, 'blocklist_')").fetchall()}
+        counts = {}
+        for r in conn.execute(
+                "SELECT list_name, CASE WHEN status = 'approved' AND expires_at <= LOCALTIMESTAMP THEN 'expired' "
+                "ELSE status END AS st, count(*) AS n FROM blocklist_entries GROUP BY 1, 2").fetchall():
+            counts.setdefault(r["list_name"], {})[r["st"]] = r["n"]
+        published = {r["list_name"]: r["n"] for r in conn.execute(
+            "SELECT list_name, count(*) AS n FROM v_blocklist_published GROUP BY 1").fetchall()}
+        queue = conn.execute("SELECT count(*) AS n FROM v_blocklist_ai_queue").fetchone()["n"]
+        today = conn.execute("SELECT count(*) AS n FROM blocklist_classifications "
+                             "WHERE classified_at >= CURRENT_DATE").fetchone()["n"]
+        prompt = conn.execute("SELECT version FROM blocklist_prompt_templates WHERE is_active").fetchone()
+        runs = conn.execute("SELECT * FROM blocklist_publish_log ORDER BY run_at DESC, id DESC LIMIT 10").fetchall()
+        rows = conn.execute(
+            "SELECT e.*, c.category, c.vendor, c.confidence, c.breakage_risk, c.reason, c.matched_pattern, "
+            "c.query_count, c.classified_at, blocklist_is_protected(e.fqdn) AS protected "
+            "FROM blocklist_entries e LEFT JOIN blocklist_classifications c ON c.fqdn = e.fqdn "
+            "WHERE (%(list)s = '' OR e.list_name = %(list)s) AND CASE %(st)s "
+            "  WHEN 'approved' THEN e.status = 'approved' AND (e.expires_at IS NULL OR e.expires_at > LOCALTIMESTAMP) "
+            "  WHEN 'expired'  THEN e.status = 'approved' AND e.expires_at <= LOCALTIMESTAMP "
+            "  ELSE e.status = %(st)s END "
+            "ORDER BY CASE c.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, "
+            "         c.query_count DESC NULLS LAST, e.updated_at DESC, e.fqdn "
+            "LIMIT %(lim)s",
+            {"list": list_name, "st": status, "lim": BLOCKLIST_PAGE_SIZE}).fetchall()
+        files = conn.execute("SELECT blocklist_render() AS f").fetchone()["f"] if request.args.get("files") else None
+    total = sum(counts.get(l, {}).get("candidate", 0) for l in BLOCKLISTS)
+    return render_template("blocklists.html", settings=s, counts=counts, published=published, queue=queue,
+                           today=today, prompt=prompt, runs=runs, rows=rows, files=files, lists=BLOCKLISTS,
+                           statuses=BLOCKLIST_STATUSES, list_name=list_name, status=status,
+                           pending_total=total, page_size=BLOCKLIST_PAGE_SIZE)
+
+
+@app.route("/blocklists/patterns", methods=["GET", "POST"])
+@login_required
+def blocklist_patterns_page():
+    if request.method == "POST":
+        action = request.form.get("action")
+        try:
+            with db() as conn:
+                if action == "add":
+                    pattern = (request.form.get("pattern") or "").strip().lower()
+                    if not PATTERN_RE.match(pattern):
+                        raise ValueError("Pattern: 3–50 characters, lowercase letters, digits, dot and hyphen only.")
+                    note = request.form.get("note", "").strip()[:200] or None
+                    conn.execute("INSERT INTO blocklist_name_patterns (pattern, note) VALUES (%s, %s)", (pattern, note))
+                    flash(f"Added pattern '{pattern}'. Matching domains are checked on the next daily run.", "ok")
+                elif action == "toggle":
+                    r = conn.execute("UPDATE blocklist_name_patterns SET is_active = NOT is_active WHERE id = %s "
+                                     "RETURNING pattern, is_active", (int(request.form["id"]),)).fetchone()
+                    if r:
+                        flash(f"'{r['pattern']}': {'enabled' if r['is_active'] else 'disabled'}.", "ok")
+                elif action == "delete":
+                    r = conn.execute("DELETE FROM blocklist_name_patterns WHERE id = %s RETURNING pattern",
+                                     (int(request.form["id"]),)).fetchone()
+                    if r:
+                        flash(f"Deleted pattern '{r['pattern']}'.", "ok")
+                else:
+                    abort(400)
+        except (ValueError, KeyError) as exc:
+            flash(str(exc) if isinstance(exc, ValueError) else "A required field is missing.", "error")
+        except psycopg.errors.UniqueViolation:
+            flash("This pattern already exists.", "error")
+        except psycopg.Error as exc:
+            flash(f"Database error: {db_error(exc)}", "error")
+        return redirect(url_for("blocklist_patterns_page"))
+
+    with db(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT p.*, (SELECT count(*) FROM blocklist_classifications c WHERE c.matched_pattern = p.pattern) AS seen, "
+            "(SELECT count(*) FROM blocklist_classifications c WHERE c.matched_pattern = p.pattern "
+            " AND c.category IN ('telemetry', 'tracking')) AS hits "
+            "FROM blocklist_name_patterns p ORDER BY p.is_active DESC, p.pattern").fetchall()
+    return render_template("blocklist_patterns.html", rows=rows)
+
+
+def _get_blocklist_prompt(conn, version):
+    row = conn.execute("SELECT * FROM blocklist_prompt_templates WHERE version = %s", (version,)).fetchone()
+    if row is None:
+        abort(404, f"Blocklist prompt version '{version}' does not exist.")
+    return row
+
+
+@app.route("/blocklists/prompt", methods=["GET", "POST"])
+@login_required
+def blocklist_prompt_page():
+    if request.method == "POST":
+        action = request.form.get("action")
+        version = request.form.get("version", "").strip()
+        created = False
+        try:
+            with db() as conn:
+                if action == "new":
+                    text = request.form.get("system_prompt", "").replace("\r\n", "\n")
+                    notes = request.form.get("notes", "").strip() or None
+                    if not VERSION_RE.match(version):
+                        raise ValueError("Version name: 1–20 characters, letters, digits, dot, hyphen, underscore only.")
+                    if not text.strip():
+                        raise ValueError("Prompt text must not be empty.")
+                    conn.execute("INSERT INTO blocklist_prompt_templates (version, system_prompt, is_active, notes) "
+                                 "VALUES (%s, %s, FALSE, %s)", (version, text, notes))
+                    created = True
+                elif action == "activate":
+                    row = _get_blocklist_prompt(conn, version)
+                    # The workflow resolves no placeholders: anything in [[...]]
+                    # would reach the model as it is.
+                    found = sorted(set(PLACEHOLDER_RE.findall(row["system_prompt"])))
+                    if found:
+                        raise ValueError("Not activated — this prompt takes no placeholders, found: "
+                                         + ", ".join(f"[[{p}]]" for p in found))
+                    conn.execute("UPDATE blocklist_prompt_templates SET is_active = FALSE WHERE is_active")
+                    conn.execute("UPDATE blocklist_prompt_templates SET is_active = TRUE WHERE version = %s", (version,))
+                    flash(f"Active blocklist prompt: {version}. The Blocklist Candidates workflow uses it from its next run.", "ok")
+                elif action == "delete":
+                    _get_blocklist_prompt(conn, version)
+                    conn.execute("DELETE FROM blocklist_prompt_templates WHERE version = %s", (version,))
+                    flash(f"Deleted blocklist prompt version {version}.", "ok")
+                else:
+                    abort(400)
+        except ValueError as exc:
+            flash(str(exc), "error")
+        except psycopg.errors.UniqueViolation:
+            flash(f"Version '{version}' already exists.", "error")
+        except psycopg.Error as exc:
+            flash(f"Database error: {db_error(exc)}", "error")
+            created = False
+        if created:
+            flash(f"Created blocklist prompt version {version} (not active yet).", "ok")
+        return redirect(url_for("blocklist_prompt_page", v=version if created else None))
+
+    with db(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT version, is_active, notes, created_at, length(system_prompt) AS chars "
+            "FROM blocklist_prompt_templates ORDER BY is_active DESC, created_at DESC, version DESC").fetchall()
+        active = conn.execute("SELECT * FROM blocklist_prompt_templates WHERE is_active").fetchone()
+        shown = _get_blocklist_prompt(conn, request.args["v"]) if request.args.get("v") else active
+        existing = {r["version"] for r in rows}
+    base = active["version"] if active else "1.0"
+    m = re.match(r"^(.*?)(\d+)$", base)
+    suggestion = next((f"{m.group(1)}{i}" for i in range(int(m.group(2)) + 1, int(m.group(2)) + 1000)
+                       if f"{m.group(1)}{i}" not in existing), "") if m else ""
+    placeholders = sorted(set(PLACEHOLDER_RE.findall(shown["system_prompt"]))) if shown else []
+    return render_template("blocklist_prompt.html", rows=rows, shown=shown, active=active,
+                           suggestion=suggestion, placeholders=placeholders)
 
 
 # ============================================================

@@ -18,6 +18,9 @@
 #                                                 memory, scoring, allow-list,
 #                                                 work queue). Reads CTI tables,
 #                                                 never modifies `cyber_sentinel`.
+#               4. db_blocklists.sql            — own blocklists for Pi-hole
+#                                                 (sentinel-blocklists): entries,
+#                                                 AI classifications, publish log
 #
 # Depends on: - Playbook 04.2 (postgres_db container running, built from
 #               Dockerfile.postgres with pg_cron preloaded)
@@ -46,6 +49,7 @@
       - { name: "schema",       src: "db_deployment.sql" }
       - { name: "partitioning", src: "db_partitioning_retention.sql" }
       - { name: "ai_pipeline",  src: "db_ai_pipeline.sql" }
+      - { name: "blocklists",   src: "db_blocklists.sql" }
 
   tasks:
     # ============================================================
@@ -104,6 +108,18 @@
               docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_ai_pipeline_rendered.sql >> {{ postgres_init_log }} 2>&1
           register: pg_ai_result
           until: (pg_ai_result.rc | default(-1)) == 0
+          retries: 10
+          delay: 10
+
+        # Needs ai_settings, pihole_block_log and domain_allowlist from
+        # db_ai_pipeline.sql. Settings keep tuned values (ON CONFLICT DO NOTHING).
+        - name: "[04.3.1.6] Execute blocklists script (db_blocklists.sql)"
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- Blocklists Execution Date: $(date) ---" >> {{ postgres_init_log }}
+              docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_blocklists_rendered.sql >> {{ postgres_init_log }} 2>&1
+          register: pg_blocklists_result
+          until: (pg_blocklists_result.rc | default(-1)) == 0
           retries: 10
           delay: 10
 

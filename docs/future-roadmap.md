@@ -59,12 +59,12 @@ Replace `passive_dns` (dnsmasq) with Pi-hole's own query log as the source of `d
 
 ## 8. Own Blocklists (Telemetry and Tracking)
 
-Domains Pi-hole lets through that turn out to be telemetry or tracking go to own blocklists in a separate repository, which Pi-hole pulls as an adlist from `raw.githubusercontent.com`.
+Domains Pi-hole lets through that turn out to be telemetry or tracking go to own blocklists in a separate repository, [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists), which Pi-hole pulls as adlists from `raw.githubusercontent.com`. A third list carries the domains the main workflow blocked as malicious, so the backup Pi-hole gets them too. First version built (name patterns, AI classification, review, daily pull request) — see [n8n Workflows](n8n.md#own-blocklists). Still open: the query-interval pre-filter (needs section 7) and the optional category from the main workflow.
 
 - **Separate workflow, daily** — not part of the main workflow: telemetry is usually clean in VirusTotal and often in Tranco, so the main pipeline never sees it, and per-minute commits gain nothing because Pi-hole reads adlists only on a gravity update.
 - **Candidates** — domains allowed by Pi-hole, not yet on the own list and not allowlisted. A cheap pre-filter (name patterns such as `telemetry`, `metrics`, `analytics`; regular query intervals per device, which needs section 7) runs before AI.
 - **AI classification** — Gemini in batches, no VirusTotal calls; returns category (telemetry / tracking / ads / functional / unknown), vendor, confidence, breakage risk and a reason. Telemetry is a category, not a 1–5 score.
 - **Review** — results land in a staging table and are approved in the AI Config UI.
-- **Publication** — approved domains go to the list repository once a day as one pull request; the merge stays manual. Token: fine-grained PAT scoped to that repository, stored in Vault.
+- **Publication** — approved domains go to the list repository once a day as one pull request (one branch rebuilt daily, so one PR at a time); the merge stays manual. Token: fine-grained PAT scoped to that repository, stored in Vault.
 - Domains only (FQDN): Pi-hole does not block IPs, and telemetry often shares CDN IPs with normal sites.
 - Optional: the main workflow's AI returns the same category for domains it already analyses and adds telemetry/tracking hits to the staging table.

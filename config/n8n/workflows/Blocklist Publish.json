@@ -1,0 +1,1100 @@
+{
+  "name": "Blocklist Publish",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 5,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        300
+      ],
+      "id": "4c41be24-72b8-5cbb-b542-e6ee3bced9ba",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Publish settings\n// Target repository and branches. The PR branch is reset to main on every\n// run and gets the full generated files, so one open pull request always\n// shows the complete difference between the database and main.\n// Mode: Run Once for All Items.\n\nconst repo = 'lukaszFD/sentinel-blocklists';\nreturn [{\n  json: {\n    repo,\n    owner: repo.split('/')[0],\n    api: `https://api.github.com/repos/${repo}`,\n    base: 'main',\n    branch: 'n8n/daily-update',\n    lists: ['malicious', 'tracking', 'telemetry'],\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        300
+      ],
+      "id": "77fa320d-3618-51e7-9806-590115222c68",
+      "name": "Publish settings"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Pi-hole auto-blocks -> malicious list (approved, expiry extended by every\n-- new block). Separate statement from the render: the render must see\n-- these rows.\nSELECT cyber_sentinel_ai.blocklist_sync_malicious() AS sync;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        40,
+        300
+      ],
+      "id": "94d6037c-4d99-50b2-99e5-cde010e282a1",
+      "name": "Sync malicious list",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Full content of the three list files, generated from the database.\nSELECT cyber_sentinel_ai.blocklist_render()                            AS files,\n       cyber_sentinel_ai.setting('blocklist_publish_enabled')::int     AS publish_enabled,\n       (SELECT count(*) FROM cyber_sentinel_ai.blocklist_entries\n         WHERE status = 'candidate')                                    AS pending_review;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        260,
+        300
+      ],
+      "id": "77a65362-6e30-5c6e-8820-ff8697e95d73",
+      "name": "Render lists",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/github/blocklists",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        480,
+        300
+      ],
+      "id": "431df35f-2934-51d4-bd33-062af0ebfd57",
+      "name": "GitHub token",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Publish settings').first().json.api }}/branches/{{ $('Publish settings').first().json.base }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ],
+      "id": "0d6bb462-9eee-5262-bc9a-b01ba8c5a681",
+      "name": "Get main branch",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Plan list files\n// One item per list file: the generated content and its path in the repo.\n// Mode: Run Once for All Items.\n\nconst s = $('Publish settings').first().json;\nconst files = $('Render lists').first().json.files || {};\nreturn s.lists.map((list) => ({\n  json: { list, path: `lists/${list}.txt`, rendered: String(files[list] ?? '') },\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "id": "fca26fb5-7466-51a7-85ba-896e6b31e172",
+      "name": "Plan list files"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Publish settings').first().json.api }}/contents/{{ $json.path }}?ref={{ encodeURIComponent($('Get main branch').first().json.body?.commit?.sha || $('Publish settings').first().json.base) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.raw+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        300
+      ],
+      "id": "7fdb227b-dc45-568d-a8c2-2092d64e2556",
+      "name": "Get list file",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compare lists\n// Generated files vs the files on main. action:\n//   error      token missing, GitHub unreachable, main unreadable\n//   no_change  every file equal to main\n//   changed    at least one file differs (added / removed per list)\n// Mode: Run Once for All Items.\n\nconst s = $('Publish settings').first().json;\nconst render = $('Render lists').first().json;\nconst vault = $('GitHub token').first().json;\nconst main = $('Get main branch').first().json;\nconst plan = $('Plan list files').all().map((i) => i.json);\nconst got = $input.all().map((i) => i.json);\n\nconst entries = (text) => String(text || '').split('\\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));\nconst errText = (res) => String(res?.error?.message || res?.error || res?.body?.message || '').slice(0, 300);\n\nlet action = 'changed';\nlet message = null;\nconst changed = [];\nconst counts = {};\nlet added = 0;\nlet removed = 0;\n\nif (vault.error || !vault.data?.token) {\n  action = 'error';\n  message = 'Vault secret cyber-sentinel/api-keys/github/blocklists missing or unreadable - add vault_github_blocklists_token and run playbook 06.1.';\n} else if (main.error || main.statusCode !== 200 || !main.body?.commit?.sha) {\n  action = 'error';\n  message = main.statusCode === 401\n    ? 'GitHub rejected the token (HTTP 401) - expired or revoked? Create a new fine-grained PAT and re-run 06.1.'\n    : `Cannot read ${s.repo} ${s.base}: HTTP ${main.statusCode ?? '?'} ${errText(main)}`;\n} else {\n  for (let i = 0; i < plan.length; i++) {\n    const f = plan[i];\n    const res = got[i] || {};\n    let current = '';\n    if (res.statusCode === 200) {\n      current = typeof res.body === 'string' ? res.body : JSON.stringify(res.body ?? '');\n    } else if (res.statusCode !== 404) {\n      action = 'error';\n      message = `Cannot read ${f.path}: HTTP ${res.statusCode ?? '?'} ${errText(res)}`;\n      break;\n    }\n    const now = new Set(entries(f.rendered));\n    const before = new Set(entries(current));\n    const add = [...now].filter((d) => !before.has(d));\n    const rem = [...before].filter((d) => !now.has(d));\n    counts[f.list] = now.size;\n    added += add.length;\n    removed += rem.length;\n    if (current !== f.rendered) changed.push({ list: f.list, path: f.path, content: f.rendered, added: add, removed: rem });\n  }\n  if (action !== 'error' && changed.length === 0) action = 'no_change';\n}\n\nconst today = new Date().toISOString().slice(0, 10);\nconst listLines = changed.map((c) => {\n  const fmt = (arr, sign) => arr.slice(0, 50).map((d) => `  ${sign} ${d}`).join('\\n') + (arr.length > 50 ? `\\n  ... ${arr.length - 50} more` : '');\n  return `### ${c.list}.txt: +${c.added.length} -${c.removed.length}\\n` +\n    (c.added.length ? '```\\n' + fmt(c.added, '+') + '\\n```\\n' : '') +\n    (c.removed.length ? '```\\n' + fmt(c.removed, '-') + '\\n```\\n' : '');\n}).join('\\n');\n\nreturn [{\n  json: {\n    action,\n    message,\n    publish_enabled: Number(render.publish_enabled) === 1,\n    pending_review: Number(render.pending_review) || 0,\n    main_sha: main.body?.commit?.sha || null,\n    main_tree: main.body?.commit?.commit?.tree?.sha || null,\n    changed,\n    counts,\n    added,\n    removed,\n    commit_message: `Update lists: +${added} -${removed} (${today})`,\n    pr_title: 'Daily blocklist update',\n    pr_body: `Generated by Cyber Sentinel (n8n workflow \"Blocklist Publish\") on ${today}.\\n\\n` +\n      `Full difference between the Cyber Sentinel database and \\`main\\`. The branch is rebuilt every day; ` +\n      `merge when ready.\\n\\n${listLines}\\n\\nEntries now: ` +\n      Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ') + '.',\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        300
+      ],
+      "id": "c4926e93-3d19-50a1-bc27-e02b91ec4e40",
+      "name": "Compare lists"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e3e16e7d-fa6e-5441-9bac-0ad1a6d7178f",
+              "leftValue": "={{ $json.publish_enabled === true && $json.action !== 'error' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1580,
+        300
+      ],
+      "id": "abd10c46-3588-53ae-857f-6f26937df2a5",
+      "name": "Publishing on?"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Publish settings').first().json.api }}/pulls?state=open&base={{ $('Publish settings').first().json.base }}&head={{ encodeURIComponent($('Publish settings').first().json.owner + ':' + $('Publish settings').first().json.branch) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        300
+      ],
+      "id": "5fb85a56-a380-5f4c-84ef-9b0790ed8a0d",
+      "name": "Find open PR",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Publish settings').first().json.api }}/git/ref/heads/{{ $('Publish settings').first().json.branch }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2020,
+        300
+      ],
+      "id": "6b579f16-8fa8-5fb8-b811-a33369495179",
+      "name": "Get branch",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Plan PR\n//   write  lists differ from main: new commit on the PR branch, open or\n//          update the pull request\n//   close  lists equal main again (e.g. a candidate was rejected before\n//          the merge) and a pull request is still open: close it\n//   none   nothing to do\n// Mode: Run Once for All Items.\n\nconst cmp = $('Compare lists').first().json;\nconst prs = $('Find open PR').first().json;\nconst ref = $('Get branch').first().json;\nconst pr = prs.statusCode === 200 && Array.isArray(prs.body) && prs.body.length ? prs.body[0] : null;\n\nlet mode = 'none';\nif (cmp.action === 'changed') mode = 'write';\nelse if (cmp.action === 'no_change' && pr) mode = 'close';\n\nreturn [{\n  json: {\n    mode,\n    branch_exists: ref.statusCode === 200,\n    pr_number: pr?.number ?? null,\n    pr_url: pr?.html_url ?? null,\n    lookup_error: prs.statusCode === 200 ? null : `Cannot list pull requests: HTTP ${prs.statusCode ?? '?'}`,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        300
+      ],
+      "id": "3e8bd00d-57e5-5684-9976-becb67156108",
+      "name": "Plan PR"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5a14236c-af89-5ba0-a186-0735e76b2c1b",
+              "leftValue": "={{ $json.mode === 'write' && !$json.lookup_error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2460,
+        300
+      ],
+      "id": "2e9fe4c0-bebc-5299-b426-679cb4032e51",
+      "name": "Write commit?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Publish settings').first().json.api }}/git/trees",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ base_tree: $('Compare lists').first().json.main_tree, tree: $('Compare lists').first().json.changed.map((f) => ({ path: f.path, mode: '100644', type: 'blob', content: f.content })) }) }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2680,
+        300
+      ],
+      "id": "25379f62-75d4-52cb-9630-f7d3c343246e",
+      "name": "Create tree",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Publish settings').first().json.api }}/git/commits",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: $('Compare lists').first().json.commit_message, tree: $json.body?.sha, parents: [ $('Compare lists').first().json.main_sha ] }) }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2900,
+        300
+      ],
+      "id": "74d7df89-8acd-535b-8fb0-d8bf604ecbe7",
+      "name": "Create commit",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "={{ $('Plan PR').first().json.branch_exists ? 'PATCH' : 'POST' }}",
+        "url": "={{ $('Publish settings').first().json.api }}/git/{{ $('Plan PR').first().json.branch_exists ? 'refs/heads/' + $('Publish settings').first().json.branch : 'refs' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Plan PR').first().json.branch_exists ? { sha: $json.body?.sha, force: true } : { ref: 'refs/heads/' + $('Publish settings').first().json.branch, sha: $json.body?.sha }) }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        300
+      ],
+      "id": "069d4f81-b01d-5b6e-803e-0ba046f038e5",
+      "name": "Point branch at commit",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7eb21afa-64d5-5b1a-9ca5-62ccc4797980",
+              "leftValue": "={{ [200, 201].includes($json.statusCode) && $('Create commit').first().json.statusCode === 201 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3340,
+        300
+      ],
+      "id": "d7b87951-3e1c-50a2-b9fc-3109312b4357",
+      "name": "Branch updated?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "83d976f7-d17b-55f8-8389-465b6b3d8694",
+              "leftValue": "={{ $json.mode === 'close' && !!$json.pr_number }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2680,
+        560
+      ],
+      "id": "e80af717-4e77-590b-8945-ca43dca2e450",
+      "name": "Close stale PR?"
+    },
+    {
+      "parameters": {
+        "method": "={{ $('Plan PR').first().json.pr_number ? 'PATCH' : 'POST' }}",
+        "url": "={{ $('Publish settings').first().json.api }}/pulls{{ $('Plan PR').first().json.pr_number ? '/' + $('Plan PR').first().json.pr_number : '' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('GitHub token').first().json.data?.token ?? '' }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Plan PR').first().json.mode === 'close' ? { state: 'closed' } : $('Plan PR').first().json.pr_number ? { title: $('Compare lists').first().json.pr_title, body: $('Compare lists').first().json.pr_body } : { title: $('Compare lists').first().json.pr_title, body: $('Compare lists').first().json.pr_body, head: $('Publish settings').first().json.branch, base: $('Publish settings').first().json.base }) }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3560,
+        300
+      ],
+      "id": "3a152061-60d5-5ed3-b396-a5c2e859cfa9",
+      "name": "Open, update or close PR",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate result\n// One log row for every run, whichever path it took. Never throws.\n// Mode: Run Once for All Items.\n\nconst cmp = $('Compare lists').first().json;\nconst ran = (name) => $(name).isExecuted;\nconst res = (name) => (ran(name) ? $(name).first().json : null);\nconst errText = (r) => String(r?.error?.message || r?.error || r?.body?.message || '').slice(0, 300);\n\nlet status;\nlet message = cmp.message;\nlet prNumber = null;\nlet prUrl = null;\nconst plan = res('Plan PR');\n\nif (cmp.action === 'error') {\n  status = 'error';\n} else if (!cmp.publish_enabled) {\n  status = 'dry_run';\n  message = cmp.action === 'changed'\n    ? `Publishing disabled (blocklist_publish_enabled = 0): +${cmp.added} -${cmp.removed} not sent.`\n    : 'Publishing disabled (blocklist_publish_enabled = 0); lists equal main.';\n} else if (plan?.lookup_error) {\n  status = 'error';\n  message = plan.lookup_error;\n} else if (plan?.mode === 'write') {\n  const steps = [['Create tree', 201], ['Create commit', 201], ['Point branch at commit', null], ['Open, update or close PR', null]];\n  const failed = steps.find(([name, code]) => {\n    const r = res(name);\n    if (!r) return true;\n    return code ? r.statusCode !== code : ![200, 201].includes(r.statusCode);\n  });\n  if (failed) {\n    const r = res(failed[0]);\n    status = 'error';\n    message = r ? `${failed[0]}: HTTP ${r.statusCode ?? '?'} ${errText(r)}` : `${failed[0]} did not run (earlier step failed)`;\n  } else {\n    const pr = res('Open, update or close PR').body;\n    status = 'published';\n    prNumber = pr.number;\n    prUrl = pr.html_url;\n    message = `${plan.pr_number ? 'Updated' : 'Opened'} PR #${pr.number}: +${cmp.added} -${cmp.removed}.`;\n  }\n} else if (plan?.mode === 'close') {\n  const r = res('Open, update or close PR');\n  prNumber = plan.pr_number;\n  prUrl = plan.pr_url;\n  if (r && r.statusCode === 200) {\n    status = 'no_change';\n    message = `Lists equal main again; closed stale PR #${plan.pr_number}.`;\n  } else {\n    status = 'error';\n    message = `Could not close stale PR #${plan.pr_number}: HTTP ${r?.statusCode ?? '?'} ${errText(r)}`;\n  }\n} else {\n  status = 'no_change';\n  message = 'Lists equal main.';\n}\n\nreturn [{\n  json: {\n    log: {\n      status,\n      counts: cmp.counts,\n      added: cmp.action === 'error' ? null : cmp.added,\n      removed: cmp.action === 'error' ? null : cmp.removed,\n      pr_number: prNumber,\n      pr_url: prUrl,\n      message,\n    },\n    pending_review: cmp.pending_review,\n    changed: cmp.changed.map((c) => ({ list: c.list, added: c.added, removed: c.removed })),\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3780,
+        300
+      ],
+      "id": "8206047e-3eac-50c6-8e16-9116a0f73e70",
+      "name": "Evaluate result"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO cyber_sentinel_ai.blocklist_publish_log\n    (status, counts, added, removed, pr_number, pr_url, message)\nSELECT r->>'status', r->'counts', (r->>'added')::int, (r->>'removed')::int,\n       (r->>'pr_number')::int, r->>'pr_url', LEFT(r->>'message', 2000)\nFROM (SELECT $1::jsonb AS r) AS x\nRETURNING status;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.log) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4000,
+        300
+      ],
+      "id": "70278bfe-d77e-5ca0-a1d8-d98b29f4aff9",
+      "name": "Log publish run",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a30c901c-c239-5d84-aa7f-af667d08cab8",
+              "leftValue": "={{ $('Evaluate result').first().json.log.status === 'published' || ($('Evaluate result').first().json.log.status === 'error' && $('Compare lists').first().json.publish_enabled === true) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4220,
+        300
+      ],
+      "id": "605a1081-decf-595f-b37c-e59cfdba1c87",
+      "name": "E-mail?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        4440,
+        300
+      ],
+      "id": "ec5a2bd2-ce9f-5095-929d-50545cdab663",
+      "name": "Get Email Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build e-mail\n// Sent when a pull request was opened or updated (merge it on GitHub) and\n// when the run failed. Domain names are HTML-escaped.\n// Mode: Run Once for Each Item.\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\nconst r = $('Evaluate result').first().json;\nconst log = r.log;\nconst ok = log.status === 'published';\nconst prLink = typeof log.pr_url === 'string' && log.pr_url.startsWith('https://github.com/')\n  ? `<a style=\"color:#90caf9;\" href=\"${esc(log.pr_url)}\">PR #${esc(log.pr_number)}</a>` : '';\nconst lists = r.changed.map((c) =>\n  `<p style=\"margin:10px 0 2px;\"><strong>${esc(c.list)}.txt</strong>: +${c.added.length} -${c.removed.length}</p>` +\n  (c.added.length ? `<div style=\"font-family:monospace;color:#81c784;\">${c.added.slice(0, 30).map(esc).join('<br>')}${c.added.length > 30 ? '<br>…' : ''}</div>` : '') +\n  (c.removed.length ? `<div style=\"font-family:monospace;color:#ff8a80;\">${c.removed.slice(0, 30).map(esc).join('<br>')}${c.removed.length > 30 ? '<br>…' : ''}</div>` : '')\n).join('');\n\nreturn {\n  json: {\n    subject: ok\n      ? `[Cyber Sentinel] Blocklists: PR #${log.pr_number} ready to merge (+${log.added} -${log.removed})`\n      : '[Cyber Sentinel] Blocklists: publishing failed',\n    html: `<div style=\"font-family:Arial,sans-serif;background:#1e1e1e;color:#e0e0e0;padding:20px;\">\n<h2 style=\"margin:0 0 12px;\">${ok ? 'Own blocklists — pull request ready' : 'Own blocklists — publishing failed'}</h2>\n<p>${esc(log.message)} ${prLink}</p>\n${ok ? lists + '<p style=\"margin-top:14px;\">Pi-hole picks the change up after the merge, on its next gravity update.</p>' : ''}\n${r.pending_review ? `<p>${esc(r.pending_review)} candidate(s) still wait for review on the Blocklists page.</p>` : ''}\n</div>`,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4660,
+        300
+      ],
+      "id": "968447cc-a6a2-5af4-84b4-5d4af498a992",
+      "name": "Build e-mail"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Get Email Pass').item.json.data.user }}",
+        "toEmail": "={{ $('Get Email Pass').item.json.data.to }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        4880,
+        300
+      ],
+      "id": "7ca3c302-1855-5e4b-9e85-f5a33437c4e0",
+      "name": "Send an Email",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      },
+      "webhookId": "3038395a-4e01-58d6-aef5-c08dcb529803"
+    },
+    {
+      "parameters": {
+        "content": "# Cyber Sentinel — Blocklist Publish\n\nOnce a day: copies Pi-hole auto-blocks into the malicious list, generates the three list files from the database (`blocklist_render()`) and compares them with `main` of **lukaszFD/sentinel-blocklists**.\n\nIf they differ, the files go as **one commit** to the branch `n8n/daily-update` (rebuilt from `main` every day) and one pull request is opened or updated. **The merge stays manual** — a ruleset on `main` requires a pull request. A PR left open while the lists became equal to `main` again is closed.\n\n`blocklist_publish_enabled = 0` → dry run: compared and logged only. Token: Vault `cyber-sentinel/api-keys/github/blocklists` (fine-grained PAT for that repository only). Every run → `blocklist_publish_log`.",
+        "height": 240,
+        "width": 880
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -280
+      ],
+      "id": "7c7cd5a4-2520-5945-8782-7d6f7f4c14e6",
+      "name": "Note - overview"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "E-mail?": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Build e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Publish settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish settings": {
+      "main": [
+        [
+          {
+            "node": "Sync malicious list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync malicious list": {
+      "main": [
+        [
+          {
+            "node": "Render lists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render lists": {
+      "main": [
+        [
+          {
+            "node": "GitHub token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub token": {
+      "main": [
+        [
+          {
+            "node": "Get main branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get main branch": {
+      "main": [
+        [
+          {
+            "node": "Plan list files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan list files": {
+      "main": [
+        [
+          {
+            "node": "Get list file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get list file": {
+      "main": [
+        [
+          {
+            "node": "Compare lists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare lists": {
+      "main": [
+        [
+          {
+            "node": "Publishing on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publishing on?": {
+      "main": [
+        [
+          {
+            "node": "Find open PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evaluate result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find open PR": {
+      "main": [
+        [
+          {
+            "node": "Get branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get branch": {
+      "main": [
+        [
+          {
+            "node": "Plan PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan PR": {
+      "main": [
+        [
+          {
+            "node": "Write commit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write commit?": {
+      "main": [
+        [
+          {
+            "node": "Create tree",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close stale PR?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create tree": {
+      "main": [
+        [
+          {
+            "node": "Create commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create commit": {
+      "main": [
+        [
+          {
+            "node": "Point branch at commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Point branch at commit": {
+      "main": [
+        [
+          {
+            "node": "Branch updated?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Branch updated?": {
+      "main": [
+        [
+          {
+            "node": "Open, update or close PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evaluate result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close stale PR?": {
+      "main": [
+        [
+          {
+            "node": "Open, update or close PR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evaluate result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open, update or close PR": {
+      "main": [
+        [
+          {
+            "node": "Evaluate result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate result": {
+      "main": [
+        [
+          {
+            "node": "Log publish run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log publish run": {
+      "main": [
+        [
+          {
+            "node": "E-mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "fbb87d52-4776-5ec1-85e5-31df1394c109",
+  "meta": {
+    "instanceId": "4efa9d51e8a3979b61633a85e297802c7247ebfbaaec1d5e3e34069621598208"
+  },
+  "nodeGroups": [],
+  "id": "BlkPublish0001XY",
+  "tags": []
+}

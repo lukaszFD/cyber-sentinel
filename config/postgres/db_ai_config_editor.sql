@@ -1,7 +1,7 @@
 -- ============================================
 -- Cyber Sentinel — AI config editor (web UI) — POSTGRES
--- Version: 1.1 (Deep Recon: recon prompt versions, read-only recon results,
---               re-queue function; VirusTotal budget status)
+-- Version: 1.2 (Own blocklists: review queue, name patterns, classifier
+--               prompt versions, read-only classifications and publish log)
 -- ============================================
 -- Runs AFTER db_ai_pipeline.sql, as the `postgres` superuser, connected to
 -- `cyber_intelligence`. Rendered by Ansible (template module, playbook
@@ -31,6 +31,18 @@
 --   cyber_sentinel_ai.recon_requeue()          EXECUTE (the only way the UI
 --                                              removes a recon row)
 --   cyber_sentinel_ai.v_vt_budget             SELECT (VirusTotal calls today)
+--   cyber_sentinel_ai.blocklist_entries        SELECT, INSERT, UPDATE(status,
+--                                              note, expires_at, reviewed_by,
+--                                              reviewed_at) — review and manual
+--                                              entries; no DELETE (a rejected row
+--                                              keeps the AI from proposing it again)
+--   cyber_sentinel_ai.blocklist_name_patterns  SELECT, INSERT, UPDATE, DELETE
+--   cyber_sentinel_ai.blocklist_prompt_templates SELECT, INSERT, UPDATE, DELETE
+--   cyber_sentinel_ai.blocklist_classifications SELECT (written by n8n)
+--   cyber_sentinel_ai.blocklist_publish_log    SELECT (written by n8n)
+--   cyber_sentinel_ai.v_blocklist_ai_queue     SELECT
+--   cyber_sentinel_ai.v_blocklist_published    SELECT
+--   cyber_sentinel_ai.blocklist_render()       EXECUTE (file preview)
 --   cyber_sentinel.dic_threat_levels           SELECT, UPDATE(description,
 --                                              action_recommended,
 --                                              is_malicious_flag) — wording feeds
@@ -64,6 +76,8 @@
 --                               highest level is malicious
 --   trg_recon_prompt_guard()    + trg_recon_prompt_one_active(): the two
 --                               prompt guards above, for the Deep Recon prompt
+--   trg_blocklist_prompt_guard() + trg_blocklist_prompt_one_active(): the
+--                               same, for the blocklist classifier prompt
 --
 -- AUDIT ACTOR: the web UI runs
 --     SELECT set_config('cyber_sentinel_ai.actor', '<ui user>', true)
@@ -202,6 +216,8 @@ BEGIN
             ('cyber_sentinel_ai', 'ai_settings',                 'key'),
             ('cyber_sentinel_ai', 'prompt_templates',            'version'),
             ('cyber_sentinel_ai', 'recon_prompt_templates',      'version'),
+            ('cyber_sentinel_ai', 'blocklist_prompt_templates',  'version'),
+            ('cyber_sentinel_ai', 'blocklist_name_patterns',     'pattern'),
             ('cyber_sentinel_ai', 'trusted_infrastructure',      'id'),
             ('cyber_sentinel_ai', 'domain_allowlist',            'domain'),
             ('cyber_sentinel_ai', 'domain_allowlist_exclusions', 'domain'),
@@ -410,6 +426,64 @@ CREATE CONSTRAINT TRIGGER trg_recon_prompt_one_active
     FOR EACH ROW EXECUTE FUNCTION cyber_sentinel_ai.trg_recon_prompt_one_active();
 
 -- ============================================
+-- SECTION 4d: blocklist_prompt_templates — guards
+-- ============================================
+-- Same rules as Section 4, for the blocklist classifier prompt
+-- (blocklist_classifications.prompt_version references the versions).
+
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.trg_blocklist_prompt_guard()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.is_active THEN
+            RAISE EXCEPTION 'Blocklist prompt version % is active and cannot be deleted - activate another version first', OLD.version;
+        END IF;
+        RETURN OLD;
+    END IF;
+
+    IF OLD.is_active AND NEW.system_prompt IS DISTINCT FROM OLD.system_prompt THEN
+        RAISE EXCEPTION 'Blocklist prompt version % is active - its text cannot be edited; create a new version instead', OLD.version;
+    END IF;
+    IF NEW.version IS DISTINCT FROM OLD.version THEN
+        RAISE EXCEPTION 'Blocklist prompt versions cannot be renamed (blocklist_classifications.prompt_version references them)';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_blocklist_prompt_guard ON cyber_sentinel_ai.blocklist_prompt_templates;
+CREATE TRIGGER trg_blocklist_prompt_guard
+    BEFORE UPDATE OR DELETE ON cyber_sentinel_ai.blocklist_prompt_templates
+    FOR EACH ROW EXECUTE FUNCTION cyber_sentinel_ai.trg_blocklist_prompt_guard();
+
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.trg_blocklist_prompt_one_active()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    v_active INT;
+BEGIN
+    SELECT count(*) INTO v_active
+    FROM cyber_sentinel_ai.blocklist_prompt_templates
+    WHERE is_active;
+
+    IF v_active <> 1 THEN
+        RAISE EXCEPTION 'Exactly one blocklist prompt version must be active (found %)', v_active;
+    END IF;
+    RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_blocklist_prompt_one_active ON cyber_sentinel_ai.blocklist_prompt_templates;
+CREATE CONSTRAINT TRIGGER trg_blocklist_prompt_one_active
+    AFTER INSERT OR UPDATE OR DELETE ON cyber_sentinel_ai.blocklist_prompt_templates
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION cyber_sentinel_ai.trg_blocklist_prompt_one_active();
+
+-- ============================================
 -- SECTION 5: MANUAL ALLOW-LIST VIEW
 -- ============================================
 -- Simple single-table view => automatically updatable. DML on it runs with
@@ -454,6 +528,22 @@ GRANT SELECT ON cyber_sentinel_ai.v_pending_recon TO "{{ ai_config_db_user }}";
 GRANT EXECUTE ON FUNCTION cyber_sentinel_ai.recon_requeue(BIGINT) TO "{{ ai_config_db_user }}";
 -- VirusTotal budget status (Settings, step 2).
 GRANT SELECT ON cyber_sentinel_ai.v_vt_budget TO "{{ ai_config_db_user }}";
+
+-- Blocklists page: review candidates and add manual entries (no DELETE —
+-- rejected rows stay so the AI does not propose them again). Entries are
+-- not in the audit log (n8n adds hundreds a day); reviewed_by/_at record
+-- the decision on the row itself. Edit name
+-- patterns and classifier prompt versions, read what n8n wrote.
+GRANT SELECT, INSERT ON cyber_sentinel_ai.blocklist_entries TO "{{ ai_config_db_user }}";
+GRANT UPDATE (status, note, expires_at, reviewed_by, reviewed_at)
+             ON cyber_sentinel_ai.blocklist_entries TO "{{ ai_config_db_user }}";
+GRANT SELECT, INSERT, UPDATE, DELETE ON cyber_sentinel_ai.blocklist_name_patterns    TO "{{ ai_config_db_user }}";
+GRANT SELECT, INSERT, UPDATE, DELETE ON cyber_sentinel_ai.blocklist_prompt_templates TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.blocklist_classifications TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.blocklist_publish_log     TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.v_blocklist_ai_queue      TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.v_blocklist_published     TO "{{ ai_config_db_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_ai.blocklist_render() TO "{{ ai_config_db_user }}";
 
 GRANT SELECT                                   ON cyber_sentinel.dic_threat_levels        TO "{{ ai_config_db_user }}";
 GRANT UPDATE (description, action_recommended, is_malicious_flag) ON cyber_sentinel.dic_threat_levels TO "{{ ai_config_db_user }}";

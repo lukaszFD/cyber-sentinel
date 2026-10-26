@@ -2,7 +2,7 @@
 
 Web UI for everything the n8n AI pipeline reads from Postgres: settings, the versioned
 AI Agent prompt, trusted infrastructure, manual allow-list + exclusions, the threat-scale
-wording, and the Deep Recon results and recon analyst prompt. Runs as its own container (`10.10.10.8`) behind `nginx-proxy` and connects as a
+wording, the Deep Recon results and recon analyst prompt, and the own blocklists. Runs as its own container (`10.10.10.8`) behind `nginx-proxy` and connects as a
 dedicated least-privilege role — never as `postgres` and never as the n8n role.
 
 | Piece | Where |
@@ -104,6 +104,11 @@ the other service names.
 | `deep_recon`, `v_pending_recon` | `SELECT` only (written by n8n) — Deep recon page |
 | `v_vt_budget` | `SELECT` — VirusTotal calls today (Settings, step 2) |
 | `recon_requeue(id)` | `EXECUTE`; the only way to remove a `deep_recon` row (retry / run again) |
+| `blocklist_entries` | `SELECT`, `INSERT`, `UPDATE(status, note, expires_at, reviewed_by, reviewed_at)` — no DELETE: a rejected row keeps the domain from being proposed again |
+| `blocklist_name_patterns` | full DML |
+| `blocklist_prompt_templates` | full DML; same guards as `prompt_templates` |
+| `blocklist_classifications`, `blocklist_publish_log`, `v_blocklist_ai_queue`, `v_blocklist_published` | `SELECT` only (written by n8n) |
+| `blocklist_render()` | `EXECUTE` — preview of the generated files |
 | `dns_queries`, `verdict_audit`, `threat_*`, everything else | no access |
 | `CREATE` in any schema | no |
 
@@ -145,3 +150,16 @@ The *score changed* filter shows the results that were e-mailed. *Retry* / *Run 
 `recon_lookback_days`. A row that stays `running` for more than 30 minutes is shown as *stuck*.
 The recon analyst prompt is versioned like the AI Agent prompt (Deep recon → Recon analyst prompt);
 a version without `[[THREAT_SCALE]]` and `[[MAX_DEVIATION]]` cannot be activated.
+
+## Blocklists
+
+The Blocklists page shows the own blocklists published to sentinel-blocklists: candidates proposed
+by the AI with vendor, confidence and breakage risk, the published, expired and rejected entries of
+each list, and the last publish runs with links to the pull request. *Approve* / *Reject* work on the
+selected rows; *Remove* on a published entry sets it to rejected, so neither the AI nor the
+malicious sync adds it again. Domains can be added by hand to any list. A domain covered by a manual
+allow-list entry is shown greyed out and is never published. *Show the generated files* renders the
+three files the next run compares with the repository.
+
+Name patterns (Blocklists → Name patterns) decide which domains the AI sees. The classifier prompt is
+versioned like the other prompts and takes no placeholders.

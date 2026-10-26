@@ -30,6 +30,8 @@ One workflow, *Automated Domain & IP Reputation Guard*, runs every minute and ha
 
 A second workflow, *Deep Recon*, runs hourly and re-assesses verdicts scored ≥ `recon_min_score` with context the main workflow does not collect: domain registration (RDAP), certificate history (crt.sh) and the web page, which urlscan.io loads from its own infrastructure. An AI analyst without tools says whether this confirms the verdict and may propose a score within `recon_max_deviation`. Verdicts are not changed automatically: the result is stored in `deep_recon` and e-mailed when the proposed score differs.
 
+Two daily workflows build own Pi-hole blocklists: *Blocklist Candidates* lets Gemini classify domains whose names look like telemetry or tracking, and *Blocklist Publish* turns approved entries plus the Pi-hole auto-blocks into list files in the public repository sentinel-blocklists, through one pull request that is merged by hand.
+
 ## 3. AI Configuration
 
 The pipeline's behaviour lives in the `cyber_sentinel_ai` schema and is changed only through the **AI Config** web UI (`ai-config-ui`):
@@ -40,6 +42,7 @@ The pipeline's behaviour lives in the `cyber_sentinel_ai` schema and is changed 
 - threat level wording,
 - simulator — runs live lookups and shows the score without touching the n8n queue,
 - Deep Recon — results, re-queue and the versioned recon prompt,
+- own blocklists — review queue, list contents, name patterns, the versioned classifier prompt and the publish log,
 - VirusTotal calls used and left today.
 
 The UI connects with its own least-privilege role; every change is written to `config_change_log`. Details: [AI Config UI integration](https://github.com/lukaszFD/cyber-sentinel/blob/main/config/ai_config_ui/INTEGRATION.md).
