@@ -21,9 +21,9 @@
 # ------------------------------------------------------------
 
 # Local source directory where the Ansible playbook is run from
-# (on the controller host — Linux Mint). Used by playbooks 04.1–04.6
+# (controller host; derived from playbook_dir, works on any OS). Used by playbooks 04.1–04.6
 # to locate config files, Dockerfiles, SQL scripts and app sources.
-main_repo_source_dir: "/home/hunter/IdeaProjects/cyber-sentinel"
+main_repo_source_dir: "{{ playbook_dir | dirname }}"
 
 # Base directory on the remote host (VM/RPi) for deployment.
 # Resolves to /home/hunter on every target since deployment_user
