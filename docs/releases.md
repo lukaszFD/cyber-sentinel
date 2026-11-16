@@ -4,12 +4,81 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
+| [v2.2.0](#v220) | Stable | 16 November 2026 | Own Pi-hole blocklists: AI classification, review, daily pull request to sentinel-blocklists |
 | [v2.1.0](#v210) | Stable | 26 October 2026 | VirusTotal budget, urlscan.io and Shodan context, Deep Recon |
 | [v2.0.0](#v200) | Stable | 7 October 2026 | PostgreSQL as the only database, AI agent pipeline, AI Config UI |
 | [v1.0.3](#v103) | Release | 5 September 2026 | Local inference on Hailo-10H (removed in v2.0.0) |
 | [v1.0.2-rc1](#v102-rc1) | Release candidate | 5 May 2026 | 1–5 threat scale, partitioning, unified Vault playbook |
 | [v1.0.1](#v101) | Release | — | Ansible deployment |
 | [v1.0.0](#v100) | Release | — | First version |
+
+---
+
+## v2.2.0
+
+Own Pi-hole blocklists: domains that get through Pi-hole but should not — malicious, tracking, telemetry — are published as plain domain lists to the public repository [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists), which Pi-hole pulls as adlists. Upgrades v2.1.0 in place; no data is lost.
+
+### Three Lists
+
+- `lists/malicious.txt` — every Pi-hole auto-block of the main workflow, approved automatically. A domain stays `blocklist_malicious_ttl_days` (default 90) after its last block; a new block extends it. The backup Pi-hole gets these blocks too.
+- `lists/tracking.txt`, `lists/telemetry.txt` — AI classification, approved by a human.
+- Domains only, exact match, one per line: Pi-hole does not block IPs, and telemetry often shares CDN IPs with normal sites.
+- The database is the source of truth; `blocklist_render()` generates the files from it.
+
+### Blocklist Candidates (n8n, daily 03:20)
+
+- Candidates: domains with a public IPv4 answer in the last `blocklist_lookback_days`, queried at least `blocklist_min_queries` times, whose name contains an active pattern (`telemetry`, `metrics`, `analytics`, `track`, …), not classified yet and not on any list.
+- Gemini in batches (`blocklist_ai_batch_size`, at most `blocklist_ai_daily_limit` per day), **no VirusTotal calls**. Returns category (telemetry / tracking / ads / functional / unknown), vendor, confidence, breakage risk and a reason.
+- Telemetry and tracking at or above `blocklist_ai_min_confidence` become review candidates; an e-mail announces them. Answers about domains that were not in the batch are dropped.
+- A classified or rejected domain is never sent to the AI or proposed again.
+
+### Blocklist Publish (n8n, daily 05:20)
+
+- The branch `n8n/daily-update` is rebuilt from `main` on every run with the full generated files, so there is always one pull request showing the whole difference. A pull request left open after the lists became equal to `main` again is closed.
+- The merge stays manual (a ruleset on `main` of sentinel-blocklists requires a pull request).
+- `blocklist_publish_enabled = 0` (default) is a dry run: lists are generated, compared and logged only.
+- Every run is logged in `blocklist_publish_log` (dry run / no change / published / error); a new or updated pull request and errors are e-mailed.
+- A domain covered by a **manual** allow-list entry (the domain or a parent) is never published. Tranco entries and trusted infrastructure do not protect: telemetry usually sits on popular vendor domains.
+
+### AI Config UI
+
+- **Blocklists** page: candidates with vendor, confidence and breakage risk; approve / reject selected rows; published, expired and rejected entries per list; manual additions; last publish runs with links to the pull request; preview of the generated files.
+- *Remove* on a published entry sets it to rejected, so neither the AI nor the malicious sync adds it again.
+- **Name patterns** editor and a versioned **classifier prompt**.
+- Settings for all `blocklist_*` keys.
+
+### Database
+
+New script `db_blocklists.sql` (playbook 04.3): `blocklist_entries`, `blocklist_classifications`, `blocklist_name_patterns`, `blocklist_prompt_templates`, `blocklist_publish_log`, views `v_blocklist_ai_queue` and `v_blocklist_published`, functions `blocklist_record_classifications()`, `blocklist_sync_malicious()`, `blocklist_render()`, `blocklist_is_protected()`. The AI Config UI role gets matching grants (no DELETE on `blocklist_entries`).
+
+### Upgrading from v2.1.0
+
+The SQL scripts are idempotent; existing data and tuned settings stay.
+
+1. Create a fine-grained GitHub token for `lukaszFD/sentinel-blocklists` only — *Contents* and *Pull requests* read/write — and set it as `vault_github_blocklists_token` in `vault.yml`.
+2. Run the playbooks:
+
+```bash
+cd ansible
+ansible-playbook 06_1_initialize_provision_vault.yml --limit rpi5-prod
+ansible-playbook 04_3_db_postgres.yml               --limit rpi5-prod
+ansible-playbook 04_5_ai_config_editor.yml          --limit rpi5-prod
+ansible-playbook 04_6_post_config.yml               --limit rpi5-prod
+```
+
+3. In n8n: publish *Blocklist Candidates* and *Blocklist Publish* (imported inactive).
+4. Check a dry run in the AI Config UI (Blocklists → publish log), then set `blocklist_publish_enabled = 1`.
+5. In Pi-hole, add the adlists and run a gravity update:
+
+```
+https://raw.githubusercontent.com/lukaszFD/sentinel-blocklists/main/lists/malicious.txt
+https://raw.githubusercontent.com/lukaszFD/sentinel-blocklists/main/lists/tracking.txt
+https://raw.githubusercontent.com/lukaszFD/sentinel-blocklists/main/lists/telemetry.txt
+```
+
+### Next
+
+API call monitoring: counting real requests per provider and caller, VirusTotal's own quota counter, usage in the AI Config UI and alerts before the daily limit. See the [roadmap](future-roadmap.md#next-api-call-monitoring).
 
 ---
 
