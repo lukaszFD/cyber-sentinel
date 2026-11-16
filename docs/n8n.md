@@ -1,9 +1,10 @@
 # n8n Workflows
 
-Two workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), both imported by playbook 04.6:
+Four workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), all imported by playbook 04.6:
 
 - **Automated Domain & IP Reputation Guard** — the main pipeline. Runs every minute and analyses one observable — a domain and the IP it resolved to — per run, as long as the VirusTotal budget allows it (see [VirusTotal Budget](#virustotal-budget)).
 - **Deep Recon** — runs hourly (at :20) after the verdict: domain age, certificate history and the web page of high-scored domains, then an AI re-assessment. See [Deep Recon](#deep-recon).
+- **Blocklist Candidates** and **Blocklist Publish** — daily (03:20 and 05:20): own Pi-hole blocklists for malicious, tracking and telemetry domains, published to [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists). See [Own Blocklists](#own-blocklists).
 
 An earlier version is published in the n8n library: [Score DNS Threats with VirusTotal, Abuse.ch, HashiCorp Vault, and Gemini](https://n8n.io/workflows/14127-score-dns-threats-with-virustotal-abusech-hashicorp-vault-and-gemini/).
 
@@ -129,6 +130,31 @@ flowchart TD
 - **Untrusted page** — the page is attacker-controlled. Its text is passed only as data, comments and scripts are stripped, URLs are defanged, the model has no tools, and e-mail links point only to urlscan.io.
 - **Result** — `deep_recon`, one row per verdict. Raw RDAP and urlscan.io payloads go to `threat_data_raw` and are linked to the verdict's indicator. When the proposed score differs (`score_changed`) and `recon_email_enabled = 1`, an e-mail shows both scores, the reason, the page and the domain history.
 
+## Own Blocklists
+
+Domains that get through Pi-hole but should not — malicious ones the main workflow blocked, telemetry and tracking — are published as plain domain lists to the public repository **lukaszFD/sentinel-blocklists**. Pi-hole pulls them as adlists. The database is the source of truth; the files are generated from it.
+
+```mermaid
+flowchart TD
+    Q[dns_queries] --> P{name matches a pattern,<br>queried ≥ blocklist_min_queries}
+    P --> AI[Blocklist Candidates: Gemini in batches<br>telemetry / tracking / ads / functional / unknown]
+    AI --> C[blocklist_entries 'candidate']
+    C --> UI[AI Config UI: approve / reject]
+    B[pihole_block_log] --> M[malicious, approved,<br>expires after blocklist_malicious_ttl_days]
+    UI --> R[blocklist_render: 3 files]
+    M --> R
+    R --> D{equal to main?}
+    D -- no --> PR[one commit on n8n/daily-update,<br>open or update the pull request]
+    PR --> MG[manual merge] --> PH[Pi-hole gravity update]
+```
+
+- **Lists** — `lists/malicious.txt`, `lists/tracking.txt`, `lists/telemetry.txt`: one domain per line, exact match, no IPs.
+- **Candidates** — domains with a public IPv4 answer in the last `blocklist_lookback_days`, queried at least `blocklist_min_queries` times, whose name contains an active pattern (`blocklist_name_patterns`), not classified yet and not on any list. At most `blocklist_ai_daily_limit` per day, `blocklist_ai_batch_size` per request. No VirusTotal calls. Answers about domains that were not in the batch are dropped.
+- **Review** — telemetry and tracking at or above `blocklist_ai_min_confidence` wait for approval on the Blocklists page; an e-mail announces them. Rejected domains are kept and never proposed again.
+- **Malicious** — every Pi-hole auto-block is copied as approved; a new block extends the expiry. A rejected malicious domain stays rejected.
+- **Protection** — a domain covered by a manual allow-list entry is never published. Tranco entries and trusted infrastructure do not protect: telemetry usually sits on popular vendor domains.
+- **Publish** — the branch `n8n/daily-update` is rebuilt from `main` every run with the full generated files, so one pull request always shows the whole difference. A pull request left open after the lists became equal to `main` again is closed. The merge stays manual: a ruleset on `main` requires a pull request. `blocklist_publish_enabled = 0` (default) is a dry run — compared and logged only. Every run is logged in `blocklist_publish_log`; a new or updated pull request and errors are e-mailed.
+
 ## Secrets
 
 The workflows read secrets from HashiCorp Vault at run time:
@@ -142,5 +168,6 @@ The workflows read secrets from HashiCorp Vault at run time:
 | `cyber-sentinel/credentials/gmail` | Email: SMTP login and alert recipient (`to`) |
 | `cyber-sentinel/credentials/pihole-api` | Pi-hole API |
 | `cyber-sentinel/api-keys/urlscanio/api-key` | urlscan.io search (main) and page scans (Deep Recon) |
+| `cyber-sentinel/api-keys/github/blocklists` | GitHub fine-grained token for sentinel-blocklists: Contents and Pull requests read/write (Blocklist Publish) |
 
 The n8n credentials needed by the AI and database nodes (Vault token, PostgreSQL, Gemini, SMTP) are created with fixed IDs by playbook 06.2, so the imported workflows work without manual setup.

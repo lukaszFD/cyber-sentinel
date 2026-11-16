@@ -1,0 +1,508 @@
+{
+  "name": "Blocklist Candidates",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 3,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        300
+      ],
+      "id": "99958404-7bc7-5374-af86-ebc6b4f5d82f",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Settings, today's AI classifications and the active classifier prompt,\n-- read once per run.\nSELECT\n    (SELECT jsonb_object_agg(key, value) FROM cyber_sentinel_ai.ai_settings) AS settings,\n    (SELECT count(*) FROM cyber_sentinel_ai.blocklist_classifications\n      WHERE classified_at >= CURRENT_DATE)                                AS classified_today,\n    p.version                                                             AS prompt_version,\n    p.system_prompt\nFROM (SELECT 1) AS one\nLEFT JOIN cyber_sentinel_ai.blocklist_prompt_templates p ON p.is_active;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -180,
+        300
+      ],
+      "id": "8479dc18-276e-5a39-980c-7de91948c923",
+      "name": "Load blocklist configuration",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a0388047-b2ba-57df-8afe-5d458d6dd8a9",
+              "leftValue": "={{ Number($json.settings.blocklist_ai_enabled) === 1 && !!$json.system_prompt && Number($json.classified_today) < Number($json.settings.blocklist_ai_daily_limit) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        300
+      ],
+      "id": "dbecec06-17c2-5826-aa98-c4ad0bcf40d9",
+      "name": "AI enabled and budget left?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Domains waiting for classification (name pattern matched, not seen by the\n-- AI yet, not on any list, not protected by the manual allow-list), most\n-- queried first, up to what is left of today's limit.\nSELECT fqdn, matched_pattern, query_count, client_count\nFROM cyber_sentinel_ai.v_blocklist_ai_queue\nLIMIT $1;",
+        "options": {
+          "queryReplacement": "={{ [ Math.max(0, Number($json.settings.blocklist_ai_daily_limit) - Number($json.classified_today)) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        260,
+        300
+      ],
+      "id": "3ccb4476-7021-5c84-bba5-26ee73c4d208",
+      "name": "Load candidates",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build batches\n// Splits the candidates into batches of blocklist_ai_batch_size. Each batch\n// becomes one AI request: system message = active classifier prompt, user\n// message = the domains as JSON. Domain names are untrusted data.\n// Mode: Run Once for All Items.\n\nconst config = $('Load blocklist configuration').first().json;\nconst size = Math.min(100, Math.max(1, Math.trunc(Number(config.settings.blocklist_ai_batch_size) || 50)));\n// No rows: the Postgres node may still emit one item without fqdn.\nconst rows = $input.all().map((i) => i.json).filter((r) => typeof r.fqdn === 'string' && r.fqdn);\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += size) {\n  const queue = rows.slice(i, i + size).map((r) => ({\n    fqdn: r.fqdn,\n    matched_pattern: r.matched_pattern,\n    query_count: Number(r.query_count),\n    client_count: Number(r.client_count),\n  }));\n  out.push({\n    json: {\n      batch_no: out.length + 1,\n      system_message: config.system_prompt,\n      user_message: JSON.stringify({ domains: queue }, null, 2),\n      prompt_version: config.prompt_version,\n      queue,\n    },\n  });\n}\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ],
+      "id": "b330ea05-e6fb-57b3-a95a-7a94360954c6",
+      "name": "Build batches"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_message }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "={{ $json.system_message }}"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        700,
+        300
+      ],
+      "id": "aebaed2b-4562-5793-8e0a-c6d85cf21ee3",
+      "name": "Blocklist classifier",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "maxOutputTokens": 8192,
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        620,
+        520
+      ],
+      "id": "ad9211bd-bbc3-5ae3-9709-01fdf14ba2dc",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JJXaAGWm6Kg1DmUJ",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"results\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"fqdn\": {\n            \"type\": \"string\"\n          },\n          \"category\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"telemetry\",\n              \"tracking\",\n              \"ads\",\n              \"functional\",\n              \"unknown\"\n            ]\n          },\n          \"vendor\": {\n            \"type\": \"string\",\n            \"description\": \"Company or product, or empty string\"\n          },\n          \"confidence\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"low\",\n              \"medium\",\n              \"high\"\n            ]\n          },\n          \"breakage_risk\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"low\",\n              \"medium\",\n              \"high\"\n            ]\n          },\n          \"reason\": {\n            \"type\": \"string\",\n            \"description\": \"One short English sentence\"\n          }\n        },\n        \"required\": [\n          \"fqdn\",\n          \"category\",\n          \"vendor\",\n          \"confidence\",\n          \"breakage_risk\",\n          \"reason\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"results\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        840,
+        520
+      ],
+      "id": "5ab6719b-426b-502b-b2ee-f561d874cd66",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Validate classifications\n// Keeps only answers about domains that were in the batch, with valid\n// categories. A failed batch is stored as nothing: its domains stay in the\n// queue and are sent again on the next run.\n// Mode: Run Once for Each Item.\n\n// Keep in sync with the model selected in the \"Google Gemini Chat Model\" node.\nconst AI_MODEL = 'gemini-3.1-flash-lite';\nconst CATEGORIES = ['telemetry', 'tracking', 'ads', 'functional', 'unknown'];\nconst LEVELS = ['low', 'medium', 'high'];\n\nconst batch = $('Build batches').all()[$itemIndex].json;\nconst ai = $json; // { output: {...} } | { text: '...' } | { error: ... }\nconst sent = new Set(batch.queue.map((q) => q.fqdn));\n\nlet results = [];\nlet aiError = null;\ntry {\n  if (ai.error) throw new Error(typeof ai.error === 'string' ? ai.error : ai.error.message || JSON.stringify(ai.error));\n  let out = ai.output ?? ai.text ?? ai.response?.text;\n  if (typeof out === 'string') out = JSON.parse(out.replace(/^```(?:json)?\\s*|\\s*```$/g, ''));\n  if (out && typeof out === 'object' && out.output && typeof out.output === 'object') out = out.output;\n  if (!out || !Array.isArray(out.results)) throw new Error('classifier returned no \"results\" array');\n  for (const r of out.results) {\n    const fqdn = String(r?.fqdn ?? '').trim().toLowerCase().replace(/\\.$/, '');\n    const category = String(r?.category ?? '').trim().toLowerCase();\n    const confidence = String(r?.confidence ?? '').trim().toLowerCase();\n    const risk = String(r?.breakage_risk ?? '').trim().toLowerCase();\n    if (!sent.has(fqdn) || !CATEGORIES.includes(category) || !LEVELS.includes(confidence) || !LEVELS.includes(risk)) continue;\n    results.push({\n      fqdn,\n      category,\n      vendor: String(r.vendor ?? '').replace(/\\s+/g, ' ').trim().slice(0, 100),\n      confidence,\n      breakage_risk: risk,\n      reason: String(r.reason ?? '').replace(/\\s+/g, ' ').trim().slice(0, 500),\n    });\n  }\n} catch (e) {\n  aiError = String(e.message || e).slice(0, 500);\n  results = [];\n}\n\nreturn {\n  json: {\n    batch_no: batch.batch_no,\n    sent: batch.queue.length,\n    answered: results.length,\n    ai_error: aiError,\n    results,\n    queue: batch.queue,\n    ai_model: AI_MODEL,\n    prompt_version: batch.prompt_version,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "id": "8fff8b5e-3cd5-520c-b2d3-8707ffe59f7a",
+      "name": "Validate classifications"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Stores the batch: every answer in blocklist_classifications, telemetry /\n-- tracking at or above blocklist_ai_min_confidence as 'candidate' entries\n-- for review in the AI config UI.\nSELECT cyber_sentinel_ai.blocklist_record_classifications($1::jsonb, $2::jsonb, $3, $4) AS stored;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.results), JSON.stringify($json.queue), $json.ai_model, $json.prompt_version ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1140,
+        300
+      ],
+      "id": "7146f35b-c827-5050-a833-d4e699e401a4",
+      "name": "Store classifications",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Summarize run\n// One item for the whole run: totals and failed batches.\n// Mode: Run Once for All Items.\n\nconst stored = $input.all().map((i) => i.json.stored || {});\nconst batches = $('Validate classifications').all().map((i) => i.json);\nconst sum = (key) => stored.reduce((n, s) => n + Number(s[key] || 0), 0);\nconst pending = $('Load candidates').all().filter((i) => i.json.fqdn).length;\n\nreturn [{\n  json: {\n    batches: batches.length,\n    sent: sum('sent'),\n    stored: sum('stored'),\n    proposed: sum('proposed'),\n    failed_batches: batches.filter((b) => b.ai_error).map((b) => ({ batch_no: b.batch_no, error: b.ai_error })),\n    queue_loaded: pending,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        300
+      ],
+      "id": "5100d0bf-e1c2-52dd-8607-1f4b2754d4ca",
+      "name": "Summarize run"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d709ae41-3abf-5af5-9340-8113f1253465",
+              "leftValue": "={{ Number($json.proposed) > 0 || $json.failed_batches.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1580,
+        300
+      ],
+      "id": "d9e44519-1253-5aea-8053-96edca2e22d9",
+      "name": "New candidates?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        300
+      ],
+      "id": "c1acd62e-af0f-5721-a165-6fc11e512387",
+      "name": "Get Email Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build e-mail\n// New telemetry / tracking candidates wait for review in the AI config UI.\n// Mode: Run Once for Each Item.\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\nconst s = $('Summarize run').first().json;\nconst failed = s.failed_batches.length\n  ? `<p style=\"color:#ff5252;\">${s.failed_batches.length} AI batch(es) failed — their domains are retried on the next run.<br>` +\n    s.failed_batches.map((f) => `Batch ${esc(f.batch_no)}: ${esc(f.error)}`).join('<br>') + '</p>'\n  : '';\n\nreturn {\n  json: {\n    subject: `[Cyber Sentinel] Blocklists: ${s.proposed} new candidate(s) to review`,\n    html: `<div style=\"font-family:Arial,sans-serif;background:#1e1e1e;color:#e0e0e0;padding:20px;\">\n<h2 style=\"margin:0 0 12px;\">Own blocklists — review needed</h2>\n<p>The AI classified ${esc(s.stored)} domain(s); <strong>${esc(s.proposed)}</strong> were proposed for the telemetry or tracking list.</p>\n${failed}\n<p>Approve or reject them on the <strong>Blocklists</strong> page of the AI config UI. Approved domains go into the next daily pull request to sentinel-blocklists.</p>\n</div>`,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        300
+      ],
+      "id": "32cb7e45-96c9-5fbf-bd04-4c491fe79d50",
+      "name": "Build e-mail"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Get Email Pass').item.json.data.user }}",
+        "toEmail": "={{ $('Get Email Pass').item.json.data.to }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2240,
+        300
+      ],
+      "id": "defbab29-8409-5674-8ee7-f26c94186524",
+      "name": "Send an Email",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      },
+      "webhookId": "0964295b-6c28-590b-885d-bff6166345d3"
+    },
+    {
+      "parameters": {
+        "content": "# Cyber Sentinel — Blocklist Candidates\n\nOnce a day, domains from `dns_queries` whose name matches an active pattern (`blocklist_name_patterns`) and that the AI has not seen yet (`v_blocklist_ai_queue`) are classified by Gemini in batches: telemetry / tracking / ads / functional / unknown. **No VirusTotal calls.**\n\nTelemetry and tracking at or above `blocklist_ai_min_confidence` become **candidates** — nothing is published until a human approves them on the Blocklists page of the AI config UI. Publishing is the job of **Blocklist Publish**.\n\nSettings: `blocklist_*` in `ai_settings`; prompt: `blocklist_prompt_templates`.",
+        "height": 240,
+        "width": 880
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -280
+      ],
+      "id": "4db23c0b-4d84-5beb-985c-8005dd0384cc",
+      "name": "Note - overview"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "New candidates?": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Build e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load blocklist configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load blocklist configuration": {
+      "main": [
+        [
+          {
+            "node": "AI enabled and budget left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI enabled and budget left?": {
+      "main": [
+        [
+          {
+            "node": "Load candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load candidates": {
+      "main": [
+        [
+          {
+            "node": "Build batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build batches": {
+      "main": [
+        [
+          {
+            "node": "Blocklist classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blocklist classifier": {
+      "main": [
+        [
+          {
+            "node": "Validate classifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate classifications": {
+      "main": [
+        [
+          {
+            "node": "Store classifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store classifications": {
+      "main": [
+        [
+          {
+            "node": "Summarize run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize run": {
+      "main": [
+        [
+          {
+            "node": "New candidates?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Blocklist classifier",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Blocklist classifier",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "50fe9cf5-d09f-5a17-95e0-fa1f94c3682b",
+  "meta": {
+    "instanceId": "4efa9d51e8a3979b61633a85e297802c7247ebfbaaec1d5e3e34069621598208"
+  },
+  "nodeGroups": [],
+  "id": "BlkCandidates01X",
+  "tags": []
+}

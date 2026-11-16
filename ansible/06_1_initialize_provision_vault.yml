@@ -47,6 +47,7 @@
       - vault_abuse_api_key
       - vault_grafana_api_key
       - vault_urlscanio_api_key
+      - vault_github_blocklists_token
       - vault_pihole_admin_password
       - vault_grafana_password
       - vault_portainer_password
@@ -210,6 +211,9 @@
         - { path: "abuse/api-key",                  value: "{{ vault_abuse_api_key }}" }
         - { path: "grafana/api-key",                value: "{{ vault_grafana_api_key }}" }
         - { path: "urlscanio/api-key",              value: "{{ vault_urlscanio_api_key }}" }
+        # Fine-grained PAT, lukaszFD/sentinel-blocklists only: Contents and
+        # Pull requests read/write. Read by the "Blocklist Publish" workflow.
+        - { path: "github/blocklists",              value: "{{ vault_github_blocklists_token }}" }
 
     # ============================================================
     # SECTION 5 — CERTIFICATES
@@ -285,7 +289,8 @@
     # api-keys/* is granted as a whole subtree rather than one leaf
     # path per provider — CTI API keys are exactly the class of
     # secret the workflows exist to consume (urlscan.io is read by
-    # both the main workflow and Deep Recon), and a new provider
+    # both the main workflow and Deep Recon; the GitHub token for
+    # sentinel-blocklists by Blocklist Publish), and a new provider
     # shouldn't require a policy change to start using. Narrow this
     # to exact leaf paths if you want it tighter than that.
     #

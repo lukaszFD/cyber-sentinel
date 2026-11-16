@@ -62,6 +62,7 @@ vault_virus_total_token: ""
 vault_abuse_api_key: ""            # abuse.ch: ThreatFox + URLhaus
 vault_gemini_api_key: ""
 vault_urlscanio_api_key: ""        # urlscan.io: search (main workflow) + page scans (Deep Recon)
+vault_github_blocklists_token: ""  # fine-grained PAT, sentinel-blocklists only: Contents + Pull requests read/write
 vault_grafana_api_key: ""
 
 # Email alerts (Gmail)

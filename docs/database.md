@@ -14,7 +14,8 @@ The SQL lives in [`config/postgres/`](https://github.com/lukaszFD/cyber-sentinel
 | 1 | `db_deployment.sql` | 04.3 | `cyber_sentinel` schema, app role, tables, views |
 | 2 | `db_partitioning_retention.sql` | 04.3 | partitions, retention functions, pg_cron jobs |
 | 3 | `db_ai_pipeline.sql` | 04.3 | `cyber_sentinel_ai` schema, scoring, allow-list, work queue, VirusTotal budget, Deep Recon |
-| 4 | `db_ai_config_editor.sql` | 04.5 | AI Config UI role, audit log, guard triggers |
+| 4 | `db_blocklists.sql` | 04.3 | own blocklists: entries, AI classifications, name patterns, classifier prompt, publish log |
+| 5 | `db_ai_config_editor.sql` | 04.5 | AI Config UI role, audit log, guard triggers |
 
 ## Schema `cyber_sentinel`
 
@@ -73,6 +74,9 @@ erDiagram
     ai_analysis_results ||--o{ deep_recon : "second look"
     prompt_templates ||--o{ verdict_audit : "prompt_version"
     recon_prompt_templates ||--o{ deep_recon : "prompt_version"
+    blocklist_prompt_templates ||--o{ blocklist_classifications : "prompt_version"
+    blocklist_classifications ||--o| blocklist_entries : "fqdn (candidate)"
+    pihole_block_log ||--o{ blocklist_entries : "fqdn (malicious)"
     domain_allowlist_staging ||--o{ domain_allowlist : "weekly sync"
 ```
 
@@ -89,6 +93,9 @@ erDiagram
 | `domain_allowlist` | Domains never sent for analysis: Tranco top list (weekly) plus manual entries. |
 | `domain_allowlist_exclusions` | Platforms where anyone can publish under a subdomain (`github.io`, `ngrok.io`, …). They override Tranco entries. |
 | `v_manual_allowlist` | The only way to edit the allow-list from the UI — manual rows only. |
+| `blocklist_name_patterns` | Name fragments (`telemetry`, `track`, …) that make a domain a candidate for AI classification. |
+| `blocklist_prompt_templates` | Versioned system prompt for the blocklist classifier. Exactly one version is active. |
+| `blocklist_entries` | Own blocklists: one row per domain and list (`malicious`, `tracking`, `telemetry`) with status `candidate` / `approved` / `rejected`, source, expiry and who reviewed it. AI and the malicious sync add rows; the UI approves, rejects and adds manual ones. |
 
 **Pipeline data** — written by n8n
 
@@ -102,6 +109,10 @@ erDiagram
 | `pihole_block_log` | Every automatic Pi-hole block attempt and its result. |
 | `v_pending_recon` | Deep Recon queue: verdicts with score ≥ `recon_min_score` from the last `recon_lookback_days`, without a recent recon of the same domain. Empty while `recon_enabled = 0`. |
 | `deep_recon` | One row per re-assessed verdict: domain age and registrar (RDAP), certificate history (crt.sh), page scan (urlscan.io links and facts), and the analyst's result — page type, brand, credential harvesting, confirms / contradicts, proposed score and reason (`score_changed` when it differs from the verdict). |
+| `v_blocklist_ai_queue` | Domains waiting for blocklist classification: pattern match, enough queries, not classified, not on a list, not manually allow-listed. |
+| `blocklist_classifications` | One AI answer per domain: category, vendor, confidence, breakage risk, reason. A domain here is not sent to the AI again. |
+| `v_blocklist_published` | Approved, not expired, not manually allow-listed entries — exactly what goes into the files. |
+| `blocklist_publish_log` | One row per publish run: dry run, no change, published (with pull request) or error. |
 
 **Logs**
 
@@ -120,6 +131,10 @@ erDiagram
 | `sp_sync_domain_allowlist()` | Applies the weekly Tranco list as a delta; aborts if the list is suspiciously short. |
 | `claim_next_observable()` | Returns the next pending observable and logs the call, or nothing when the queue is empty or the VirusTotal budget is used up. |
 | `recon_requeue()` | Removes one `deep_recon` row so its verdict gets a new second look; the only way the UI deletes from that table. |
+| `blocklist_record_classifications()` | Stores one AI batch and turns telemetry / tracking answers into review candidates. |
+| `blocklist_sync_malicious()` | Copies Pi-hole auto-blocks into the malicious list and extends their expiry. |
+| `blocklist_render()` | Full content of the three list files. |
+| `blocklist_is_protected()` | TRUE when a manual allow-list entry covers the domain. |
 
 ## Roles
 

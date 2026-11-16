@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Name patterns{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Name patterns</h1>
+  <a class="btn ghost" href="{{ url_for('blocklists_page') }}">← Blocklists</a>
+</div>
+<p class="muted">A domain is shown to the AI only when its name contains one of the active patterns (e.g. <code>telemetry</code> matches <code>telemetry.vendor.com</code>). This keeps AI requests for the domains most likely to be telemetry or tracking. A pattern is only a hint — the AI still decides. "Checked" counts domains the AI looked at because of the pattern, "Hits" those it called telemetry or tracking.</p>
+
+<form method="post" class="card form-row">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="add">
+  <label class="grow">Pattern<input name="pattern" required maxlength="50" placeholder="e.g. telemetry"></label>
+  <label class="grow">Note<input name="note" maxlength="200"></label>
+  <button class="btn primary" type="submit">Add</button>
+</form>
+
+<section class="card">
+<table class="list">
+  <thead><tr><th>Pattern</th><th>Note</th><th>Checked</th><th>Hits</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr class="{{ 'row-off' if not r.is_active }}">
+    <td class="mono">{{ r.pattern }}</td>
+    <td class="small">{{ r.note or '' }}</td>
+    <td class="mono">{{ r.seen }}</td>
+    <td class="mono">{{ r.hits }}</td>
+    <td>{% if r.is_active %}<span class="tag ok">active</span>{% else %}<span class="tag">disabled</span>{% endif %}</td>
+    <td class="row-actions">
+      <form method="post">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="{{ r.id }}">
+        <button class="btn small ghost" type="submit">{{ 'Disable' if r.is_active else 'Enable' }}</button>
+      </form>
+      <form method="post" data-confirm="Delete pattern {{ r.pattern }}?">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ r.id }}">
+        <button class="btn small danger" type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="muted">No patterns — no domain is sent to the AI.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

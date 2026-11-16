@@ -36,6 +36,8 @@
     n8n_workflow_files_to_import:
       - "{{ n8n_workflow_file }}"
       - "Deep Recon.json"
+      - "Blocklist Candidates.json"
+      - "Blocklist Publish.json"
 
   tasks:
     # ============================================================
@@ -288,10 +290,12 @@
     # paths; the staged copies get fixed names (workflow_to_import_<n>.json).
     #
     # Each JSON keeps its workflow id (main: ILhKRbyvF5NaIRYL, Deep Recon:
-    # DpRecon2SentnlX1), so a re-import updates it in place instead of
+    # DpRecon2SentnlX1, Blocklist Candidates: BlkCandidates01X, Blocklist
+    # Publish: BlkPublish0001XY), so a re-import updates it in place instead of
     # adding a second copy. The CLI import leaves workflows INACTIVE —
     # publish them in the n8n UI.
-    # Requires config/postgres/db_ai_pipeline.sql (playbook 04.3 [04.3.1.4]).
+    # Requires config/postgres/db_ai_pipeline.sql (playbook 04.3 [04.3.1.4]);
+    # the blocklist workflows also db_blocklists.sql ([04.3.1.6]).
     #
     # Pre-check on the control host: fails with the list of files that DO
     # exist, instead of the lookup plugin's bare "File not found". Path is

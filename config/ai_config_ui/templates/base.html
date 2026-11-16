@@ -21,10 +21,11 @@
       ('allowlist_page', 'Allow-list'),
       ('simulator_page', 'Simulator'),
       ('recon_page', 'Deep recon'),
+      ('blocklists_page', 'Blocklists'),
       ('audit_page', 'Change log'),
     ] %}
     {% for ep, label in nav %}
-      <a href="{{ url_for(ep) }}" class="{{ 'active' if request.endpoint == ep or (ep == 'prompts_page' and request.endpoint and request.endpoint.startswith('prompt')) or (ep == 'recon_page' and request.endpoint == 'recon_prompt_page') }}">{{ label }}</a>
+      <a href="{{ url_for(ep) }}" class="{{ 'active' if request.endpoint == ep or (ep == 'prompts_page' and request.endpoint and request.endpoint.startswith('prompt')) or (ep == 'recon_page' and request.endpoint == 'recon_prompt_page') or (ep == 'blocklists_page' and request.endpoint and request.endpoint.startswith('blocklist')) }}">{{ label }}</a>
     {% endfor %}
   </nav>
   <form method="post" action="{{ url_for('logout') }}" class="logout">

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Blocklists{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Own blocklists</h1>
+  <div class="row-actions">
+    <a class="btn ghost" href="{{ url_for('blocklist_patterns_page') }}">Name patterns →</a>
+    <a class="btn ghost" href="{{ url_for('blocklist_prompt_page') }}">Classifier prompt →</a>
+  </div>
+</div>
+<p class="muted">Domains on these lists are published to the public repository <a href="https://github.com/lukaszFD/sentinel-blocklists" target="_blank" rel="noopener noreferrer">sentinel-blocklists</a>, which Pi-hole downloads as adlists. Once a day the lists go into one pull request; nothing reaches Pi-hole before you merge it. Domains covered by a manual <a href="{{ url_for('allowlist_page') }}">allow-list</a> entry are never published. Thresholds are in <a href="{{ url_for('settings_page') }}#stage-8">Settings</a>.</p>
+
+<div class="grid">
+  <section class="card">
+    <h2>Status</h2>
+    <dl class="kv">
+      <dt>Publishing</dt><dd>{% if settings.blocklist_publish_enabled == 1 %}<span class="tag ok">ON</span>{% else %}<span class="tag warn">DRY RUN</span>{% endif %}</dd>
+      <dt>AI classification</dt><dd>{% if settings.blocklist_ai_enabled == 1 %}<span class="tag ok">ON</span>{% else %}<span class="tag">OFF</span>{% endif %}</dd>
+      <dt>Checked by AI today</dt><dd class="mono">{{ today }} / {{ settings.blocklist_ai_daily_limit|num }}</dd>
+      <dt>Waiting for AI</dt><dd class="mono">{{ queue }}</dd>
+      <dt>Waiting for your review</dt><dd class="mono">{% if pending_total %}<a href="{{ url_for('blocklists_page', status='candidate') }}"><strong>{{ pending_total }}</strong></a>{% else %}0{% endif %}</dd>
+      <dt>Active prompt</dt><dd class="mono">{% if prompt %}<a href="{{ url_for('blocklist_prompt_page') }}">{{ prompt.version }}</a>{% else %}<span class="tag bad">none</span>{% endif %}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Lists</h2>
+    <table class="list compact">
+      <thead><tr><th>List</th><th>Published</th><th>To review</th><th>Expired</th><th>Rejected</th></tr></thead>
+      <tbody>
+      {% for l in lists %}{% set c = counts.get(l, {}) %}
+        <tr>
+          <td><a href="{{ url_for('blocklists_page', list=l, status='approved') }}">{{ l }}</a></td>
+          <td class="mono">{{ published.get(l, 0) }}</td>
+          <td class="mono">{% if c.get('candidate') %}<a href="{{ url_for('blocklists_page', list=l, status='candidate') }}">{{ c.get('candidate') }}</a>{% else %}0{% endif %}</td>
+          <td class="mono">{{ c.get('expired', 0) }}</td>
+          <td class="mono">{{ c.get('rejected', 0) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="small"><a href="{{ url_for('blocklists_page', list=list_name or None, status=status, files=1) }}#files">Show the generated files</a></p>
+  </section>
+</div>
+
+<section class="card">
+  <div class="head-row">
+    <h2>{{ list_name or 'All lists' }} · {{ {'candidate': 'waiting for review', 'approved': 'published', 'expired': 'expired', 'rejected': 'rejected'}[status] }}</h2>
+    <div class="row-actions">
+      {% for st in statuses %}<a class="btn small {{ 'primary' if st == status else 'ghost' }}" href="{{ url_for('blocklists_page', list=list_name or None, status=st) }}">{{ st }}</a>{% endfor %}
+      <a class="btn small ghost" href="{{ url_for('blocklists_page', status=status) }}">all lists</a>
+    </div>
+  </div>
+  {% if status == 'candidate' %}<p class="muted small">Proposed by the AI. Check the vendor and the breakage risk: blocking telemetry can stop updates, sync or licence checks. Rejected domains are never proposed again.</p>{% endif %}
+  {% if status == 'rejected' %}<p class="muted small">Rejected domains stay here so they are not proposed or synced again. Approve one to publish it after all. A rejected malicious domain may still be on Pi-hole's own denylist — remove it there (Domains → Denylist) if it was a false positive.</p>{% endif %}
+  <form method="post" action="{{ url_for('blocklists_page', list=list_name or None, status=status) }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <table class="list">
+      <thead><tr><th></th><th>Domain</th><th>List</th><th>AI says</th><th>Queries</th><th>Source</th><th>Expires</th><th>Reviewed</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="{{ 'row-off' if r.protected }}">
+          <td><input type="checkbox" name="id" value="{{ r.id }}" aria-label="select {{ r.fqdn }}"></td>
+          <td class="mono">{{ r.fqdn }}{% if r.protected %}<div class="small"><span class="tag warn">allow-listed — not published</span></div>{% endif %}</td>
+          <td>{{ r.list_name }}</td>
+          <td class="small">
+            {% if r.category %}
+              <span class="tag {{ 'ok' if r.confidence == 'high' }}">{{ r.category }} · {{ r.confidence }}</span>
+              {% if r.vendor %}<div><strong>{{ r.vendor }}</strong></div>{% endif %}
+              <div class="{{ 'bad-text' if r.breakage_risk == 'high' }}">breakage risk: {{ r.breakage_risk }}</div>
+              {% if r.reason %}<div class="muted">{{ r.reason }}</div>{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="mono small">{{ r.query_count if r.query_count is not none else '—' }}{% if r.matched_pattern %}<div class="muted">“{{ r.matched_pattern }}”</div>{% endif %}</td>
+          <td class="small">{{ r.source }}{% if r.note %}<div class="muted">{{ r.note }}</div>{% endif %}</td>
+          <td class="small nowrap">{{ r.expires_at|dt if r.expires_at else '—' }}</td>
+          <td class="small nowrap muted">{% if r.reviewed_at %}{{ r.reviewed_by }}<div>{{ r.reviewed_at|dt }}</div>{% else %}—{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="muted">Nothing here.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if rows|length >= page_size %}<p class="muted small">Showing the first {{ page_size }}.</p>{% endif %}
+    {% if rows %}
+    <div class="actions">
+      {% if status != 'approved' %}<button class="btn primary" type="submit" name="action" value="approve">Approve selected</button>{% endif %}
+      {% if status != 'rejected' %}<button class="btn {{ 'danger' if status == 'approved' else 'ghost' }}" type="submit" name="action" value="reject" data-confirm="Reject the selected domains? They are removed from the lists in the next pull request and not proposed again.">{{ 'Remove selected' if status in ['approved', 'expired'] else 'Reject selected' }}</button>{% endif %}
+    </div>
+    {% endif %}
+  </form>
+</section>
+
+<form method="post" class="card form-row" action="{{ url_for('blocklists_page', list=list_name or None, status=status) }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="add">
+  <label class="grow">Add a domain yourself<input name="domain" required maxlength="253" placeholder="e.g. telemetry.vendor.com"></label>
+  <label>List
+    <select name="list_name">{% for l in lists %}<option value="{{ l }}" {{ 'selected' if l == list_name }}>{{ l }}</option>{% endfor %}</select>
+  </label>
+  <label class="grow">Note<input name="note" maxlength="200"></label>
+  <button class="btn primary" type="submit">Add</button>
+</form>
+
+<section class="card">
+  <h2>Publish runs</h2>
+  <table class="list compact">
+    <thead><tr><th>When</th><th>Result</th><th>Change</th><th>Entries</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      <tr>
+        <td class="nowrap small">{{ r.run_at|dt }}</td>
+        <td><span class="tag {{ {'published': 'ok', 'error': 'bad', 'dry_run': 'warn'}.get(r.status, '') }}">{{ r.status | replace('_', ' ') }}</span></td>
+        <td class="mono small">{% if r.added is not none %}+{{ r.added }} −{{ r.removed }}{% endif %}</td>
+        <td class="small">{% if r.counts %}{% for k, v in r.counts.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</td>
+        <td class="small">{{ r.message or '' }}{% if r.pr_url and r.pr_url.startswith('https://github.com/') %} <a href="{{ r.pr_url }}" target="_blank" rel="noopener noreferrer">PR #{{ r.pr_number }}</a>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No runs yet — the Blocklist Publish workflow runs once a day.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if files %}
+<section class="card" id="files">
+  <h2>Generated files (what the next run compares with the repository)</h2>
+  {% for l in lists %}
+    <details><summary class="mono">lists/{{ l }}.txt</summary><pre class="preview">{{ files[l] }}</pre></details>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}
