@@ -1,8 +1,8 @@
 -- ============================================
 -- Cyber Sentinel — AI pipeline schema — POSTGRES
--- Version: 2.4 (Section 7d: urlscan.io search and Shodan InternetDB in the main workflow;
---               Section 8b: VirusTotal budget and claim_next_observable();
---               Section 9: Deep Recon queue, results and recon prompt)
+-- Version: 2.5 (Section 8b: api_call_log for every CTI / AI request, VirusTotal
+--               budget from the higher of the local and the provider counter,
+--               usage views and alerts; Section 10: Failure Guard)
 -- ============================================
 -- Runs AFTER db_deployment.sql and db_partitioning_retention.sql,
 -- as the `postgres` superuser, connected to `cyber_intelligence`.
@@ -32,13 +32,17 @@
 --   sp_sync_domain_allowlist()   weekly delta load from the staging table
 --   v_pending_observables   work queue of the main workflow
 --   claim_next_observable() next observable from the queue, only when the
---                           VirusTotal budget allows it (v_vt_budget,
---                           vt_lookup_log)
+--                           VirusTotal budget allows it (v_vt_budget)
+--   api_call_log            every outgoing CTI / AI request (partitioned by
+--                           month); vt_lookup_log is a view on it
+--   api_provider_quota      providers' own usage counters (API Usage Monitor)
+--   v_api_usage_today / v_api_usage_daily   usage for the AI config UI
 --   pihole_block_log        every Pi-hole auto-block attempt
 --   deep_recon              Deep Recon of high-scored verdicts: RDAP,
 --                           crt.sh, urlscan.io page scan, AI re-assessment
 --   recon_prompt_templates  versioned system prompt of the Deep Recon analyst
 --   v_pending_recon         work queue read by the Deep Recon workflow
+--   ops_settings / workflow_failure_alerts   Failure Guard (Section 10)
 --
 -- PROMPT PLACEHOLDERS use [[NAME]] on purpose: Jinja2 (Ansible) would
 -- consume double curly braces.
@@ -820,68 +824,180 @@ ORDER BY c.last_seen DESC;
 GRANT SELECT ON cyber_sentinel_ai.v_pending_observables TO "{{ postgres_user }}";
 
 -- ============================================
--- SECTION 8b: VIRUSTOTAL BUDGET
+-- SECTION 8b: API CALL LOG AND VIRUSTOTAL BUDGET
 -- ============================================
--- The workflow runs every minute and calls claim_next_observable() instead
--- of reading v_pending_observables directly. The function hands out one
--- observable only when the VirusTotal budget allows it:
+-- api_call_log has one row per outgoing CTI / AI request: provider,
+-- caller, endpoint, time, HTTP status and outcome. It is the source of
+-- every usage number (AI config UI, alerts) and of the VirusTotal budget.
+-- Partitioned by month like dns_queries; sp_drop_old_partitions()
+-- (db_partitioning_retention.sql) drops months older than 6 months.
+--
+-- VirusTotal is the only provider with a hard budget. The main workflow
+-- runs every minute and calls claim_next_observable(), which hands out one
+-- observable only when the budget allows it:
 --   * fewer than vt_per_minute_limit calls in the last 60 seconds, and
 --   * calls left today (vt_daily_limit - used) > reserve, where
 --     reserve = vt_reserve_per_hour x hours until the quota resets.
--- So a backlog is cleared as fast as the per-minute limit allows, and the
--- reserve keeps enough calls for traffic that arrives later in the day.
--- vt_reserve_per_hour = 0 spends the whole budget as soon as there is work.
+-- "Used" is the HIGHER of two counters: VirusTotal calls in api_call_log
+-- today (every caller), and the provider's own counter that the
+-- "API Usage Monitor" workflow reads every hour (api_provider_quota). The
+-- provider counter also sees calls this database never logged: the dev
+-- environment, manual API tests, anything else using the same key.
 --
--- Every claim is logged in vt_lookup_log and counted as one VirusTotal call
--- (a failed call is counted too — conservative). The claim also stops two
+-- The claim inserts a row with outcome 'claimed'; the workflow fills in the
+-- HTTP status with api_call_result(). A claim without a result (run failed
+-- before it) still counts — conservative. The claim also stops two
 -- overlapping runs from taking the same observable; a run that fails before
 -- storing a verdict releases the pair after CLAIM_TTL (15 minutes).
 -- The VirusTotal daily quota resets at 00:00 UTC.
--- Live lookups in the AI config UI simulator are not counted here.
+--
+-- Other providers (Gemini, urlscan.io, Shodan, abuse.ch, ...) are only
+-- counted: api_daily_limit_<provider> draws the limit in the UI and
+-- api_alert_threshold_pct triggers one e-mail per provider and day.
 
 INSERT INTO cyber_sentinel_ai.ai_settings (key, value, category, description) VALUES
                                                                                   ('vt_daily_limit',      500, 'pipeline', 'VirusTotal API calls per day (public API: 500); the workflow stops for the day when they are used up'),
                                                                                   ('vt_per_minute_limit', 4,   'pipeline', 'VirusTotal API calls per minute (public API: 4)'),
-                                                                                  ('vt_reserve_per_hour', 5,   'pipeline', 'VirusTotal calls kept back for each hour left until the quota resets, for traffic that arrives later; 0 = use the budget as soon as there is work')
+                                                                                  ('vt_reserve_per_hour', 5,   'pipeline', 'VirusTotal calls kept back for each hour left until the quota resets, for traffic that arrives later; 0 = use the budget as soon as there is work'),
+                                                                                  ('api_daily_limit_gemini',  0,    'pipeline', 'Gemini requests per day shown as the limit in the API usage page and used for the alert; 0 = no limit'),
+                                                                                  ('api_daily_limit_urlscan', 1000, 'pipeline', 'urlscan.io requests per day (search + scans) shown as the limit and used for the alert; 0 = no limit'),
+                                                                                  ('api_daily_limit_shodan',  0,    'pipeline', 'Shodan InternetDB requests per day for the alert; 0 = no limit (InternetDB has none)'),
+                                                                                  ('api_daily_limit_abusech', 0,    'pipeline', 'abuse.ch (ThreatFox + URLhaus) requests per day for the alert; 0 = no limit'),
+                                                                                  ('api_alert_threshold_pct', 80,   'pipeline', 'E-mail once a day when a provider has used this share (%) of its daily limit; 0 = no usage alerts')
     ON CONFLICT (key) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.vt_lookup_log (
-    id            BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    fqdn          TEXT NOT NULL,
-    observable_ip VARCHAR(45) NOT NULL,
+CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.api_call_log (
+    id            BIGINT GENERATED BY DEFAULT AS IDENTITY,
+    called_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    provider      VARCHAR(20) NOT NULL CHECK (provider ~ '^[a-z0-9_]+$'),
+    caller        VARCHAR(30) NOT NULL,
+    endpoint      VARCHAR(40),
+    outcome       VARCHAR(12) NOT NULL DEFAULT 'claimed'
+                  CHECK (outcome IN ('claimed', 'ok', 'no_data', 'rate_limited', 'error')),
+    http_status   INT,
+    message       TEXT,
+    fqdn          TEXT,
+    observable_ip VARCHAR(45),
     dns_query_id  INT,
-    claimed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_vt_lookup_log_claimed
-    ON cyber_sentinel_ai.vt_lookup_log (claimed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_vt_lookup_log_pair
-    ON cyber_sentinel_ai.vt_lookup_log (fqdn, observable_ip, claimed_at DESC);
+    PRIMARY KEY (id, called_at)
+) PARTITION BY RANGE (called_at);
+CREATE INDEX IF NOT EXISTS idx_api_call_log_provider
+    ON cyber_sentinel_ai.api_call_log (provider, called_at DESC);
+CREATE INDEX IF NOT EXISTS idx_api_call_log_vt_pair
+    ON cyber_sentinel_ai.api_call_log (fqdn, observable_ip, called_at DESC)
+    WHERE provider = 'virustotal';
 
--- Current budget, read by claim_next_observable() and the AI config UI.
+-- Current month + 3 ahead, plus DEFAULT so no INSERT is ever rejected.
+-- Later months are added by sp_add_future_partitions() (pg_cron).
+CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.api_call_log_p_default
+    PARTITION OF cyber_sentinel_ai.api_call_log DEFAULT;
+DO $$
+DECLARE
+    v_month DATE;
+    v_name  TEXT;
+BEGIN
+    FOR i IN 0..3 LOOP
+        v_month := date_trunc('month', CURRENT_DATE) + make_interval(months => i);
+        v_name  := 'api_call_log_p' || to_char(v_month, 'YYYYMM');
+        IF to_regclass('cyber_sentinel_ai.' || v_name) IS NULL THEN
+            EXECUTE format('CREATE TABLE cyber_sentinel_ai.%I PARTITION OF cyber_sentinel_ai.api_call_log '
+                           'FOR VALUES FROM (%L) TO (%L)', v_name, v_month, v_month + interval '1 month');
+        END IF;
+    END LOOP;
+END
+$$;
+
+-- Upgrade from v2.2: vt_lookup_log was a table of claims (kept 3 days).
+-- Its rows move to api_call_log once; the name stays as a read-only view.
+-- v_vt_budget depended on the table; it is created again below (and its
+-- grant for the UI role again by db_ai_config_editor.sql, playbook 04.5).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = 'cyber_sentinel_ai' AND c.relname = 'vt_lookup_log' AND c.relkind = 'r') THEN
+        INSERT INTO cyber_sentinel_ai.api_call_log
+            (called_at, provider, caller, endpoint, outcome, fqdn, observable_ip, dns_query_id)
+        SELECT claimed_at, 'virustotal', 'main', 'ip_report', 'claimed', fqdn, observable_ip, dns_query_id
+        FROM cyber_sentinel_ai.vt_lookup_log;
+        DROP VIEW IF EXISTS cyber_sentinel_ai.v_vt_budget;
+        DROP TABLE cyber_sentinel_ai.vt_lookup_log;
+    END IF;
+END
+$$;
+
+CREATE OR REPLACE VIEW cyber_sentinel_ai.vt_lookup_log AS
+SELECT id, fqdn, observable_ip, dns_query_id, called_at AS claimed_at, outcome, http_status
+FROM cyber_sentinel_ai.api_call_log
+WHERE provider = 'virustotal' AND caller = 'main';
+
+-- Provider's own usage counter, written by "API Usage Monitor" (hourly).
+CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.api_provider_quota (
+    provider      VARCHAR(20) NOT NULL,
+    checked_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    used_today    INT NOT NULL,
+    allowed_today INT,
+    raw           JSONB,
+    PRIMARY KEY (provider, checked_at)
+);
+
+-- One row per provider and UTC day when the usage e-mail was sent.
+CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.api_alert_log (
+    provider   VARCHAR(20) NOT NULL,
+    day        DATE NOT NULL,
+    used       INT NOT NULL,
+    daily_limit INT NOT NULL,
+    alerted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider, day)
+);
+
+-- Daily limit of a provider; NULL = no limit.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_daily_limit(p_provider TEXT)
+RETURNS INT
+LANGUAGE sql STABLE AS $$
+SELECT NULLIF(CASE WHEN p_provider = 'virustotal'
+                   THEN cyber_sentinel_ai.setting('vt_daily_limit')
+                   ELSE (SELECT value FROM cyber_sentinel_ai.ai_settings
+                         WHERE key = 'api_daily_limit_' || p_provider)
+              END, 0)::int;
+$$;
+
+-- Current VirusTotal budget, read by claim_next_observable(), api_claim()
+-- and the AI config UI. Columns after resets_at were added in v2.3.
 CREATE OR REPLACE VIEW cyber_sentinel_ai.v_vt_budget AS
 WITH t AS (
     SELECT date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day_start
 ), used AS (
-    SELECT count(*) FILTER (WHERE l.claimed_at >= t.day_start)                 AS used_today,
-           count(*) FILTER (WHERE l.claimed_at > now() - interval '60 seconds') AS used_last_minute
+    SELECT count(*) FILTER (WHERE l.called_at >= t.day_start)                 AS local_today,
+           count(*) FILTER (WHERE l.called_at > now() - interval '60 seconds') AS used_last_minute
     FROM t
-    LEFT JOIN cyber_sentinel_ai.vt_lookup_log l
-           ON l.claimed_at >= LEAST(t.day_start, now() - interval '60 seconds')
+    LEFT JOIN cyber_sentinel_ai.api_call_log l
+           ON l.provider = 'virustotal'
+          AND l.called_at >= LEAST(t.day_start, now() - interval '60 seconds')
     GROUP BY t.day_start
+), vt AS (
+    SELECT q.used_today, q.checked_at
+    FROM t, cyber_sentinel_ai.api_provider_quota q
+    WHERE q.provider = 'virustotal' AND q.checked_at >= t.day_start
+    ORDER BY q.checked_at DESC
+    LIMIT 1
 )
-SELECT u.used_today::int,
+SELECT GREATEST(u.local_today, COALESCE(vt.used_today, 0))::int                      AS used_today,
        u.used_last_minute::int,
        cyber_sentinel_ai.setting('vt_daily_limit')::int                                AS daily_limit,
        cyber_sentinel_ai.setting('vt_per_minute_limit')::int                           AS per_minute_limit,
-       GREATEST(cyber_sentinel_ai.setting('vt_daily_limit')::int - u.used_today, 0)::int AS remaining_today,
+       GREATEST(cyber_sentinel_ai.setting('vt_daily_limit')::int
+                - GREATEST(u.local_today, COALESCE(vt.used_today, 0)), 0)::int         AS remaining_today,
        ceil(cyber_sentinel_ai.setting('vt_reserve_per_hour')
             * extract(epoch FROM (t.day_start + interval '1 day' - now())) / 3600)::int AS reserve,
-       t.day_start + interval '1 day'                                                   AS resets_at
-FROM t, used u;
+       t.day_start + interval '1 day'                                                   AS resets_at,
+       u.local_today::int                                                               AS local_used_today,
+       vt.used_today                                                                    AS provider_used_today,
+       vt.checked_at                                                                    AS provider_checked_at
+FROM t CROSS JOIN used u LEFT JOIN vt ON TRUE;
 
 -- Returns 0 or 1 row with the columns of v_pending_observables. The
--- advisory lock serialises overlapping runs, so the budget check and the
--- claim are atomic.
+-- advisory lock serialises overlapping runs (and api_claim()), so the
+-- budget check and the claim are atomic.
 CREATE OR REPLACE FUNCTION cyber_sentinel_ai.claim_next_observable()
 RETURNS SETOF cyber_sentinel_ai.v_pending_observables
 LANGUAGE plpgsql AS $$
@@ -900,27 +1016,214 @@ BEGIN
     SELECT p.* INTO obs
     FROM cyber_sentinel_ai.v_pending_observables p
     WHERE NOT EXISTS (
-        SELECT 1 FROM cyber_sentinel_ai.vt_lookup_log l
-        WHERE l.fqdn = p.fqdn
+        SELECT 1 FROM cyber_sentinel_ai.api_call_log l
+        WHERE l.provider = 'virustotal'
+          AND l.fqdn = p.fqdn
           AND l.observable_ip = p.observable_ip
-          AND l.claimed_at > now() - c_claim_ttl)
+          AND l.called_at > now() - c_claim_ttl)
     LIMIT 1;
     IF NOT FOUND THEN
         RETURN;
     END IF;
 
-    INSERT INTO cyber_sentinel_ai.vt_lookup_log (fqdn, observable_ip, dns_query_id)
-    VALUES (obs.fqdn, obs.observable_ip, obs.dns_query_id);
-
-    -- Keep the log bounded: older rows are not needed for any limit.
-    DELETE FROM cyber_sentinel_ai.vt_lookup_log WHERE claimed_at < now() - interval '3 days';
+    INSERT INTO cyber_sentinel_ai.api_call_log
+        (provider, caller, endpoint, outcome, fqdn, observable_ip, dns_query_id)
+    VALUES ('virustotal', 'main', 'ip_report', 'claimed', obs.fqdn, obs.observable_ip, obs.dns_query_id);
 
     RETURN NEXT obs;
 END
 $$;
 
-GRANT SELECT, INSERT, DELETE ON cyber_sentinel_ai.vt_lookup_log TO "{{ postgres_user }}";
-GRANT SELECT ON cyber_sentinel_ai.v_vt_budget TO "{{ postgres_user }}";
+-- Outcome of an HTTP status: 2xx ok, 404 no_data, 429 rate_limited,
+-- anything else (or no response) error.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_outcome(p_http_status INT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+SELECT CASE WHEN p_http_status BETWEEN 200 AND 299 THEN 'ok'
+            WHEN p_http_status = 404 THEN 'no_data'
+            WHEN p_http_status = 429 THEN 'rate_limited'
+            ELSE 'error' END;
+$$;
+
+-- Result of the VirusTotal call of the main workflow: fills in the latest
+-- open claim of the pair. Returns FALSE when no claim was found.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_call_result(
+    p_fqdn TEXT, p_observable_ip TEXT, p_http_status INT, p_message TEXT DEFAULT NULL)
+RETURNS BOOLEAN
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_id BIGINT;
+BEGIN
+    SELECT id INTO v_id
+    FROM cyber_sentinel_ai.api_call_log
+    WHERE provider = 'virustotal' AND caller = 'main' AND outcome = 'claimed'
+      AND fqdn = p_fqdn AND observable_ip = p_observable_ip
+      AND called_at > now() - interval '15 minutes'
+    ORDER BY called_at DESC
+    LIMIT 1;
+    IF v_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    UPDATE cyber_sentinel_ai.api_call_log
+    SET outcome = cyber_sentinel_ai.api_outcome(p_http_status),
+        http_status = p_http_status,
+        message = LEFT(p_message, 500)
+    WHERE id = v_id AND called_at > now() - interval '15 minutes';
+    RETURN TRUE;
+END
+$$;
+
+-- Logs a batch of calls that need no budget: [{provider, caller, endpoint,
+-- http_status, message, fqdn, observable_ip}, ...]. Rows without a provider
+-- are skipped. Returns the number of rows stored.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_calls_record(p_calls JSONB)
+RETURNS INT
+LANGUAGE sql AS $$
+WITH ins AS (
+    INSERT INTO cyber_sentinel_ai.api_call_log
+        (provider, caller, endpoint, outcome, http_status, message, fqdn, observable_ip)
+    SELECT lower(x->>'provider'), LEFT(COALESCE(x->>'caller', 'unknown'), 30), LEFT(x->>'endpoint', 40),
+           cyber_sentinel_ai.api_outcome((x->>'http_status')::int),
+           (x->>'http_status')::int, LEFT(x->>'message', 500),
+           lower(x->>'fqdn'), x->>'observable_ip'
+    FROM jsonb_array_elements(COALESCE(p_calls, '[]'::jsonb)) x
+    WHERE COALESCE(x->>'provider', '') <> ''
+    RETURNING 1
+)
+SELECT count(*)::int FROM ins;
+$$;
+
+-- VirusTotal call outside the main workflow (AI config UI simulator).
+-- Same budget rules and lock as claim_next_observable(); returns the claim
+-- id, or NULL when the budget does not allow a call now. SECURITY DEFINER:
+-- the UI role gets EXECUTE only, never INSERT on the log.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_claim(p_caller TEXT, p_fqdn TEXT, p_observable_ip TEXT)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    b    cyber_sentinel_ai.v_vt_budget;
+    v_id BIGINT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('cyber_sentinel_ai.claim_next_observable'));
+    SELECT * INTO b FROM cyber_sentinel_ai.v_vt_budget;
+    IF b.used_last_minute >= b.per_minute_limit OR b.remaining_today <= b.reserve THEN
+        RETURN NULL;
+    END IF;
+    INSERT INTO cyber_sentinel_ai.api_call_log (provider, caller, endpoint, outcome, fqdn, observable_ip)
+    VALUES ('virustotal', LEFT(p_caller, 30), 'ip_report', 'claimed', lower(p_fqdn), p_observable_ip)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END
+$$;
+REVOKE ALL ON FUNCTION cyber_sentinel_ai.api_claim(TEXT, TEXT, TEXT) FROM PUBLIC;
+
+-- Result of a call claimed with api_claim(), or a logged call of a provider
+-- without budget from the UI (p_id NULL inserts a new row).
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_call_finish(
+    p_id BIGINT, p_provider TEXT, p_caller TEXT, p_endpoint TEXT,
+    p_http_status INT, p_message TEXT DEFAULT NULL, p_fqdn TEXT DEFAULT NULL, p_observable_ip TEXT DEFAULT NULL)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF p_id IS NOT NULL THEN
+        UPDATE cyber_sentinel_ai.api_call_log
+        SET outcome = cyber_sentinel_ai.api_outcome(p_http_status),
+            http_status = p_http_status,
+            message = LEFT(p_message, 500)
+        WHERE id = p_id AND called_at > now() - interval '1 hour';
+    ELSE
+        INSERT INTO cyber_sentinel_ai.api_call_log
+            (provider, caller, endpoint, outcome, http_status, message, fqdn, observable_ip)
+        VALUES (lower(p_provider), LEFT(p_caller, 30), LEFT(p_endpoint, 40),
+                cyber_sentinel_ai.api_outcome(p_http_status), p_http_status, LEFT(p_message, 500),
+                lower(p_fqdn), p_observable_ip);
+    END IF;
+END
+$$;
+REVOKE ALL ON FUNCTION cyber_sentinel_ai.api_call_finish(BIGINT, TEXT, TEXT, TEXT, INT, TEXT, TEXT, TEXT) FROM PUBLIC;
+
+-- Stores the provider's own counter (API Usage Monitor). Keeps 14 days.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_quota_record(
+    p_provider TEXT, p_used_today INT, p_allowed_today INT, p_raw JSONB DEFAULT NULL)
+RETURNS VOID
+LANGUAGE sql AS $$
+INSERT INTO cyber_sentinel_ai.api_provider_quota (provider, used_today, allowed_today, raw)
+VALUES (lower(p_provider), p_used_today, p_allowed_today, p_raw);
+DELETE FROM cyber_sentinel_ai.api_provider_quota WHERE checked_at < now() - interval '14 days';
+$$;
+
+-- Usage per provider for the current UTC day.
+CREATE OR REPLACE VIEW cyber_sentinel_ai.v_api_usage_today AS
+WITH t AS (
+    SELECT date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day_start
+), loc AS (
+    SELECT l.provider,
+           count(*)                                            AS calls,
+           count(*) FILTER (WHERE l.outcome = 'rate_limited')  AS rate_limited,
+           count(*) FILTER (WHERE l.outcome = 'error')         AS errors,
+           count(*) FILTER (WHERE l.outcome = 'claimed')       AS open_claims
+    FROM t JOIN cyber_sentinel_ai.api_call_log l ON l.called_at >= t.day_start
+    GROUP BY l.provider
+), q AS (
+    SELECT DISTINCT ON (q.provider) q.provider, q.used_today, q.checked_at
+    FROM t JOIN cyber_sentinel_ai.api_provider_quota q ON q.checked_at >= t.day_start
+    ORDER BY q.provider, q.checked_at DESC
+), p AS (
+    SELECT provider FROM loc UNION SELECT provider FROM q
+    UNION SELECT unnest(ARRAY['virustotal', 'gemini', 'urlscan', 'shodan', 'abusech'])
+)
+SELECT p.provider,
+       COALESCE(loc.calls, 0)::int                                         AS local_calls,
+       q.used_today                                                        AS provider_used,
+       q.checked_at                                                        AS provider_checked_at,
+       GREATEST(COALESCE(loc.calls, 0), COALESCE(q.used_today, 0))::int    AS used,
+       cyber_sentinel_ai.api_daily_limit(p.provider)                       AS daily_limit,
+       round(100.0 * GREATEST(COALESCE(loc.calls, 0), COALESCE(q.used_today, 0))
+             / cyber_sentinel_ai.api_daily_limit(p.provider), 1)           AS used_pct,
+       COALESCE(loc.rate_limited, 0)::int                                  AS rate_limited,
+       COALESCE(loc.errors, 0)::int                                        AS errors,
+       COALESCE(loc.open_claims, 0)::int                                   AS open_claims
+FROM p LEFT JOIN loc USING (provider) LEFT JOIN q USING (provider);
+
+-- Providers that crossed api_alert_threshold_pct today and were not
+-- e-mailed yet. Marks them as alerted, so each provider alerts once a day.
+CREATE OR REPLACE FUNCTION cyber_sentinel_ai.api_usage_alerts_due()
+RETURNS SETOF cyber_sentinel_ai.api_alert_log
+LANGUAGE sql AS $$
+INSERT INTO cyber_sentinel_ai.api_alert_log (provider, day, used, daily_limit)
+SELECT u.provider, (now() AT TIME ZONE 'UTC')::date, u.used, u.daily_limit
+FROM cyber_sentinel_ai.v_api_usage_today u
+WHERE u.daily_limit IS NOT NULL
+  AND cyber_sentinel_ai.setting('api_alert_threshold_pct') > 0
+  AND u.used_pct >= cyber_sentinel_ai.setting('api_alert_threshold_pct')
+ON CONFLICT (provider, day) DO NOTHING
+RETURNING *;
+$$;
+
+-- Calls per UTC day, provider and caller (AI config UI history).
+CREATE OR REPLACE VIEW cyber_sentinel_ai.v_api_usage_daily AS
+SELECT (l.called_at AT TIME ZONE 'UTC')::date                       AS day,
+       l.provider,
+       l.caller,
+       count(*)::int                                                AS calls,
+       count(*) FILTER (WHERE l.outcome IN ('ok', 'no_data'))::int  AS ok,
+       count(*) FILTER (WHERE l.outcome = 'rate_limited')::int      AS rate_limited,
+       count(*) FILTER (WHERE l.outcome IN ('error', 'claimed'))::int AS failed
+FROM cyber_sentinel_ai.api_call_log l
+GROUP BY 1, 2, 3;
+
+GRANT SELECT, INSERT, UPDATE ON cyber_sentinel_ai.api_call_log       TO "{{ postgres_user }}";
+GRANT SELECT, INSERT, DELETE ON cyber_sentinel_ai.api_provider_quota TO "{{ postgres_user }}";
+GRANT SELECT, INSERT         ON cyber_sentinel_ai.api_alert_log      TO "{{ postgres_user }}";
+GRANT SELECT ON cyber_sentinel_ai.vt_lookup_log, cyber_sentinel_ai.v_vt_budget,
+                cyber_sentinel_ai.v_api_usage_today, cyber_sentinel_ai.v_api_usage_daily
+             TO "{{ postgres_user }}";
 
 -- ============================================
 -- SECTION 9: DEEP RECON (separate n8n workflow)
@@ -1128,6 +1431,61 @@ REVOKE ALL ON FUNCTION cyber_sentinel_ai.recon_requeue(BIGINT) FROM PUBLIC;
 GRANT SELECT, INSERT, UPDATE ON cyber_sentinel_ai.deep_recon             TO "{{ postgres_user }}";
 GRANT SELECT                 ON cyber_sentinel_ai.recon_prompt_templates TO "{{ postgres_user }}";
 GRANT SELECT                 ON cyber_sentinel_ai.v_pending_recon        TO "{{ postgres_user }}";
+
+-- ============================================
+-- SECTION 10: FAILURE GUARD (separate n8n workflow)
+-- ============================================
+-- "Failure Guard" is the Error Workflow of every Cyber Sentinel workflow.
+-- n8n starts it after each failed run. When the last
+-- failure_guard_threshold runs of a workflow all failed, it deactivates
+-- that workflow through the n8n API and sends ONE e-mail; a successful run
+-- in between starts the count again. It needs neither Vault nor the
+-- pipeline itself: it uses the n8n credentials "Postgres account" and
+-- "SMTP account" directly, so it still works when Vault is sealed.
+--
+-- ops_settings holds the text settings the guard needs while Vault may be
+-- down. Ansible owns the values: every run of this script overwrites them
+-- from ansible-vault (vault_n8n_alert_to, default: the sender address).
+
+INSERT INTO cyber_sentinel_ai.ai_settings (key, value, category, description) VALUES
+    ('failure_guard_threshold', 10, 'pipeline', 'Failure Guard: a workflow whose last N runs all failed is deactivated and one e-mail is sent')
+    ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.ops_settings (
+    key         VARCHAR(64) PRIMARY KEY,
+    value       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO cyber_sentinel_ai.ops_settings (key, value, description) VALUES
+    ('alert_email_from', '{{ vault_n8n_user | replace("'", "''") }}',
+     'Sender of Failure Guard e-mails (the SMTP account user). Set by Ansible.'),
+    ('alert_email_to', '{{ (vault_n8n_alert_to | default(vault_n8n_user, true)) | replace("'", "''") }}',
+     'Recipient of Failure Guard e-mails. Set by Ansible from vault_n8n_alert_to.')
+ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value, description = EXCLUDED.description, updated_at = now()
+    WHERE ops_settings.value IS DISTINCT FROM EXCLUDED.value;
+
+-- One row per alert: the workflow that was stopped and why.
+CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.workflow_failure_alerts (
+    id            BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    alerted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    workflow_id   VARCHAR(40) NOT NULL,
+    workflow_name TEXT,
+    execution_id  VARCHAR(40),
+    failures      INT NOT NULL,
+    first_failure TIMESTAMPTZ,
+    error_node    TEXT,
+    error_message TEXT,
+    deactivated   BOOLEAN NOT NULL,
+    message       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_failure_alerts_at
+    ON cyber_sentinel_ai.workflow_failure_alerts (alerted_at DESC);
+
+GRANT SELECT          ON cyber_sentinel_ai.ops_settings            TO "{{ postgres_user }}";
+GRANT SELECT, INSERT  ON cyber_sentinel_ai.workflow_failure_alerts TO "{{ postgres_user }}";
 
 -- ============================================
 -- VERIFICATION (run manually)

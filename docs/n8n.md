@@ -1,10 +1,12 @@
 # n8n Workflows
 
-Four workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), all imported by playbook 04.6:
+Six workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), all imported by playbook 04.6:
 
 - **Automated Domain & IP Reputation Guard** — the main pipeline. Runs every minute and analyses one observable — a domain and the IP it resolved to — per run, as long as the VirusTotal budget allows it (see [VirusTotal Budget](#virustotal-budget)).
 - **Deep Recon** — runs hourly (at :20) after the verdict: domain age, certificate history and the web page of high-scored domains, then an AI re-assessment. See [Deep Recon](#deep-recon).
 - **Blocklist Candidates** and **Blocklist Publish** — daily (03:20 and 05:20): own Pi-hole blocklists for malicious, tracking and telemetry domains, published to [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists). See [Own Blocklists](#own-blocklists).
+- **API Usage Monitor** — hourly (at :05): VirusTotal's own usage counter and the daily usage e-mail. See [API Usage](#api-usage).
+- **Failure Guard** — the Error Workflow of all the others: stops a workflow after `failure_guard_threshold` failed runs in a row and sends one e-mail. See [Failure Guard](#failure-guard).
 
 An earlier version is published in the n8n library: [Score DNS Threats with VirusTotal, Abuse.ch, HashiCorp Vault, and Gemini](https://n8n.io/workflows/14127-score-dns-threats-with-virustotal-abusech-hashicorp-vault-and-gemini/).
 
@@ -34,7 +36,7 @@ flowchart TD
 
 1. **Load configuration** — one query reads all `ai_settings`, the threat scale and the active prompt. Every threshold below comes from there and is edited in the AI Config UI.
 2. **Pick observable** — `claim_next_observable()` returns the next row of `v_pending_observables`, or nothing when the VirusTotal budget is used up. Private IPs, allow-listed domains and pairs analysed in the last `cache_ttl_days` are already filtered out.
-3. **VirusTotal** — VirusTotal checks the IP. A failed lookup (quota, auth, server error) is never scored as clean: the run fails and the observable is retried later.
+3. **VirusTotal** — VirusTotal checks the IP; the HTTP status goes into `api_call_log` right away. A failed lookup (quota, auth, server error) is never scored as clean: the run fails and the observable is retried later. The request is not retried inside the run, so one claim is exactly one VirusTotal call.
 4. **Shodan and the gate** — every IP is also looked up in Shodan InternetDB (switch `shodan_internetdb_enabled`): open ports, software, known CVEs, tags and the hostnames Shodan saw on the IP. Free, no API key, no quota; weekly snapshot, non-commercial use only. It is context for the AI agent and the e-mail and does not change the rule score. Below `vt_gate_min_malicious` detections the observable is then scored by rules only and stored as clean: no further API calls, no AI tokens, no email.
 5. **Enrich** — ThreatFox (by IP), URLhaus (by domain) and two urlscan.io searches (switch `urlscan_search_enabled`, scans younger than `urlscan_search_days`): earlier scans of the domain's page (title, HTTP status, TLS issuer and certificate age, urlscan's verdict) and other sites urlscan saw on the same IP (malicious ones first). All are supporting sources; urlscan.io is only searched, nothing is submitted, and nothing here changes the rule score.
 6. **Rule score** — `compute_threat_score()` in PostgreSQL turns the results into a score 1–5 with a step-by-step trace.
@@ -44,7 +46,7 @@ flowchart TD
 
 ## VirusTotal Budget
 
-The public API allows 4 requests per minute and 500 per day; the daily quota resets at 00:00 UTC. The workflow runs every minute, and `claim_next_observable()` decides whether this run may call VirusTotal:
+The public API allows 4 requests per minute and 500 per day; the daily quota resets at 00:00 UTC. The workflow runs every minute, and `claim_next_observable()` decides whether this run may call VirusTotal. **Used** is the higher of two counters: VirusTotal calls in `api_call_log` today (every caller), and VirusTotal's own counter for the key, read hourly by *API Usage Monitor*. The second one also sees calls this stack never logged — the dev environment and manual tests use the same key.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -52,9 +54,34 @@ The public API allows 4 requests per minute and 500 per day; the daily quota res
 | `vt_per_minute_limit` | 4 | Calls in the last 60 seconds. Matters when runs overlap or the schedule runs more often than once a minute. |
 | `vt_reserve_per_hour` | 5 | Calls kept back per hour left until the reset, for traffic that arrives later. 0 = spend the budget as soon as there is work. |
 
-A backlog is therefore cleared at up to 60 observables per hour instead of being spread over the day, while the reserve keeps calls for the evening and night. Every call is logged in `vt_lookup_log`; the same row stops two overlapping runs from taking the same observable. If a run fails before storing a verdict (e.g. VirusTotal returns 429), the pair is picked up again after 15 minutes.
+A backlog is therefore cleared at up to 60 observables per hour instead of being spread over the day, while the reserve keeps calls for the evening and night. Every claim is a row in `api_call_log` (outcome `claimed`, then the HTTP status); the same row stops two overlapping runs from taking the same observable. If a run fails before storing a verdict (e.g. VirusTotal returns 429), the pair is picked up again after 15 minutes.
 
-Calls made by the live lookups in the AI Config UI simulator are not counted — keep `vt_daily_limit` a little below the real quota if you use them often. To clear a backlog faster than 60 per hour, set the Schedule Trigger to run every 15–20 seconds; the per-minute limit still holds.
+The live lookups of the AI Config UI simulator go through the same budget (`api_claim()`): a lookup is refused while the per-minute limit or the reserve is reached. To clear a backlog faster than 60 per hour, set the Schedule Trigger to run every 15–20 seconds; the per-minute limit still holds.
+
+## API Usage
+
+Every outgoing request is a row in `cyber_sentinel_ai.api_call_log`: provider, caller, endpoint, time, HTTP status and outcome (`ok`, `no_data`, `rate_limited`, `error`, or `claimed` when the run stopped before the result). The workflows log in one *Log API calls* node at the end of a run; VirusTotal is logged right after its call. The table is partitioned by month and kept 6 months, like `dns_queries`.
+
+| Caller | Providers |
+|---|---|
+| `main` | VirusTotal, Shodan, abuse.ch (ThreatFox, URLhaus), urlscan.io search, Gemini (one row per AI Agent run) |
+| `deep_recon` | RDAP, crt.sh, urlscan.io (search, scan, every poll of the result, DOM), Gemini |
+| `blocklist_candidates` | Gemini (one row per batch) |
+| `simulator` | VirusTotal, abuse.ch |
+| `monitor` | VirusTotal quota (`virustotal_quota` — free, does not count against the quota) |
+
+*API Usage Monitor* runs every hour at :05: it stores VirusTotal's counter in `api_provider_quota` and sends **one e-mail per provider and UTC day** when its usage crosses `api_alert_threshold_pct` (80 %) of its daily limit (`vt_daily_limit`, `api_daily_limit_<provider>`; 0 = no limit). Only VirusTotal is stopped by its budget — the other providers are counted and alerted. The AI Config UI shows everything on the **API usage** page: today per provider and caller, per hour, the last 30 days, rate limits and errors.
+
+## Failure Guard
+
+Every workflow above has *Failure Guard* as its Error Workflow (workflow settings). n8n starts it after each failed run. It reads the last `failure_guard_threshold` + 1 runs of that workflow through the n8n API:
+
+- the last `failure_guard_threshold` (10) runs all failed → the workflow is **deactivated** and **one e-mail** goes out with the failed node, the error and the time of the first failure;
+- a run still in flight after the stop finds that alert in `workflow_failure_alerts` and sends nothing; a successful run starts the count again.
+
+It needs no Vault: it uses the n8n credentials *Postgres account*, *SMTP account* and *n8n API (Failure Guard)* directly, and reads sender and recipient from `cyber_sentinel_ai.ops_settings`, which playbook 04.3 writes from `vault_n8n_user` / `vault_n8n_alert_to`. So it also works when Vault is sealed — the case that stopped the pipeline unnoticed for three days in November 2026. Every alert is stored in `workflow_failure_alerts`. After fixing the cause, activate the workflow again in n8n.
+
+n8n starts an Error Workflow **only while it is active**, and every import (04.6) deactivates it. Playbook 06.3 therefore activates Failure Guard and issues its API key (scopes `workflow:read`, `workflow:list`, `workflow:deactivate`, `execution:read`, `execution:list`; the old key is deleted) — run it after every 04.6. `00_main.yml` does.
 
 ## Rule Score
 
@@ -170,4 +197,4 @@ The workflows read secrets from HashiCorp Vault at run time:
 | `cyber-sentinel/api-keys/urlscanio/api-key` | urlscan.io search (main) and page scans (Deep Recon) |
 | `cyber-sentinel/api-keys/github/blocklists` | GitHub fine-grained token for sentinel-blocklists: Contents and Pull requests read/write (Blocklist Publish) |
 
-The n8n credentials needed by the AI and database nodes (Vault token, PostgreSQL, Gemini, SMTP) are created with fixed IDs by playbook 06.2, so the imported workflows work without manual setup.
+The n8n credentials needed by the AI and database nodes (Vault token, PostgreSQL, Gemini, SMTP) are created with fixed IDs by playbook 06.2, and the n8n API key of Failure Guard by playbook 06.3, so the imported workflows work without manual setup.

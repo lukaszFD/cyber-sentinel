@@ -13,7 +13,7 @@ The SQL lives in [`config/postgres/`](https://github.com/lukaszFD/cyber-sentinel
 |---|---|---|---|
 | 1 | `db_deployment.sql` | 04.3 | `cyber_sentinel` schema, app role, tables, views |
 | 2 | `db_partitioning_retention.sql` | 04.3 | partitions, retention functions, pg_cron jobs |
-| 3 | `db_ai_pipeline.sql` | 04.3 | `cyber_sentinel_ai` schema, scoring, allow-list, work queue, VirusTotal budget, Deep Recon |
+| 3 | `db_ai_pipeline.sql` | 04.3 | `cyber_sentinel_ai` schema, scoring, allow-list, work queue, API call log and VirusTotal budget, Deep Recon, Failure Guard |
 | 4 | `db_blocklists.sql` | 04.3 | own blocklists: entries, AI classifications, name patterns, classifier prompt, publish log |
 | 5 | `db_ai_config_editor.sql` | 04.5 | AI Config UI role, audit log, guard triggers |
 
@@ -102,8 +102,14 @@ erDiagram
 | Object | What it does |
 |---|---|
 | `v_pending_observables` | Work queue: new domain + IP pairs, without private IPs, allow-listed domains and pairs analysed in the last `cache_ttl_days`. |
-| `vt_lookup_log` | One row per VirusTotal call (kept 3 days). Counts the daily and per-minute budget and stops overlapping runs from taking the same pair. |
-| `v_vt_budget` | VirusTotal calls used today and in the last minute, calls left, reserve, next reset. |
+| `api_call_log` | One row per outgoing CTI / AI request: provider, caller, endpoint, HTTP status, outcome. Partitioned by month, kept 6 months. VirusTotal claims of the main workflow also stop overlapping runs from taking the same pair. |
+| `vt_lookup_log` | View on `api_call_log` (VirusTotal calls of the main workflow); a table until v2.2. |
+| `api_provider_quota` | Providers' own usage counters, written hourly by *API Usage Monitor* (kept 14 days). |
+| `v_vt_budget` | VirusTotal calls used today (the higher of the local count and VirusTotal's counter), in the last minute, calls left, reserve, next reset. |
+| `v_api_usage_today` / `v_api_usage_daily` | Usage per provider today with limit and share; calls per day, provider and caller. |
+| `api_alert_log` | Providers e-mailed for crossing `api_alert_threshold_pct`, one row per UTC day. |
+| `ops_settings` | Text settings Failure Guard needs while Vault may be down (e-mail sender and recipient). Written by playbook 04.3. |
+| `workflow_failure_alerts` | Workflows Failure Guard stopped: failures, first failure, failed node, error. |
 | `verdict_audit` | Per verdict: rule score, final score, what the agent changed and why, model, prompt version, evidence. Also the "already analysed" cache. |
 | `verdict_vectors` | Vector memory of past verdicts (3072-dim Gemini embeddings) searched by the agent's `historical_verdicts` tool. |
 | `pihole_block_log` | Every automatic Pi-hole block attempt and its result. |
@@ -129,7 +135,11 @@ erDiagram
 | `is_allowlisted()` | Allow-list check; the most specific rule wins. |
 | `setting()` | Reads one value from `ai_settings`; fails on a missing key. |
 | `sp_sync_domain_allowlist()` | Applies the weekly Tranco list as a delta; aborts if the list is suspiciously short. |
-| `claim_next_observable()` | Returns the next pending observable and logs the call, or nothing when the queue is empty or the VirusTotal budget is used up. |
+| `claim_next_observable()` | Returns the next pending observable and logs the claim, or nothing when the queue is empty or the VirusTotal budget is used up. |
+| `api_call_result()` | Fills in the HTTP status of the main workflow's VirusTotal claim. |
+| `api_calls_record()` | Logs a batch of calls (the *Log API calls* nodes). |
+| `api_claim()` / `api_call_finish()` | VirusTotal claim and result for the simulator; the only way the UI writes the log. |
+| `api_quota_record()` / `api_usage_alerts_due()` | Stores a provider counter; returns the providers to e-mail today and marks them. |
 | `recon_requeue()` | Removes one `deep_recon` row so its verdict gets a new second look; the only way the UI deletes from that table. |
 | `blocklist_record_classifications()` | Stores one AI batch and turns telemetry / tracking answers into review candidates. |
 | `blocklist_sync_malicious()` | Copies Pi-hole auto-blocks into the malicious list and extends their expiry. |
@@ -142,13 +152,13 @@ erDiagram
 |---|---|
 | `postgres` | Superuser; runs the deployment scripts and pg_cron jobs. |
 | app role (`postgres_user`) | n8n and `dns_log_processor`: read/write in both schemas, read-only on the audit log. |
-| `ai_config_editor` | AI Config UI only: the configuration objects above, nothing from the data tables. Reads `deep_recon`, the recon queue and the VirusTotal budget. Guard triggers stop it from breaking the pipeline (active prompts are read-only, one prompt of each kind always active, malicious levels stay a contiguous top range). |
+| `ai_config_editor` | AI Config UI only: the configuration objects above, nothing from the data tables. Reads `deep_recon`, the recon queue, the VirusTotal budget, the API call log and Failure Guard alerts; logs simulator calls through `api_claim()` / `api_call_finish()` only. Guard triggers stop it from breaking the pipeline (active prompts are read-only, one prompt of each kind always active, malicious levels stay a contiguous top range). |
 
 Passwords come from `vault.yml` and are copied to HashiCorp Vault.
 
 ## Partitioning and Retention
 
-`dns_queries`, `threat_indicators` and `network_events` are partitioned by month (`<table>_pYYYYMM`) with a default partition catching anything outside the range. Two pg_cron jobs run on the 1st of each month:
+`dns_queries`, `threat_indicators`, `network_events` and `cyber_sentinel_ai.api_call_log` are partitioned by month (`<table>_pYYYYMM`) with a default partition catching anything outside the range. The list lives in `cyber_sentinel.partitioned_tables()`. Two pg_cron jobs run on the 1st of each month:
 
 | Job | Time | Action |
 |---|---|---|

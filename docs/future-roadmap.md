@@ -2,17 +2,6 @@
 
 What is planned next. Delivered work is listed in [Releases](releases.md).
 
-## Next: API Call Monitoring
-
-Planned right after v2.2.0, on its own branch. The VirusTotal free tier (500 requests/day) has been used up several times although `claim_next_observable()` keeps a budget. The budget counts claims in `vt_lookup_log`, not the requests VirusTotal actually receives, so calls outside the main workflow's path are invisible — for example live lookups from the AI Config UI simulator (`AI_UI_VT_API_KEY`), retries of a failed HTTP request, or anything else using the same key.
-
-- **Count real calls** — one log table for every outgoing CTI/AI request: provider (VirusTotal, Gemini, urlscan.io, Shodan, abuse.ch), caller (main workflow, Deep Recon, Blocklist Candidates, simulator), time and HTTP status, so `429` responses are visible.
-- **Compare with the provider** — read VirusTotal's own quota counter (`/api/v3/users/{key}/overall_quotas`) and show the difference to the local count; a gap means calls from outside the logged paths.
-- **AI Config UI** — usage per provider and caller: today, per hour, last 30 days, with the limit drawn in.
-- **Alerts** — e-mail when a provider reaches a set share of its daily limit (e.g. 80 %) and on the first `429` of the day.
-- **Budget from real calls** — the simulator and any other caller go through the same budget as the main workflow, so the reserve also covers them.
-- Later the health agent (section 2, item 1) reads these counters instead of its own queries.
-
 ## 1. Sentinel Engram
 
 [Sentinel Engram](https://github.com/lukaszFD/sentinel-engram) is the long-term memory of Cyber Sentinel: a separate project that loads AI verdicts, DNS activity and Pi-hole blocklists into a Vertex Synapse CTI graph, with a Neo4j view for visual analysis. It reads Cyber Sentinel's database through a read-only role and an SSH tunnel and never writes to it.
@@ -27,7 +16,7 @@ Planned on the Cyber Sentinel side:
 
 Goal: a system that checks itself, corrects its own mistakes and improves its own configuration, with a human approving changes instead of doing them. Each item runs as a separate n8n workflow; workflows hand work to each other through a status-driven queue table. Order below is the planned order.
 
-1. **Health agent** — daily check of the pipeline: queue depth, VirusTotal 429 errors, failed AI analyses, pg_cron jobs, aborted Tranco syncs, and host state from Prometheus (see section 6). Sends a short daily report and alerts when the pipeline stops.
+1. **Health agent** — daily check of the pipeline: queue depth, failed AI analyses, pg_cron jobs, aborted Tranco syncs, and host state from Prometheus (see section 6). API usage and 429s come from `api_call_log`, and stopped workflows from Failure Guard (both in [v2.3.0](releases.md#v230)). Sends a short daily report.
 2. **Verdict review and auto-unblock** — weekly re-scan of verdicts scored 3–5 and of everything blocked in Pi-hole. Blocks get an expiry date; a domain that stays clean is unblocked, one that became malicious is raised.
 3. **Analyst feedback** — mark a verdict as false positive or true positive in the AI Config UI (or with the `cs.fp` tag in Engram). Labelled verdicts go into vector memory as confirmed examples.
 4. **Prompt and threshold tuning agent** — analyses `verdict_audit` and feedback: where the AI deviates from the rules and why, which rules produce false positives, how often the agent fails. Creates a new prompt version or setting change as an **inactive draft**, replays it against stored evidence from recent verdicts (no CTI API calls) and shows the difference. Activation stays manual in the AI Config UI.

@@ -1,7 +1,8 @@
 -- ============================================
 -- Cyber Sentinel — AI config editor (web UI) — POSTGRES
--- Version: 1.2 (Own blocklists: review queue, name patterns, classifier
---               prompt versions, read-only classifications and publish log)
+-- Version: 1.3 (API usage: read-only call log, usage views and provider
+--               counters; simulator VirusTotal calls through api_claim();
+--               Failure Guard alerts read-only)
 -- ============================================
 -- Runs AFTER db_ai_pipeline.sql, as the `postgres` superuser, connected to
 -- `cyber_intelligence`. Rendered by Ansible (template module, playbook
@@ -31,6 +32,12 @@
 --   cyber_sentinel_ai.recon_requeue()          EXECUTE (the only way the UI
 --                                              removes a recon row)
 --   cyber_sentinel_ai.v_vt_budget             SELECT (VirusTotal calls today)
+--   cyber_sentinel_ai.api_call_log             SELECT (written by n8n and the
+--                                              functions below)
+--   cyber_sentinel_ai.v_api_usage_today / v_api_usage_daily / api_provider_quota /
+--   api_alert_log / workflow_failure_alerts    SELECT
+--   cyber_sentinel_ai.api_claim(), api_call_finish()  EXECUTE (simulator: the
+--                                              only way the UI writes the log)
 --   cyber_sentinel_ai.blocklist_entries        SELECT, INSERT, UPDATE(status,
 --                                              note, expires_at, reviewed_by,
 --                                              reviewed_at) — review and manual
@@ -528,6 +535,15 @@ GRANT SELECT ON cyber_sentinel_ai.v_pending_recon TO "{{ ai_config_db_user }}";
 GRANT EXECUTE ON FUNCTION cyber_sentinel_ai.recon_requeue(BIGINT) TO "{{ ai_config_db_user }}";
 -- VirusTotal budget status (Settings, step 2).
 GRANT SELECT ON cyber_sentinel_ai.v_vt_budget TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.api_call_log            TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.v_api_usage_today       TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.v_api_usage_daily       TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.api_provider_quota      TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.api_alert_log           TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_ai.workflow_failure_alerts TO "{{ ai_config_db_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_ai.api_claim(TEXT, TEXT, TEXT) TO "{{ ai_config_db_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_ai.api_call_finish(BIGINT, TEXT, TEXT, TEXT, INT, TEXT, TEXT, TEXT)
+    TO "{{ ai_config_db_user }}";
 
 -- Blocklists page: review candidates and add manual entries (no DELETE —
 -- rejected rows stay so the AI does not propose them again). Entries are

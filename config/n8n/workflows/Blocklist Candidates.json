@@ -334,6 +334,44 @@
       ],
       "id": "4db23c0b-4d84-5beb-985c-8005dd0384cc",
       "name": "Note - overview"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect API calls\n// One Gemini request per classified batch for cyber_sentinel_ai.api_call_log\n// (usage page, alerts).\n// Mode: Run Once for All Items.\n\nconst CALLER = 'blocklist_candidates';\nconst calls = $('Validate classifications').all().map((i) => ({\n  provider: 'gemini',\n  caller: CALLER,\n  endpoint: 'classifier',\n  http_status: i.json.ai_error ? null : 200,\n  message: i.json.ai_error ? String(i.json.ai_error).slice(0, 300) : null,\n}));\nreturn [{ json: { calls } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        560
+      ],
+      "id": "722164f1-0d28-5a34-a3fd-63fefcd6a247",
+      "name": "Collect API calls",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Usage counters (API usage page, alerts). Never stops the run.\nSELECT cyber_sentinel_ai.api_calls_record($1::jsonb) AS stored;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.calls || []) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1800,
+        560
+      ],
+      "id": "806a77a0-6c9e-5341-808a-a373d77ab937",
+      "name": "Log API calls",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "pinData": {},
@@ -466,6 +504,11 @@
             "node": "New candidates?",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Collect API calls",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -491,12 +534,24 @@
           }
         ]
       ]
+    },
+    "Collect API calls": {
+      "main": [
+        [
+          {
+            "node": "Log API calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "errorWorkflow": "FailureGuard0001"
   },
   "versionId": "50fe9cf5-d09f-5a17-95e0-fa1f94c3682b",
   "meta": {

@@ -4,7 +4,9 @@
 -- ============================================
 -- Strategy: Monthly declarative partitioning, 6-month retention
 -- Tables: cyber_sentinel.dns_queries, cyber_sentinel.network_events,
---         cyber_sentinel.threat_indicators
+--         cyber_sentinel.threat_indicators, cyber_sentinel_ai.api_call_log
+--         (the last one is created by db_ai_pipeline.sql; listed in
+--         cyber_sentinel.partitioned_tables())
 -- Automation: pg_cron (jobs evt_drop_old_partitions / evt_add_future_partitions)
 --
 -- PREREQUISITES:
@@ -76,18 +78,33 @@ CREATE TABLE IF NOT EXISTS cyber_sentinel.threat_indicators_p_default PARTITION 
 -- job commands in Part 4), so they work regardless of whatever role or
 -- search_path ends up invoking them.
 
+-- Partitioned tables under maintenance, as 'schema.table'. Tables of
+-- other schemas are listed explicitly; a table that does not exist yet
+-- (cyber_sentinel_ai.api_call_log before db_ai_pipeline.sql ran) is skipped.
+CREATE OR REPLACE FUNCTION cyber_sentinel.partitioned_tables()
+RETURNS TEXT[]
+LANGUAGE sql IMMUTABLE AS $$
+SELECT ARRAY['cyber_sentinel.dns_queries', 'cyber_sentinel.network_events',
+             'cyber_sentinel.threat_indicators', 'cyber_sentinel_ai.api_call_log'];
+$$;
+
 CREATE OR REPLACE FUNCTION cyber_sentinel.sp_add_future_partitions()
 RETURNS void AS $$
 DECLARE
-v_table_name TEXT;
+v_qualified TEXT;
+    v_schema TEXT;
+    v_table_name TEXT;
     v_target_month DATE;
     v_partition_name TEXT;
     v_range_start DATE;
     v_range_end DATE;
     i INT;
 BEGIN
-    FOREACH v_table_name IN ARRAY ARRAY['dns_queries', 'network_events', 'threat_indicators']
+    FOREACH v_qualified IN ARRAY cyber_sentinel.partitioned_tables()
     LOOP
+        v_schema := split_part(v_qualified, '.', 1);
+        v_table_name := split_part(v_qualified, '.', 2);
+        CONTINUE WHEN to_regclass(v_qualified) IS NULL;
         FOR i IN 1..3 LOOP
             v_target_month := date_trunc('month', CURRENT_DATE) + (i || ' months')::interval;
             v_range_start := v_target_month;
@@ -97,12 +114,12 @@ BEGIN
             IF NOT EXISTS (
                 SELECT 1 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE c.relname = v_partition_name AND n.nspname = 'cyber_sentinel'
+                WHERE c.relname = v_partition_name AND n.nspname = v_schema
             ) THEN
 BEGIN
 EXECUTE format(
-        'CREATE TABLE cyber_sentinel.%I PARTITION OF cyber_sentinel.%I FOR VALUES FROM (%L) TO (%L)',
-        v_partition_name, v_table_name, v_range_start, v_range_end
+        'CREATE TABLE %I.%I PARTITION OF %I.%I FOR VALUES FROM (%L) TO (%L)',
+        v_schema, v_partition_name, v_schema, v_table_name, v_range_start, v_range_end
         );
 INSERT INTO cyber_sentinel.partition_maintenance_log (table_name, partition_name, action)
 VALUES (v_table_name, v_partition_name, 'ADD');
@@ -125,13 +142,12 @@ rec RECORD;
     v_yyyymm TEXT;
 BEGIN
 FOR rec IN
-SELECT c.relname AS partition_name, p.relname AS table_name
+SELECT c.relname AS partition_name, p.relname AS table_name, n.nspname AS schema_name
 FROM pg_inherits i
          JOIN pg_class c ON c.oid = i.inhrelid
          JOIN pg_class p ON p.oid = i.inhparent
          JOIN pg_namespace n ON n.oid = p.relnamespace
-WHERE n.nspname = 'cyber_sentinel'
-  AND p.relname IN ('dns_queries', 'network_events', 'threat_indicators')
+WHERE n.nspname || '.' || p.relname = ANY (cyber_sentinel.partitioned_tables())
   AND c.relname ~ '_p[0-9]{6}$'
     LOOP
         v_yyyymm := right(rec.partition_name, 6);
@@ -144,8 +160,8 @@ BEGIN
                 -- (02:00 on the 1st of the month). CONCURRENTLY cannot be used
                 -- inside a plpgsql function (it cannot run in a transaction
                 -- block).
-EXECUTE format('ALTER TABLE cyber_sentinel.%I DETACH PARTITION cyber_sentinel.%I', rec.table_name, rec.partition_name);
-EXECUTE format('DROP TABLE cyber_sentinel.%I', rec.partition_name);
+EXECUTE format('ALTER TABLE %I.%I DETACH PARTITION %I.%I', rec.schema_name, rec.table_name, rec.schema_name, rec.partition_name);
+EXECUTE format('DROP TABLE %I.%I', rec.schema_name, rec.partition_name);
 INSERT INTO cyber_sentinel.partition_maintenance_log (table_name, partition_name, action)
 VALUES (rec.table_name, rec.partition_name, 'DROP');
 EXCEPTION WHEN OTHERS THEN
@@ -197,8 +213,7 @@ FROM pg_inherits i
          JOIN pg_class child ON child.oid = i.inhrelid
          JOIN pg_namespace n ON n.oid = parent.relnamespace
          LEFT JOIN pg_stat_user_tables s ON s.relid = child.oid
-WHERE n.nspname = 'cyber_sentinel'
-  AND parent.relname IN ('dns_queries', 'network_events', 'threat_indicators')
+WHERE n.nspname || '.' || parent.relname = ANY (cyber_sentinel.partitioned_tables())
 ORDER BY parent.relname, child.relname;
 
 -- ============================================

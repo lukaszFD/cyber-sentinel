@@ -1088,7 +1088,8 @@
   "active": false,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "errorWorkflow": "FailureGuard0001"
   },
   "versionId": "fbb87d52-4776-5ec1-85e5-31df1394c109",
   "meta": {
