@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}API usage{% endblock %}
+{% block content %}
+<h1>API usage</h1>
+<p class="muted">Every outgoing request of the n8n workflows and of the simulator is logged in <code>cyber_sentinel_ai.api_call_log</code> (kept 6 months). The day is the UTC day of the providers' quotas — it resets at 00:00 UTC (01:00/02:00 Polish time). <strong>Used</strong> is the higher of the local count and the provider's own counter, which the <em>API Usage Monitor</em> workflow reads every hour and which also sees calls from the dev environment or manual tests.</p>
+{% if ready %}
+
+<section class="card">
+  <h2>Today</h2>
+  <table class="list">
+    <thead><tr><th>Provider</th><th>Used</th><th>Limit</th><th></th><th>Local</th><th>Provider counter</th><th>429</th><th>Errors</th></tr></thead>
+    <tbody>
+    {% for r in today %}
+    <tr>
+      <td class="mono">{{ r.provider }}</td>
+      <td class="mono">{{ r.used }}</td>
+      <td class="mono">{{ r.daily_limit if r.daily_limit else '—' }}</td>
+      <td>{% if r.daily_limit %}<meter min="0" max="{{ r.daily_limit }}" low="{{ (r.daily_limit * 0.6)|int }}" high="{{ (r.daily_limit * 0.8)|int }}" optimum="0" value="{{ r.used }}">{{ r.used_pct }} %</meter> <span class="small muted">{{ r.used_pct }} %</span>{% endif %}</td>
+      <td class="mono">{{ r.local_calls }}</td>
+      <td class="mono">{% if r.provider_used is not none %}{{ r.provider_used }} <span class="small muted">at {{ r.checked_local|dt }}</span>{% else %}—{% endif %}</td>
+      <td>{% if r.rate_limited %}<span class="tag bad">{{ r.rate_limited }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td>{% if r.errors %}<span class="tag warn">{{ r.errors }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if vt_budget %}
+  <p class="small">VirusTotal budget: <strong class="mono">{{ vt_budget.remaining_today }}</strong> calls left today, {{ vt_budget.reserve }} of them kept for later traffic · {{ vt_budget.used_last_minute }}/{{ vt_budget.per_minute_limit }} in the last minute · resets {{ vt_budget.resets_local|dt }}
+    {% if vt_budget.provider_used_today is not none and vt_budget.provider_used_today > vt_budget.local_used_today %}
+      · <span class="tag warn">VirusTotal counted {{ vt_budget.provider_used_today - vt_budget.local_used_today }} more than this stack logged</span> — calls from outside (dev, manual tests)
+    {% endif %}
+    {% if vt_budget.remaining_today <= vt_budget.reserve %} · <span class="tag warn">paused</span>{% endif %}</p>
+  {% endif %}
+  <p class="small muted">Limits and the alert threshold: <a href="{{ url_for('settings_page') }}">Settings</a> (<code>vt_daily_limit</code>, <code>api_daily_limit_*</code>, <code>api_alert_threshold_pct</code>). Only VirusTotal is stopped by its budget; the other providers are counted and alerted.</p>
+</section>
+
+<div class="grid">
+  <section class="card">
+    <h2>Today by caller</h2>
+    <table class="list">
+      <thead><tr><th>Provider</th><th>Caller</th><th>Calls</th><th>OK</th><th>429</th><th>Failed</th></tr></thead>
+      <tbody>
+      {% for r in callers %}
+      <tr><td class="mono">{{ r.provider }}</td><td>{{ r.caller }}</td><td class="mono">{{ r.calls }}</td><td class="mono">{{ r.ok }}</td>
+          <td class="mono">{{ r.rate_limited }}</td><td class="mono">{{ r.failed }}</td></tr>
+      {% else %}<tr><td colspan="6" class="muted">No calls today.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">Failed includes claims without a result (the run stopped before the request finished).</p>
+  </section>
+  <section class="card">
+    <h2>Today by hour (Polish time)</h2>
+    <table class="list">
+      <thead><tr><th>Hour</th>{% for p in providers %}<th class="mono">{{ p }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for hour, row in hour_rows %}
+      <tr><td class="mono">{{ hour }}</td>{% for p in providers %}<td class="mono">{{ row.get(p, '') }}</td>{% endfor %}</tr>
+      {% else %}<tr><td class="muted">No calls today.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Last 30 days</h2>
+  <table class="list">
+    <thead><tr><th>Day (UTC)</th>{% for p in day_providers %}<th class="mono">{{ p }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for day, row in day_rows %}
+    <tr><td class="mono nowrap">{{ day }}</td>
+      {% for p in day_providers %}{% set c = row.get(p) %}
+      <td class="mono">{% if c %}{{ c.calls }}{% if c.rate_limited %} <span class="tag bad">429×{{ c.rate_limited }}</span>{% endif %}{% if c.failed %} <span class="tag warn">{{ c.failed }} failed</span>{% endif %}{% endif %}</td>
+      {% endfor %}</tr>
+    {% else %}<tr><td class="muted">No calls logged yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Rate limits and errors (7 days)</h2>
+  <table class="list">
+    <thead><tr><th>When</th><th>Provider</th><th>Caller</th><th>Endpoint</th><th>Outcome</th><th>HTTP</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for r in problems %}
+    <tr><td class="nowrap small">{{ r.at|dt }}</td><td class="mono">{{ r.provider }}</td><td>{{ r.caller }}</td><td class="mono small">{{ r.endpoint or '' }}</td>
+        <td><span class="tag {{ 'bad' if r.outcome == 'rate_limited' else 'warn' }}">{{ r.outcome }}</span></td>
+        <td class="mono">{{ r.http_status if r.http_status is not none else '—' }}</td><td class="small">{{ r.message or '' }}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">None.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<div class="grid">
+  <section class="card">
+    <h2>Usage alerts sent</h2>
+    <table class="list">
+      <thead><tr><th>When</th><th>Provider</th><th>Used / limit</th></tr></thead>
+      <tbody>
+      {% for a in alerts %}<tr><td class="nowrap small">{{ a.at|dt }}</td><td class="mono">{{ a.provider }}</td><td class="mono">{{ a.used }} / {{ a.daily_limit }}</td></tr>
+      {% else %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Failure Guard</h2>
+    <p class="small muted">Workflows stopped after <code>failure_guard_threshold</code> failed runs in a row (one e-mail each).</p>
+    <table class="list">
+      <thead><tr><th>When</th><th>Workflow</th><th>Failures</th><th>Last error</th></tr></thead>
+      <tbody>
+      {% for g in guard %}
+      <tr><td class="nowrap small">{{ g.at|dt }}</td>
+          <td>{{ g.workflow_name }} {% if g.deactivated %}<span class="tag bad">stopped</span>{% else %}<span class="tag warn">not stopped</span>{% endif %}</td>
+          <td class="mono">{{ g.failures }}</td><td class="small"><span class="mono">{{ g.error_node or '' }}</span> {{ g.error_message }}</td></tr>
+      {% else %}<tr><td colspan="4" class="muted">None.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

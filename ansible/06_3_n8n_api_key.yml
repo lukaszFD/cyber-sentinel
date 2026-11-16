@@ -1,0 +1,194 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 06.3 — Failure Guard (n8n API key + activation)
+# ============================================================
+# Purpose:    Makes the "Failure Guard" workflow work:
+#               1. logs in to n8n as the owner (REST session)
+#               2. deletes the previous key labelled `failure-guard`
+#               3. creates a new key, limited to reading executions and
+#                  deactivating workflows
+#               4. imports it as the credential "n8n API (Failure Guard)"
+#                  with the fixed ID the workflow JSON expects
+#               5. activates Failure Guard: n8n runs an Error Workflow only
+#                  while it is active, and every import (04.6) deactivates it
+#
+# Why a new key every run: a fresh dev deploy builds a new n8n instance,
+# so a key kept in ansible-vault would stop working. The key never leaves
+# the host: it goes straight from the n8n API into the credential store.
+# Independent of Vault and of 06.2 (no n8n Vault token needed), so it can
+# run on its own during an upgrade.
+#
+# Depends on: - 04.6 (owner account exists, Failure Guard imported) — run
+#               it AFTER every 04.6
+# Idempotent: re-runs rotate the key, update the credential in place and
+#             leave an already active Failure Guard as it is.
+# ============================================================
+
+- name: 06.3 - n8n API key for Failure Guard
+  hosts: all_servers
+  become: yes
+
+  vars:
+    n8n_container: "n8n-server"
+    n8n_url: "http://localhost:5678"
+    n8n_api_key_label: "failure-guard"
+    failure_guard_workflow_id: "FailureGuard0001"
+    # Read executions, deactivate a workflow. Nothing else.
+    n8n_api_key_scopes:
+      - "workflow:read"
+      - "workflow:list"
+      - "workflow:deactivate"
+      - "execution:read"
+      - "execution:list"
+    # n8n binds the REST session to a browser id; any constant works.
+    n8n_rest_headers:
+      browser-id: "cyber-sentinel-ansible"
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — REST session as owner
+    # ============================================================
+
+    - name: "[06.3.1.1] Wait for n8n to become healthy"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/healthz"
+        status_code: 200
+      register: n8n_health
+      until: n8n_health.status == 200
+      retries: 30
+      delay: 5
+
+    - name: "[06.3.1.2] Log in to n8n as the owner"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/rest/login"
+        method: POST
+        headers: "{{ n8n_rest_headers }}"
+        body_format: json
+        body:
+          emailOrLdapLoginId: "{{ n8n_admin_email }}"
+          password: "{{ vault_n8n_password }}"
+        status_code: 200
+      register: n8n_login
+      no_log: true
+
+    # ============================================================
+    # SECTION 2 — Rotate the key
+    # ============================================================
+
+    - name: "[06.3.2.1] List existing API keys"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/rest/api-keys"
+        headers: "{{ n8n_rest_headers | combine({'Cookie': n8n_login.cookies_string}) }}"
+        status_code: 200
+      register: n8n_api_keys
+      no_log: true
+
+    - name: "[06.3.2.2] Delete previous Failure Guard keys"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/rest/api-keys/{{ item.id }}"
+        method: DELETE
+        headers: "{{ n8n_rest_headers | combine({'Cookie': n8n_login.cookies_string}) }}"
+        status_code: [200, 204]
+      # n8n 2.x answers {data: {items: [...], counts, ...}}; ['items'], not
+      # .items (that is the dict method in Jinja).
+      loop: "{{ (n8n_api_keys.json.data['items'] | default([])) | selectattr('label', 'equalto', n8n_api_key_label) | list }}"
+      loop_control:
+        label: "{{ item.id }}"
+      no_log: true
+
+    - name: "[06.3.2.3] Create the Failure Guard API key"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/rest/api-keys"
+        method: POST
+        headers: "{{ n8n_rest_headers | combine({'Cookie': n8n_login.cookies_string}) }}"
+        body_format: json
+        body:
+          label: "{{ n8n_api_key_label }}"
+          scopes: "{{ n8n_api_key_scopes }}"
+          expiresAt: null
+        status_code: 200
+      register: n8n_api_key_new
+      no_log: true
+
+    # ============================================================
+    # SECTION 3 — Store it as an n8n credential
+    # ============================================================
+    # Same pattern as 06.2: import:credentials upserts by id and encrypts
+    # the plain `data` object with the instance key.
+
+    - name: "[06.3.3.X] Import the n8n API credential"
+      block:
+        - name: "[06.3.3.1] Stage credential file on host (plaintext key)"
+          ansible.builtin.copy:
+            content: >-
+              {{ [{'id': 'n8nApiFailGuard1', 'name': 'n8n API (Failure Guard)', 'type': 'n8nApi',
+                   'data': {'apiKey': n8n_api_key_new.json.data.rawApiKey,
+                            'baseUrl': n8n_url ~ '/api/v1'}}] | to_json }}
+            dest: "/tmp/n8n_api_credential.json"
+            mode: "0600"
+          no_log: true
+
+        - name: "[06.3.3.2] Copy credential file into n8n container"
+          ansible.builtin.shell:
+            cmd: >-
+              docker exec -i {{ n8n_container }}
+              sh -c 'umask 077 && cat > /tmp/n8n_api_credential.json'
+              < /tmp/n8n_api_credential.json
+
+        - name: "[06.3.3.3] Import credential via n8n CLI"
+          ansible.builtin.command:
+            cmd: >-
+              docker exec {{ n8n_container }}
+              n8n import:credentials --input=/tmp/n8n_api_credential.json
+          register: n8n_api_cred_import
+          changed_when: true
+
+      always:
+        - name: "[06.3.3.4] Remove plaintext credential file (host + container)"
+          ansible.builtin.shell:
+            cmd: >-
+              rm -f /tmp/n8n_api_credential.json;
+              docker exec -u root {{ n8n_container }} rm -f /tmp/n8n_api_credential.json
+          changed_when: false
+          failed_when: false
+
+    # ============================================================
+    # SECTION 4 — Activate Failure Guard
+    # ============================================================
+    # Same REST call as the "Publish" button: the current version becomes
+    # the active one, live at once (no restart).
+
+    - name: "[06.3.4.1] Read the Failure Guard workflow"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/rest/workflows/{{ failure_guard_workflow_id }}"
+        headers: "{{ n8n_rest_headers | combine({'Cookie': n8n_login.cookies_string}) }}"
+        status_code: [200, 404]
+      register: n8n_failure_guard
+      no_log: true
+
+    - name: "[06.3.4.2] Fail when Failure Guard is not imported"
+      ansible.builtin.assert:
+        that: n8n_failure_guard.status == 200
+        fail_msg: >-
+          Workflow {{ failure_guard_workflow_id }} (Failure Guard) is not in n8n.
+          Run 04_6_post_config.yml first (it imports config/n8n/workflows/Failure Guard.json).
+        quiet: true
+
+    - name: "[06.3.4.3] Activate Failure Guard"
+      ansible.builtin.uri:
+        url: "{{ n8n_url }}/rest/workflows/{{ failure_guard_workflow_id }}/activate"
+        method: POST
+        headers: "{{ n8n_rest_headers | combine({'Cookie': n8n_login.cookies_string}) }}"
+        body_format: json
+        body:
+          versionId: "{{ n8n_failure_guard.json.data.versionId }}"
+        status_code: 200
+      when: not (n8n_failure_guard.json.data.active | default(false) | bool)
+      no_log: true
+
+    - name: "[06.3.5.1] Summary"
+      ansible.builtin.debug:
+        msg: >-
+          Failure Guard API key rotated (scopes: {{ n8n_api_key_scopes | join(', ') }}),
+          stored as credential "n8n API (Failure Guard)";
+          Failure Guard {{ 'was already active' if (n8n_failure_guard.json.data.active | default(false) | bool) else 'activated' }}.

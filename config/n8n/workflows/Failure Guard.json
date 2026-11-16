@@ -1,0 +1,424 @@
+{
+  "name": "Failure Guard",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Cyber Sentinel — Failure Guard\n\nError Workflow of every Cyber Sentinel workflow (workflow settings → *Error workflow*). n8n starts it after each failed run — **only while it is active**; playbook 06.3 activates it after every import.\n\nWhen the last `failure_guard_threshold` (default 10) runs of a workflow **all** failed, it deactivates that workflow through the n8n API and sends **one** e-mail per streak. A successful run in between starts the count again.\n\nWorks when Vault is sealed: it uses the n8n credentials *Postgres account*, *SMTP account* and *n8n API (Failure Guard)* directly. Sender and recipient come from `cyber_sentinel_ai.ops_settings` (written by playbook 04.3). The API key is issued by playbook 06.3.\n\nEvery alert is stored in `cyber_sentinel_ai.workflow_failure_alerts`.",
+        "height": 420,
+        "width": 560,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        300
+      ],
+      "id": "0b6e4ff1-351a-5748-b17e-bcff7d34f39a",
+      "name": "Note - overview"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        260,
+        300
+      ],
+      "id": "40a6c44c-c923-581a-9f8b-e5533a9d18d5",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Threshold and e-mail addresses. Read from Postgres directly (n8n credential),\n-- never from Vault: the guard must work while Vault is sealed.\nSELECT cyber_sentinel_ai.setting('failure_guard_threshold')::int AS threshold,\n       (SELECT value FROM cyber_sentinel_ai.ops_settings WHERE key = 'alert_email_from') AS email_from,\n       (SELECT value FROM cyber_sentinel_ai.ops_settings WHERE key = 'alert_email_to')   AS email_to;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        300
+      ],
+      "id": "cf16c11a-c894-57e3-9b6a-f95d6dd69179",
+      "name": "Guard settings",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=http://localhost:5678/api/v1/executions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "n8nApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "workflowId",
+              "value": "={{ $('Error Trigger').first().json.workflow.id }}"
+            },
+            {
+              "name": "limit",
+              "value": "={{ (Number($('Guard settings').first().json.threshold) || 10) + 1 }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ],
+      "id": "464f1ef1-1f3d-5c78-8931-134a5d9b0e5c",
+      "name": "Recent executions",
+      "credentials": {
+        "n8nApi": {
+          "id": "n8nApiFailGuard1",
+          "name": "n8n API (Failure Guard)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate failures\n// Reads the newest executions of the failed workflow (n8n API, newest\n// first) and decides:\n//   stop   the last `threshold` runs all failed -> deactivate the workflow\n//          and e-mail, unless this streak was already e-mailed (\"Earlier\n//          alert for this streak?\" checks workflow_failure_alerts)\n// A successful run in between starts the count again. Runs still in\n// flight after the stop find the earlier alert and send nothing.\n// Mode: Run Once for All Items.\n\nconst ev = $('Error Trigger').first().json;\nconst cfg = $('Guard settings').first().json;\nconst res = $json; // full HTTP response of \"Recent executions\"\n\nconst threshold = Math.max(2, Number(cfg.threshold) || 10);\nconst wf = ev.workflow || {};\nconst exec = ev.execution || {};\nconst err = exec.error || ev.trigger?.error || {};\n\nif (res.statusCode !== 200 || !Array.isArray(res.body?.data)) {\n  // Never guess: without the history the guard cannot count. The run of\n  // this workflow fails, so the problem shows up in n8n's execution list.\n  const detail = res.statusCode === 401\n    ? 'n8n API rejected the key - run playbook 06.3 (06_3_n8n_api_key.yml).'\n    : `HTTP ${res.statusCode ?? '?'} ${String(res.body?.message || res.error?.message || '').slice(0, 200)}`;\n  throw new Error(`Failure Guard cannot read the executions of \"${wf.name}\": ${detail}`);\n}\n\nconst runs = res.body.data\n  .filter((r) => r.finished !== false || r.status) // ignore runs still in progress\n  .sort((a, b) => Number(b.id) - Number(a.id));\nconst failed = (r) => ['error', 'crashed'].includes(r.status);\nlet streak = 0;\nwhile (streak < runs.length && failed(runs[streak])) streak++;\n\nconst stop = streak >= threshold;\nconst firstFailure = streak ? runs[streak - 1].startedAt : null;\n\nreturn [{\n  json: {\n    stop,\n    threshold,\n    streak,\n    workflow_id: String(wf.id || ''),\n    workflow_name: wf.name || '(unknown workflow)',\n    execution_id: exec.id ? String(exec.id) : null,\n    execution_url: exec.url || null,\n    error_node: err.node?.name || exec.lastNodeExecuted || null,\n    error_message: String(err.message || err.description || 'no error message').slice(0, 1000),\n    first_failure: firstFailure,\n    last_failure: streak ? runs[0].startedAt : null,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "id": "fd97efaf-da74-5a77-8abb-78d656df279d",
+      "name": "Evaluate failures"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "69e39bc6-8c78-5856-8a78-e2081569dc38",
+              "leftValue": "={{ $json.stop }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1140,
+        300
+      ],
+      "id": "af8741a9-ede0-55dd-a0d5-8cae17fd3330",
+      "name": "Stop workflow?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $('Evaluate failures').first().json.workflow_id }}/deactivate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "n8nApi",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        300
+      ],
+      "id": "5ec6d8f4-24f8-5700-b3be-4a7cfbaac36c",
+      "name": "Deactivate workflow",
+      "credentials": {
+        "n8nApi": {
+          "id": "n8nApiFailGuard1",
+          "name": "n8n API (Failure Guard)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- An alert for this workflow since the oldest failure we can see means the\n-- streak was already e-mailed (a run still in flight after the stop).\nSELECT EXISTS (\n    SELECT 1 FROM cyber_sentinel_ai.workflow_failure_alerts\n    WHERE workflow_id = $1\n      AND alerted_at >= COALESCE($2::timestamptz, now()) - interval '1 minute'\n) AS already;",
+        "options": {
+          "queryReplacement": "={{ [ $('Evaluate failures').first().json.workflow_id, $('Evaluate failures').first().json.first_failure ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1580,
+        300
+      ],
+      "id": "1dcd26f5-5500-52f1-b9d3-286530b413d3",
+      "name": "Earlier alert for this streak?",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b87ef4bd-8288-5c79-b81d-4cf1cc03efe8",
+              "leftValue": "={{ $json.already === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        300
+      ],
+      "id": "fce7bdda-9215-541d-8f2e-eca8dcef617e",
+      "name": "First alert of this streak?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build e-mail\n// One e-mail per streak: what stopped, since when, the last error and how\n// to restart it.\n// Mode: Run Once for All Items.\n\nconst r = $('Evaluate failures').first().json;\nconst cfg = $('Guard settings').first().json;\nconst deact = $('Deactivate workflow').first().json;\nconst deactivated = deact.statusCode === 200;\n\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst when = (t) => (t ? new Date(t).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' }) : '-');\n\nconst state = deactivated\n  ? 'The workflow has been <b>deactivated</b>.'\n  : `<b>Deactivation failed</b> (n8n API HTTP ${esc(deact.statusCode ?? '?')}) - the workflow is still active, deactivate it by hand.`;\n\nconst html = `\n<p>${state} Its last <b>${r.streak}</b> runs failed (Failure Guard threshold: ${r.threshold}).</p>\n<table cellpadding=\"4\" style=\"border-collapse:collapse\">\n  <tr><td><b>Workflow</b></td><td>${esc(r.workflow_name)} (${esc(r.workflow_id)})</td></tr>\n  <tr><td><b>First failure</b></td><td>${esc(when(r.first_failure))}</td></tr>\n  <tr><td><b>Last failure</b></td><td>${esc(when(r.last_failure))}</td></tr>\n  <tr><td><b>Failed node</b></td><td>${esc(r.error_node || '-')}</td></tr>\n  <tr><td><b>Error</b></td><td><code>${esc(r.error_message)}</code></td></tr>\n  ${r.execution_url ? `<tr><td><b>Execution</b></td><td><a href=\"${esc(r.execution_url)}\">${esc(r.execution_url)}</a></td></tr>` : ''}\n</table>\n<p>To restart: fix the cause (for example unseal Vault or bring back the network), then activate the workflow again in n8n.\nNo further e-mail is sent for this streak.</p>`;\n\nreturn [{\n  json: {\n    from: cfg.email_from,\n    to: cfg.email_to || cfg.email_from,\n    subject: `Cyber Sentinel: \"${r.workflow_name}\" ${deactivated ? 'stopped' : 'failing'} after ${r.streak} failed runs`,\n    html,\n    log: {\n      workflow_id: r.workflow_id,\n      workflow_name: r.workflow_name,\n      execution_id: r.execution_id,\n      failures: r.streak,\n      first_failure: r.first_failure,\n      error_node: r.error_node,\n      error_message: r.error_message,\n      deactivated,\n      message: deactivated ? 'deactivated' : `deactivation failed: HTTP ${deact.statusCode ?? '?'}`,\n    },\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        300
+      ],
+      "id": "640d3af6-ec8e-556e-b5e7-d10b2111d577",
+      "name": "Build e-mail"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO cyber_sentinel_ai.workflow_failure_alerts\n    (workflow_id, workflow_name, execution_id, failures, first_failure,\n     error_node, error_message, deactivated, message)\nSELECT r->>'workflow_id', r->>'workflow_name', r->>'execution_id', (r->>'failures')::int,\n       (r->>'first_failure')::timestamptz, r->>'error_node', LEFT(r->>'error_message', 2000),\n       (r->>'deactivated')::boolean, r->>'message'\nFROM (SELECT $1::jsonb AS r) AS x\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.log) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2240,
+        300
+      ],
+      "id": "561685ed-fc97-54a0-9c36-5537a20c17f7",
+      "name": "Log alert",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Build e-mail').first().json.from }}",
+        "toEmail": "={{ $('Build e-mail').first().json.to }}",
+        "subject": "={{ $('Build e-mail').first().json.subject }}",
+        "html": "={{ $('Build e-mail').first().json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2460,
+        300
+      ],
+      "id": "698e16cb-56f3-54bf-b27e-029077615a6f",
+      "name": "Send an Email",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      },
+      "webhookId": "8073432f-6634-5074-82f3-234aec8cb117"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Guard settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard settings": {
+      "main": [
+        [
+          {
+            "node": "Recent executions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent executions": {
+      "main": [
+        [
+          {
+            "node": "Evaluate failures",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate failures": {
+      "main": [
+        [
+          {
+            "node": "Stop workflow?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop workflow?": {
+      "main": [
+        [
+          {
+            "node": "Deactivate workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deactivate workflow": {
+      "main": [
+        [
+          {
+            "node": "Earlier alert for this streak?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Earlier alert for this streak?": {
+      "main": [
+        [
+          {
+            "node": "First alert of this streak?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "First alert of this streak?": {
+      "main": [
+        [
+          {
+            "node": "Build e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build e-mail": {
+      "main": [
+        [
+          {
+            "node": "Log alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log alert": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8c79c39c-e717-5a56-aee8-a4b0e6e5c178",
+  "meta": {
+    "instanceId": "4efa9d51e8a3979b61633a85e297802c7247ebfbaaec1d5e3e34069621598208"
+  },
+  "nodeGroups": [],
+  "id": "FailureGuard0001",
+  "tags": []
+}

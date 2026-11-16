@@ -17,7 +17,11 @@ Differences from the workflow, all deliberate:
   * VirusTotal errors (429 / 401 / 5xx) are raised as LiveLookupError and shown
     to the operator. The workflow throws too (the observable stays queued),
     so neither path ever scores an error as "clean".
-  * Nothing is written anywhere. Raw payloads are dropped after reduction.
+  * Raw payloads are dropped after reduction. The only write is the usage
+    log: every request goes through the hooks app.py installs
+    (set_usage_hooks), i.e. cyber_sentinel_ai.api_claim() before a VirusTotal
+    call — the SAME budget as the main workflow — and api_call_finish()
+    after every call.
 
 Standard library only (urllib, socket) — no extra dependency in the image.
 """
@@ -56,10 +60,6 @@ def _env(name, default=""):
 VT_API_KEY = _env("AI_UI_VT_API_KEY")
 ABUSE_API_KEY = _env("AI_UI_ABUSE_API_KEY")
 RESOLVER = _env("AI_UI_RESOLVER", "10.10.10.2")
-# The VirusTotal free tier (4 requests/min, 500/day) is SHARED with n8n,
-# which needs 1 request per run. The UI therefore keeps well below it.
-VT_MIN_INTERVAL = int(_env("AI_UI_VT_MIN_INTERVAL", "20"))   # seconds between UI requests
-VT_DAILY_LIMIT = int(_env("AI_UI_VT_DAILY_LIMIT", "50"))     # UI requests per UTC day
 CACHE_TTL = int(_env("AI_UI_LIVE_CACHE_SECONDS", "900"))    # reuse a result for 15 min
 
 
@@ -72,14 +72,28 @@ def abuse_enabled():
 
 
 # ------------------------------------------------------------
-# Quota guard + cache (process-local: gunicorn runs 1 worker)
+# Usage hooks + cache (process-local: gunicorn runs 1 worker)
 # ------------------------------------------------------------
 
 _lock = threading.Lock()
 _cache = {}            # (source, key) -> (expires_at, value)
-_vt_last_call = 0.0
-_vt_day = None
-_vt_day_count = 0
+
+# Installed by app.py. claim(fqdn, ip) -> claim id, or None when the shared
+# VirusTotal budget does not allow a call now (per-minute limit, reserve).
+# report(claim_id, provider, endpoint, http_status, error, fqdn, ip) logs the
+# outcome. Without hooks VirusTotal lookups are refused (never unbudgeted).
+_claim = None
+_report = None
+
+
+def set_usage_hooks(claim, report):
+    global _claim, _report
+    _claim, _report = claim, report
+
+
+def _log_call(claim_id, provider, endpoint, status, err, fqdn=None, ip=None):
+    if _report:
+        _report(claim_id, provider, endpoint, status, err, fqdn, ip)
 
 
 def _cache_get(source, key):
@@ -96,34 +110,6 @@ def _cache_put(source, key, value):
         if len(_cache) > 500:  # bounded; simulator traffic is tiny
             _cache.clear()
         _cache[(source, key)] = (time.time() + CACHE_TTL, value)
-
-
-def _vt_reserve():
-    """Reserve one VirusTotal request or raise LiveLiveLookupError with the reason."""
-    global _vt_last_call, _vt_day, _vt_day_count
-    with _lock:
-        now = time.time()
-        today = datetime.now(timezone.utc).date()
-        if _vt_day != today:
-            _vt_day, _vt_day_count = today, 0
-        if _vt_day_count >= VT_DAILY_LIMIT:
-            raise LiveLookupError(
-                f"Simulator VirusTotal budget used up for today ({VT_DAILY_LIMIT} requests, "
-                "AI_UI_VT_DAILY_LIMIT). The quota is shared with n8n, so the simulator stops first.")
-        wait = VT_MIN_INTERVAL - (now - _vt_last_call)
-        if wait > 0:
-            raise LiveLookupError(
-                f"Wait {int(wait) + 1} s before the next live VirusTotal lookup "
-                f"(AI_UI_VT_MIN_INTERVAL = {VT_MIN_INTERVAL} s keeps the shared free-tier quota for n8n).")
-        _vt_last_call = now
-        _vt_day_count += 1
-
-
-def vt_budget():
-    with _lock:
-        today = datetime.now(timezone.utc).date()
-        used = _vt_day_count if _vt_day == today else 0
-    return {"used": used, "limit": VT_DAILY_LIMIT, "interval": VT_MIN_INTERVAL}
 
 
 # ------------------------------------------------------------
@@ -265,15 +251,22 @@ def reduce_virustotal(status_code, body):
     }
 
 
-def vt_lookup(ip):
-    """Live VirusTotal IP report, reduced. Cached; guarded by the UI quota."""
+def vt_lookup(ip, fqdn=None):
+    """Live VirusTotal IP report, reduced. Cached; budgeted like the workflow."""
     if not VT_API_KEY:
         raise LiveLookupError("VirusTotal key not configured (AI_UI_VT_API_KEY).")
     cached = _cache_get("vt", ip)
     if cached:
         return {**cached, "cached": True}
-    _vt_reserve()
+    if not _claim:
+        raise LiveLookupError("VirusTotal budget is not available (usage hooks not installed).")
+    claim_id = _claim(fqdn, ip)
+    if claim_id is None:
+        raise LiveLookupError(
+            "VirusTotal budget does not allow a call right now (per-minute limit, or the calls left today "
+            "are kept as reserve for the main workflow). Try again later.")
     status, body, err = _http("GET", VT_URL.format(ip=urllib.parse.quote(ip)), headers={"x-apikey": VT_API_KEY})
+    _log_call(claim_id, "virustotal", "ip_report", status, err, fqdn, ip)
     if err:
         raise LiveLookupError(f"VirusTotal {err}")
     vt = reduce_virustotal(status, body)
@@ -404,6 +397,7 @@ def threatfox_lookup(ip, active_days):
     data = json.dumps({"query": "search_ioc", "search_term": ip}).encode()
     status, body, err = _http("POST", TF_URL, headers={"Auth-Key": ABUSE_API_KEY, "Content-Type": "application/json"},
                               data=data)
+    _log_call(None, "abusech", "threatfox", status, err, None, ip)
     tf = reduce_threatfox(status, body, err, ip, active_days)
     if tf["status"] != "error":
         _cache_put("tf", key, tf)
@@ -420,6 +414,7 @@ def urlhaus_lookup(fqdn):
     status, body, err = _http("POST", UH_URL, headers={"Auth-Key": ABUSE_API_KEY,
                                                         "Content-Type": "application/x-www-form-urlencoded"},
                               data=data)
+    _log_call(None, "abusech", "urlhaus", status, err, fqdn, None)
     uh = reduce_urlhaus(status, body, err)
     if uh["status"] != "error":
         _cache_put("uh", fqdn, uh)

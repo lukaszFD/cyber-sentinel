@@ -122,6 +122,7 @@ Each playbook starts with a header describing its purpose, dependencies and sect
 | 05 | `05_deploy_proxy.yml` | Nginx reverse proxy with TLS |
 | 06.1 | `06_1_initialize_provision_vault.yml` | Vault init/unseal, secrets, n8n token, Pi-hole API password |
 | 06.2 | `06_2_n8n_bootstrap.yml` | n8n community nodes and credentials |
+| 06.3 | `06_3_n8n_api_key.yml` | Failure Guard: n8n API key (rotated on every run, stored as an n8n credential) and activation. Run after every 04.6. |
 | 07 | `07_setup_monitoring.yml` | SSD health metrics for Prometheus. Production only, run manually — not part of `00_main.yml`. |
 
 Re-run a single step the same way:

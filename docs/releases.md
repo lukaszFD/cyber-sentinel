@@ -4,6 +4,7 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
+| [v2.3.0](#v230) | Stable | 16 November 2026 | API call log and usage page, VirusTotal budget from the provider's counter, Failure Guard |
 | [v2.2.0](#v220) | Stable | 16 November 2026 | Own Pi-hole blocklists: AI classification, review, daily pull request to sentinel-blocklists |
 | [v2.1.0](#v210) | Stable | 26 October 2026 | VirusTotal budget, urlscan.io and Shodan context, Deep Recon |
 | [v2.0.0](#v200) | Stable | 7 October 2026 | PostgreSQL as the only database, AI agent pipeline, AI Config UI |
@@ -11,6 +12,52 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 | [v1.0.2-rc1](#v102-rc1) | Release candidate | 5 May 2026 | 1–5 threat scale, partitioning, unified Vault playbook |
 | [v1.0.1](#v101) | Release | — | Ansible deployment |
 | [v1.0.0](#v100) | Release | — | First version |
+
+---
+
+## v2.3.0
+
+Counts every outgoing API request and stops a failing workflow after a few runs instead of thousands. Upgrades v2.2.0 in place; no data is lost.
+
+### API Call Log
+
+- New table `api_call_log` (partitioned by month, kept 6 months): one row per request to VirusTotal, Gemini, urlscan.io, Shodan, abuse.ch, RDAP and crt.sh — provider, caller, endpoint, HTTP status, outcome. `vt_lookup_log` became a view on it; its rows are moved once.
+- All workflows log their calls in one *Log API calls* node; the main workflow logs VirusTotal right after the call. The VirusTotal request is no longer retried inside a run, so one claim is one call.
+- The partition jobs (`sp_add_future_partitions()`, `sp_drop_old_partitions()`) handle tables of both schemas through `cyber_sentinel.partitioned_tables()`.
+
+### VirusTotal Budget From the Provider
+
+- New workflow **API Usage Monitor** (hourly at :05) stores VirusTotal's own counter for the key (`overall_quotas`; free, it does not use the quota). `v_vt_budget` uses the higher of this and the local count, so calls from the dev environment and manual tests reduce the budget too.
+- The AI Config UI simulator goes through the same budget (`api_claim()`): same per-minute limit and reserve; its separate in-memory limit (`AI_UI_VT_MIN_INTERVAL`, `AI_UI_VT_DAILY_LIMIT`) is gone.
+- One e-mail per provider and UTC day when usage crosses `api_alert_threshold_pct` (80 %) of `vt_daily_limit` / `api_daily_limit_<provider>`. Only VirusTotal is stopped by its budget.
+
+### Failure Guard
+
+- New workflow **Failure Guard**, set as the Error Workflow of every workflow. After `failure_guard_threshold` (10) failed runs in a row it deactivates the workflow and sends **one** e-mail per streak; a successful run resets the count.
+- Works while Vault is sealed: n8n credentials only, sender and recipient in `ops_settings` (written by 04.3).
+- New playbook **06.3** issues its n8n API key (rotated on every run) and activates it — n8n runs an Error Workflow only while it is active.
+
+### AI Config UI
+
+- **API usage** page: today per provider (local count, VirusTotal's counter, limit), per caller and per hour, the last 30 days, rate limits and errors, usage alerts and Failure Guard alerts.
+- Settings step 9 *API usage and failures*.
+
+### Upgrading from v2.2.0
+
+The SQL scripts are idempotent; existing data stays.
+
+```bash
+cd ansible
+ansible-playbook 04_3_db_postgres.yml      --limit rpi5-prod
+ansible-playbook 04_5_ai_config_editor.yml --limit rpi5-prod
+ansible-playbook 04_6_post_config.yml      --limit rpi5-prod \
+  --start-at-task "[04.6.4.1] Verify workflow JSON exists on control host"
+ansible-playbook 06_3_n8n_api_key.yml      --limit rpi5-prod
+```
+
+- 04.3 must run before 04.5: it moves `vt_lookup_log` and recreates `v_vt_budget`, whose UI grant 04.5 restores.
+- 04.6 re-imports all six workflows and leaves them **inactive**: publish the main workflow, Deep Recon, both blocklist workflows and *API Usage Monitor* again in n8n. 06.3 runs after 04.6 and activates *Failure Guard* itself.
+- Optional: `vault_n8n_alert_to` in `vault.yml` for a different recipient (default: the sender).
 
 ---
 

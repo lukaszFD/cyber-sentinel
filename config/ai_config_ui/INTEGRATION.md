@@ -70,10 +70,12 @@ Python port of its two reduction nodes (`live_lookup.py`): VirusTotal by IP, the
 - The FQDN is resolved directly against Unbound (`AI_UI_RESOLVER`, default `10.10.10.2`),
   not via Pi-hole — otherwise passive_dns would log it and the domain would enter the real
   n8n queue. Unbound's `access-control` must allow `10.10.10.0/24` (it already serves Pi-hole).
-- The VirusTotal free tier (4/min, 500/day) is shared with n8n. The UI keeps its own budget:
-  `AI_UI_VT_MIN_INTERVAL` (default 20 s between lookups), `AI_UI_VT_DAILY_LIMIT` (default 50/day),
-  and caches each result for `AI_UI_LIVE_CACHE_SECONDS` (default 900). Counters live in the
-  process and reset on container restart.
+- The VirusTotal free tier (4/min, 500/day) is shared with n8n, so the simulator uses the
+  workflow's budget: `api_claim('simulator', ...)` before each VirusTotal call (same per-minute
+  limit and reserve; refused when the budget does not allow it) and `api_call_finish()` after
+  every call, so its requests show on the API usage page. Results are cached for
+  `AI_UI_LIVE_CACHE_SECONDS` (default 900). `AI_UI_VT_MIN_INTERVAL` / `AI_UI_VT_DAILY_LIMIT`
+  are gone (v2.3).
 - A VirusTotal 401/429/5xx is shown as an error and nothing is calculated — same rule as the
   workflow, which never scores a failed lookup as clean.
 
@@ -102,7 +104,9 @@ the other service names.
 | `pihole_block_log` | `SELECT` only (written by n8n) — shown under Settings → Automatic blocking |
 | `recon_prompt_templates` | full DML; same guards as `prompt_templates` (active version read-only, exactly one active) |
 | `deep_recon`, `v_pending_recon` | `SELECT` only (written by n8n) — Deep recon page |
-| `v_vt_budget` | `SELECT` — VirusTotal calls today (Settings, step 2) |
+| `v_vt_budget` | `SELECT` — VirusTotal calls today (Settings, step 2; simulator) |
+| `api_call_log`, `v_api_usage_today`, `v_api_usage_daily`, `api_provider_quota`, `api_alert_log`, `workflow_failure_alerts` | `SELECT` — API usage page |
+| `api_claim()`, `api_call_finish()` | `EXECUTE` — simulator VirusTotal budget and call log (SECURITY DEFINER; no INSERT on the log) |
 | `recon_requeue(id)` | `EXECUTE`; the only way to remove a `deep_recon` row (retry / run again) |
 | `blocklist_entries` | `SELECT`, `INSERT`, `UPDATE(status, note, expires_at, reviewed_by, reviewed_at)` — no DELETE: a rejected row keeps the domain from being proposed again |
 | `blocklist_name_patterns` | full DML |

@@ -1,0 +1,381 @@
+{
+  "name": "API Usage Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Cyber Sentinel — API Usage Monitor\n\nEvery hour at :05:\n\n1. reads VirusTotal's **own** usage counter for the API key (`/users/{key}/overall_quotas`) and stores it in `api_provider_quota` — `claim_next_observable()` budgets with the higher of this and the local count, so calls from the dev environment or manual tests also reduce the budget;\n2. checks `v_api_usage_today` and sends **one e-mail per provider and UTC day** when its usage crosses `api_alert_threshold_pct` (default 80 %) of its daily limit.\n\nEvery request of every workflow is logged in `cyber_sentinel_ai.api_call_log`; the AI Config UI shows it on the *API usage* page.",
+        "height": 420,
+        "width": 560,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        300
+      ],
+      "id": "f0fb90cf-d241-5593-84d1-d70ec0977e94",
+      "name": "Note - overview"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        140,
+        300
+      ],
+      "id": "80825ec2-27cc-5a1e-b89f-1b0077d9f478",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        140,
+        500
+      ],
+      "id": "10585e33-6443-5bde-bdf0-70ade4c4322d",
+      "name": "Run now"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/virustotal",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        360,
+        300
+      ],
+      "id": "1143a976-95e3-59b4-8f6c-e56d85e88693",
+      "name": "Virus total API TOKEN",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/users/{{ $json.data?.token ?? 'missing' }}/overall_quotas",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-apikey",
+              "value": "={{ $json.data?.token ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        580,
+        300
+      ],
+      "id": "b096f9cd-c088-5dc5-ab3e-890bc1ecf3ac",
+      "name": "VirusTotal quota",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Data reduction - VirusTotal quota\n// VirusTotal's own counter for this API key (every caller: this stack, the\n// dev environment, manual tests). claim_next_observable() budgets with the\n// higher of this and the local count. The quota request itself is logged\n// as provider \"virustotal_quota\", so it never inflates the local VirusTotal\n// count; if VirusTotal counts it, its own counter shows it.\n// Mode: Run Once for All Items.\n\nconst res = $json; // full HTTP response\nconst num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);\nconst daily = res.body?.data?.api_requests_daily?.user || {};\nconst ok = res.statusCode === 200 && num(daily.used) !== null;\n\nreturn [{\n  json: {\n    ok,\n    quota: ok ? { used: num(daily.used), allowed: num(daily.allowed), raw: res.body.data } : null,\n    calls: [{\n      provider: 'virustotal_quota',\n      caller: 'monitor',\n      endpoint: 'overall_quotas',\n      http_status: Number.isInteger(res.statusCode) ? res.statusCode : null,\n      message: ok ? null : String(res.body?.error?.message || res.error?.message || 'no quota in response').slice(0, 300),\n    }],\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        300
+      ],
+      "id": "4deb8bd0-57b7-562f-bca2-ee1f11d7a66a",
+      "name": "Data reduction - VirusTotal quota"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Provider counter (only when the response had one) and the quota request\n-- itself in api_call_log.\nSELECT CASE WHEN jsonb_typeof($1::jsonb) <> 'object' THEN NULL ELSE\n         cyber_sentinel_ai.api_quota_record('virustotal', ($1::jsonb->>'used')::int,\n                                            ($1::jsonb->>'allowed')::int, $1::jsonb->'raw') END AS quota,\n       cyber_sentinel_ai.api_calls_record($2::jsonb) AS logged;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.quota ?? null), JSON.stringify($json.calls) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1020,
+        300
+      ],
+      "id": "2e05f389-6ff4-5947-befa-20a71515f02f",
+      "name": "Store quota and call",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Providers over api_alert_threshold_pct today that were not e-mailed yet;\n-- the function marks them, so each provider alerts once per UTC day.\nSELECT provider, used, daily_limit FROM cyber_sentinel_ai.api_usage_alerts_due();",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1240,
+        300
+      ],
+      "id": "846c6e6f-b3eb-5cca-9439-4ed240e74193",
+      "name": "Usage alerts due",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "756b0fe7-7817-5a18-a30a-c26784c88e84",
+              "leftValue": "={{ $('Usage alerts due').all().some((i) => !!i.json.provider) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1460,
+        300
+      ],
+      "id": "6fa4f078-f4f4-5318-982f-adbba106b1f5",
+      "name": "Any alerts?"
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        300
+      ],
+      "id": "e793c644-4972-56ae-9c83-4a96c2346583",
+      "name": "Get Email Pass",
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build e-mail\n// One e-mail for all providers that crossed api_alert_threshold_pct today\n// (each provider alerts once per UTC day, see api_usage_alerts_due()).\n// Mode: Run Once for All Items.\n\nconst rows = $('Usage alerts due').all().map((i) => i.json).filter((r) => r.provider);\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst pct = (r) => Math.round((100 * Number(r.used)) / Number(r.daily_limit));\n\nconst lines = rows.map((r) => `<tr><td>${esc(r.provider)}</td><td align=\"right\">${esc(r.used)}</td>`\n  + `<td align=\"right\">${esc(r.daily_limit)}</td><td align=\"right\"><b>${pct(r)} %</b></td></tr>`).join('');\n\nreturn [{\n  json: {\n    subject: `Cyber Sentinel: API usage ${rows.map((r) => `${r.provider} ${pct(r)}%`).join(', ')}`,\n    html: `<p>Daily API usage crossed the alert threshold (UTC day, resets at 00:00 UTC):</p>\n<table cellpadding=\"4\" border=\"1\" style=\"border-collapse:collapse\">\n<tr><th>Provider</th><th>Used</th><th>Daily limit</th><th>Share</th></tr>${lines}</table>\n<p>Used = the higher of the local count (api_call_log) and the provider's own counter.\nDetails: AI Config UI, page <i>API usage</i>. VirusTotal stops by itself when the budget is used up;\nthe other providers are only counted.</p>`,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        300
+      ],
+      "id": "0014aee5-edd8-55b2-857d-345bd0e06dd6",
+      "name": "Build e-mail"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Get Email Pass').first().json.data.user }}",
+        "toEmail": "={{ $('Get Email Pass').first().json.data.to }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2120,
+        300
+      ],
+      "id": "f859c7b5-d65c-502f-bfc3-86dde0b25c55",
+      "name": "Send an Email",
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      },
+      "webhookId": "26f27a7a-7dbe-592d-a1fc-db945d0f9c7c"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Virus total API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Virus total API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal quota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal quota": {
+      "main": [
+        [
+          {
+            "node": "Data reduction - VirusTotal quota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data reduction - VirusTotal quota": {
+      "main": [
+        [
+          {
+            "node": "Store quota and call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store quota and call": {
+      "main": [
+        [
+          {
+            "node": "Usage alerts due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Usage alerts due": {
+      "main": [
+        [
+          {
+            "node": "Any alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any alerts?": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Build e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "Virus total API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "FailureGuard0001"
+  },
+  "versionId": "30414768-87a9-5432-961b-5be137a21c0c",
+  "meta": {
+    "instanceId": "4efa9d51e8a3979b61633a85e297802c7247ebfbaaec1d5e3e34069621598208"
+  },
+  "nodeGroups": [],
+  "id": "ApiUsageMonitor1",
+  "tags": []
+}

@@ -56,7 +56,7 @@
     <button class="btn primary" type="submit" name="action" value="calc">Calculate</button>
     {% if live_vt %}
       <button class="btn" type="submit" name="action" value="live">Fetch live data &amp; calculate</button>
-      <span class="muted small">VirusTotal budget today: {{ vt_budget.used }}/{{ vt_budget.limit }} · min {{ vt_budget.interval }} s apart · quota shared with n8n{% if not live_abuse %} · <span class="tag warn">no abuse.ch key — ThreatFox / URLhaus will show "error"</span>{% endif %}</span>
+      <span class="muted small">{% if vt_budget %}VirusTotal today: {{ vt_budget.used_today }}/{{ vt_budget.daily_limit }} · {{ vt_budget.remaining_today }} left, {{ vt_budget.reserve }} kept for the main workflow · same budget as n8n{% else %}VirusTotal budget unknown (database too old){% endif %}{% if not live_abuse %} · <span class="tag warn">no abuse.ch key — ThreatFox / URLhaus will show "error"</span>{% endif %}</span>
     {% else %}
       <span class="muted small">Live lookups are off — set <code>AI_UI_VT_API_KEY</code> (see INTEGRATION.md).</span>
     {% endif %}

@@ -432,6 +432,55 @@ SETTING_HELP = {
         "raise": "3 — only well-known telemetry and tracking endpoints reach the review queue.",
         "lower": "1 — every guess is proposed; more to review.",
     },
+    "api_alert_threshold_pct": {
+        "min": 0, "max": 100, "integer": True, "stage": 9,
+        "label": "E-mail when a daily limit is used up to (%)",
+        "what": "Once a day per service, an e-mail tells you that this share of its daily limit is used. "
+                "VirusTotal counts what the service itself reports too, so calls from the dev setup or manual "
+                "tests are included. The services and their use are on the API usage page.",
+        "raise": "Fewer, later warnings — maybe only when the limit is nearly gone.",
+        "lower": "Earlier warnings. 0 turns usage e-mails off.",
+    },
+    "api_daily_limit_gemini": {
+        "min": 0, "max": 100000, "integer": True, "stage": 9,
+        "label": "Gemini requests per day (limit for the warning)",
+        "what": "Your Gemini plan's daily request limit. It only draws the line on the API usage page and "
+                "triggers the warning e-mail — Gemini calls are never stopped by it. 0 = no limit known.",
+        "raise": "Use the real limit of your Gemini plan so the warning comes at the right time.",
+        "lower": "0 — no warning for Gemini.",
+    },
+    "api_daily_limit_urlscan": {
+        "min": 0, "max": 100000, "integer": True, "stage": 9,
+        "label": "urlscan.io requests per day (limit for the warning)",
+        "what": "urlscan.io searches and scans per day (main workflow and deep recon). Only for the warning and "
+                "the API usage page; deep recon has its own scan limit in step 7.",
+        "raise": "Matches a bigger urlscan.io plan.",
+        "lower": "0 — no warning for urlscan.io.",
+    },
+    "api_daily_limit_shodan": {
+        "min": 0, "max": 100000, "integer": True, "stage": 9,
+        "label": "Shodan requests per day (limit for the warning)",
+        "what": "Shodan's free database has no daily limit; set one only if you want a warning above it.",
+        "raise": "A warning when the pipeline is unusually busy.",
+        "lower": "0 — no warning for Shodan.",
+    },
+    "api_daily_limit_abusech": {
+        "min": 0, "max": 100000, "integer": True, "stage": 9,
+        "label": "abuse.ch requests per day (limit for the warning)",
+        "what": "ThreatFox and URLhaus requests together. abuse.ch publishes no hard daily limit; set one only "
+                "for a warning.",
+        "raise": "A warning when the pipeline is unusually busy.",
+        "lower": "0 — no warning for abuse.ch.",
+    },
+    "failure_guard_threshold": {
+        "min": 2, "max": 100, "integer": True, "stage": 9,
+        "label": "Stop a workflow after this many failed runs in a row",
+        "what": "When this many runs of a workflow fail one after another (for example Vault is sealed or the "
+                "network is down), the workflow is switched off and you get one e-mail. A successful run "
+                "starts the count again. Turn the workflow back on in n8n after fixing the cause.",
+        "raise": "More tolerance for short outages — but more failed runs before you hear about it.",
+        "lower": "You hear about a problem sooner; a short outage may already stop the workflow.",
+    },
 }
 
 # The n8n AI workflow, in the order a domain goes through it.
@@ -450,6 +499,9 @@ PIPELINE_STEPS = {
     8: ("Own blocklists", "Malicious domains plus telemetry and tracking you approved go to your public "
                           "sentinel-blocklists repository, which Pi-hole downloads. Every change waits for "
                           "your merge on GitHub."),
+    9: ("API usage and failures", "How many requests each outside service gets (VirusTotal, Gemini, urlscan.io, "
+                                  "Shodan, abuse.ch), when you are warned, and when a failing workflow is "
+                                  "switched off. Details on the API usage page."),
 }
 
 TF_UH_STATUSES = ["ok", "no_data", "not_checked", "error"]
@@ -495,6 +547,40 @@ def db_error(exc):
             msg += f" ({diag.message_detail})"
         return msg
     return str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+
+
+# ------------------------------------------------------------
+# API usage: the simulator's live lookups go through the same VirusTotal
+# budget as the main workflow and are logged in api_call_log
+# (SECURITY DEFINER functions; this role has EXECUTE only).
+# ------------------------------------------------------------
+
+def _api_claim(fqdn, ip):
+    with db() as conn:
+        return conn.execute("SELECT api_claim('simulator', %s, %s) AS id", (fqdn, ip)).fetchone()["id"]
+
+
+def _api_report(claim_id, provider, endpoint, status, error, fqdn, ip):
+    try:
+        with db() as conn:
+            conn.execute("SELECT api_call_finish(%s, %s, 'simulator', %s, %s, %s, %s, %s)",
+                         (claim_id, provider, endpoint, status, error, fqdn, ip))
+    except psycopg.Error as exc:
+        # The lookup itself succeeded; a missing log row must not hide it.
+        log.warning("could not log simulator %s call: %s", provider, db_error(exc))
+
+
+live_lookup.set_usage_hooks(_api_claim, _api_report)
+
+
+def vt_budget_row(conn):
+    """Current VirusTotal budget (v_vt_budget), or None on an older database."""
+    if not conn.execute("SELECT to_regclass('cyber_sentinel_ai.v_vt_budget') IS NOT NULL "
+                        "AND has_table_privilege('cyber_sentinel_ai.v_vt_budget', 'SELECT') AS ok").fetchone()["ok"]:
+        return None
+    # Reset time shown in Polish time (the quota resets at 00:00 UTC).
+    return conn.execute("SELECT *, resets_at AT TIME ZONE 'Europe/Warsaw' AS resets_local "
+                        "FROM v_vt_budget").fetchone()
 
 
 def fmt_num(value):
@@ -789,13 +875,7 @@ def settings_page():
         rows = conn.execute(
             "SELECT key, value, category, description, updated_at FROM ai_settings "
             "ORDER BY key").fetchall()
-        # The log table arrives with db_ai_pipeline.sql v2.2 — tolerate an older database.
-        vt_budget = None
-        if conn.execute("SELECT to_regclass('cyber_sentinel_ai.v_vt_budget') IS NOT NULL "
-                        "AND has_table_privilege('cyber_sentinel_ai.v_vt_budget', 'SELECT') AS ok").fetchone()["ok"]:
-            # Reset time shown in Polish time (the quota resets at 00:00 UTC).
-            vt_budget = conn.execute("SELECT *, resets_at AT TIME ZONE 'Europe/Warsaw' AS resets_local "
-                                     "FROM v_vt_budget").fetchone()
+        vt_budget = vt_budget_row(conn)
         blocks = []
         if conn.execute("SELECT to_regclass('cyber_sentinel_ai.pihole_block_log') IS NOT NULL "
                         "AND has_table_privilege('cyber_sentinel_ai.pihole_block_log', 'SELECT') AS ok"
@@ -1393,7 +1473,15 @@ def simulator_page():
     return render_template("simulator.html", form=form, result=result, live=live, statuses=TF_UH_STATUSES,
                            presets=SIM_PRESETS, preset=preset,
                            live_vt=live_lookup.vt_enabled(), live_abuse=live_lookup.abuse_enabled(),
-                           vt_budget=live_lookup.vt_budget())
+                           vt_budget=_sim_vt_budget())
+
+
+def _sim_vt_budget():
+    try:
+        with db(readonly=True) as conn:
+            return vt_budget_row(conn)
+    except psycopg.Error:
+        return None
 
 
 def _sim_fetch_live(form):
@@ -1434,7 +1522,7 @@ def _sim_fetch_live(form):
         s = {r["key"]: r["value"] for r in conn.execute(
             "SELECT key, value FROM ai_settings WHERE key IN ('vt_gate_min_malicious', 'tf_active_days')").fetchall()}
 
-    vt = live_lookup.vt_lookup(ip)
+    vt = live_lookup.vt_lookup(ip, fqdn)
     gate = s.get("vt_gate_min_malicious")
     gate_open = gate is not None and vt["status"] == "ok" and vt["malicious"] >= gate
     if gate_open:
@@ -1840,6 +1928,61 @@ def _changes(old, new):
                     for l in difflib.unified_diff(a.splitlines(), b.splitlines(), lineterm="", n=1)]
         out.append({"field": key, "old": a, "new": b, "diff": diff})
     return out
+
+
+@app.route("/api-usage")
+@login_required
+def api_usage_page():
+    """Outgoing CTI / AI requests (api_call_log), VirusTotal budget, alerts."""
+    with db(readonly=True) as conn:
+        if not conn.execute("SELECT to_regclass('cyber_sentinel_ai.v_api_usage_today') IS NOT NULL "
+                            "AND has_table_privilege('cyber_sentinel_ai.v_api_usage_today', 'SELECT') AS ok"
+                            ).fetchone()["ok"]:
+            flash("The API call log arrives with db_ai_pipeline.sql v2.5 — run playbooks 04.3 and 04.5.", "error")
+            return render_template("api_usage.html", ready=False)
+        today = conn.execute("SELECT *, provider_checked_at AT TIME ZONE 'Europe/Warsaw' AS checked_local "
+                             "FROM v_api_usage_today ORDER BY used DESC, provider").fetchall()
+        vt_budget = vt_budget_row(conn)
+        callers = conn.execute(
+            "SELECT provider, caller, calls, ok, rate_limited, failed FROM v_api_usage_daily "
+            "WHERE day = (now() AT TIME ZONE 'UTC')::date ORDER BY provider, calls DESC").fetchall()
+        # Today per local hour; the UTC day starts at 01:00 or 02:00 Polish time.
+        hours = conn.execute(
+            "SELECT to_char(date_trunc('hour', called_at AT TIME ZONE 'Europe/Warsaw'), 'HH24:00') AS hour, "
+            "       provider, count(*)::int AS calls "
+            "FROM api_call_log "
+            "WHERE called_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' "
+            "GROUP BY 1, 2 ORDER BY 1").fetchall()
+        days = conn.execute(
+            "SELECT day, provider, sum(calls)::int AS calls, sum(rate_limited)::int AS rate_limited, "
+            "       sum(failed)::int AS failed "
+            "FROM v_api_usage_daily WHERE day > (now() AT TIME ZONE 'UTC')::date - 30 "
+            "GROUP BY 1, 2 ORDER BY 1 DESC, 2").fetchall()
+        problems = conn.execute(
+            "SELECT called_at AT TIME ZONE 'Europe/Warsaw' AS at, provider, caller, endpoint, outcome, "
+            "       http_status, message, fqdn "
+            "FROM api_call_log WHERE outcome IN ('rate_limited', 'error') "
+            "  AND called_at > now() - interval '7 days' "
+            "ORDER BY called_at DESC LIMIT 30").fetchall()
+        alerts = conn.execute(
+            "SELECT day, provider, used, daily_limit, alerted_at AT TIME ZONE 'Europe/Warsaw' AS at "
+            "FROM api_alert_log ORDER BY alerted_at DESC LIMIT 10").fetchall()
+        guard = conn.execute(
+            "SELECT alerted_at AT TIME ZONE 'Europe/Warsaw' AS at, workflow_name, failures, error_node, "
+            "       error_message, deactivated "
+            "FROM workflow_failure_alerts ORDER BY alerted_at DESC LIMIT 10").fetchall()
+    providers = sorted({h["provider"] for h in hours})
+    hour_rows = {}
+    for h in hours:
+        hour_rows.setdefault(h["hour"], {})[h["provider"]] = h["calls"]
+    day_rows = {}
+    for d in days:
+        day_rows.setdefault(d["day"], {})[d["provider"]] = d
+    day_providers = sorted({d["provider"] for d in days})
+    return render_template("api_usage.html", ready=True, today=today, vt_budget=vt_budget, callers=callers,
+                           providers=providers, hour_rows=sorted(hour_rows.items()),
+                           day_rows=sorted(day_rows.items(), reverse=True), day_providers=day_providers,
+                           problems=problems, alerts=alerts, guard=guard)
 
 
 @app.route("/audit")

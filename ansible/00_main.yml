@@ -76,3 +76,4 @@
 - import_playbook: 05_deploy_proxy.yml               # [00.3.1] Nginx reverse proxy with SSL
 - import_playbook: 06_1_initialize_provision_vault.yml  # [00.3.2] Init/unseal Vault, provision secrets, n8n token
 - import_playbook: 06_2_n8n_bootstrap.yml            # [00.3.3] n8n community nodes + credentials (fixed IDs)
+- import_playbook: 06_3_n8n_api_key.yml             # [00.3.4] Failure Guard: n8n API key + activation (after 04.6)

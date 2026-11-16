@@ -955,6 +955,44 @@
       ],
       "id": "a57c7e25-8dad-50b3-9693-7ff5fdd92825",
       "name": "Note - analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect API calls\n// One row per outgoing request of this run for cyber_sentinel_ai.api_call_log\n// (usage page, alerts). Polls of the scan result count one by one.\n// Mode: Run Once for All Items.\n\nconst CALLER = 'deep_recon';\n\n// Every run of an HTTP node, also inside a polling loop (runIndex 0..n).\nconst ran = (name) => { try { return $(name).isExecuted; } catch (e) { return false; } };\nconst runsOf = (name) => {\n  const out = [];\n  if (!ran(name)) return out;\n  for (let i = 0; i < 50; i++) {\n    let items;\n    try { items = $(name).all(0, i); } catch (e) { break; }\n    if (!items || !items.length) break;\n    out.push(...items.map((it) => it.json || {}));\n  }\n  return out;\n};\nconst errText = (r) => (r.error ? String(r.error.message || r.error).slice(0, 300) : null);\nconst calls = [];\nconst http = (provider, endpoint, name, extra = {}) => {\n  for (const r of runsOf(name)) {\n    calls.push({ provider, caller: CALLER, endpoint,\n                 http_status: Number.isInteger(Number(r.statusCode)) && r.statusCode !== undefined ? Number(r.statusCode) : null,\n                 message: errText(r), ...extra });\n  }\n};\n\nconst claim = ran('Claim next verdict') ? $('Claim next verdict').first().json : {};\nconst target = { fqdn: claim.fqdn || null };\nhttp('rdap', 'domain', 'RDAP lookup', target);\nhttp('crtsh', 'certificates', 'crt.sh lookup', target);\nhttp('urlscan', 'search', 'Search existing scan', target);\nhttp('urlscan', 'scan', 'Submit scan', target);\nhttp('urlscan', 'result', 'Get scan result', target);\nhttp('urlscan', 'dom', 'Get page DOM', target);\nif (ran('Recon analyst')) {\n  for (const a of runsOf('Recon analyst')) {\n    calls.push({ provider: 'gemini', caller: CALLER, endpoint: 'recon_analyst', http_status: a.error ? null : 200,\n                 message: errText(a), ...target });\n  }\n}\nreturn [{ json: { calls } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        560
+      ],
+      "id": "48001b36-87a9-5c62-b30d-ea3c960726c4",
+      "name": "Collect API calls",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Usage counters (API usage page, alerts). Never stops the run.\nSELECT cyber_sentinel_ai.api_calls_record($1::jsonb) AS stored;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.calls || []) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5720,
+        560
+      ],
+      "id": "06e9f3b5-8ee6-50ba-a67e-688ea9db21fa",
+      "name": "Log API calls",
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "pinData": {},
@@ -1353,6 +1391,11 @@
             "node": "Score changed?",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Collect API calls",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1389,12 +1432,24 @@
           }
         ]
       ]
+    },
+    "Collect API calls": {
+      "main": [
+        [
+          {
+            "node": "Log API calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "errorWorkflow": "FailureGuard0001"
   },
   "versionId": "114fa310-1c9c-5fb8-8e0c-e081a53b4cfb",
   "meta": {
