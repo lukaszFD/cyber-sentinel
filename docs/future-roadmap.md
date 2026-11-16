@@ -2,6 +2,17 @@
 
 What is planned next. Delivered work is listed in [Releases](releases.md).
 
+## Next: API Call Monitoring
+
+Planned right after v2.2.0, on its own branch. The VirusTotal free tier (500 requests/day) has been used up several times although `claim_next_observable()` keeps a budget. The budget counts claims in `vt_lookup_log`, not the requests VirusTotal actually receives, so calls outside the main workflow's path are invisible — for example live lookups from the AI Config UI simulator (`AI_UI_VT_API_KEY`), retries of a failed HTTP request, or anything else using the same key.
+
+- **Count real calls** — one log table for every outgoing CTI/AI request: provider (VirusTotal, Gemini, urlscan.io, Shodan, abuse.ch), caller (main workflow, Deep Recon, Blocklist Candidates, simulator), time and HTTP status, so `429` responses are visible.
+- **Compare with the provider** — read VirusTotal's own quota counter (`/api/v3/users/{key}/overall_quotas`) and show the difference to the local count; a gap means calls from outside the logged paths.
+- **AI Config UI** — usage per provider and caller: today, per hour, last 30 days, with the limit drawn in.
+- **Alerts** — e-mail when a provider reaches a set share of its daily limit (e.g. 80 %) and on the first `429` of the day.
+- **Budget from real calls** — the simulator and any other caller go through the same budget as the main workflow, so the reserve also covers them.
+- Later the health agent (section 2, item 1) reads these counters instead of its own queries.
+
 ## 1. Sentinel Engram
 
 [Sentinel Engram](https://github.com/lukaszFD/sentinel-engram) is the long-term memory of Cyber Sentinel: a separate project that loads AI verdicts, DNS activity and Pi-hole blocklists into a Vertex Synapse CTI graph, with a Neo4j view for visual analysis. It reads Cyber Sentinel's database through a read-only role and an SSH tunnel and never writes to it.
@@ -57,14 +68,9 @@ Replace `passive_dns` (dnsmasq) with Pi-hole's own query log as the source of `d
 - `log_processor.py`: reopen the log after rotation (truncate / inode change), batch commits, reconnect after a Postgres restart, move off Python 3.9.
 - Result: real client IPs in `dns_queries` (today every query comes from `10.10.10.4`), cache-answered queries captured, one container less. Required by sections 3 and 8.
 
-## 8. Own Blocklists (Telemetry and Tracking)
+## 8. Own Blocklists — Follow-ups
 
-Domains Pi-hole lets through that turn out to be telemetry or tracking go to own blocklists in a separate repository, [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists), which Pi-hole pulls as adlists from `raw.githubusercontent.com`. A third list carries the domains the main workflow blocked as malicious, so the backup Pi-hole gets them too. First version built (name patterns, AI classification, review, daily pull request) — see [n8n Workflows](n8n.md#own-blocklists). Still open: the query-interval pre-filter (needs section 7) and the optional category from the main workflow.
+The first version shipped in [v2.2.0](releases.md#v220): name patterns, AI classification, review in the AI Config UI and a daily pull request to [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists) — see [n8n Workflows](n8n.md#own-blocklists). Still open:
 
-- **Separate workflow, daily** — not part of the main workflow: telemetry is usually clean in VirusTotal and often in Tranco, so the main pipeline never sees it, and per-minute commits gain nothing because Pi-hole reads adlists only on a gravity update.
-- **Candidates** — domains allowed by Pi-hole, not yet on the own list and not allowlisted. A cheap pre-filter (name patterns such as `telemetry`, `metrics`, `analytics`; regular query intervals per device, which needs section 7) runs before AI.
-- **AI classification** — Gemini in batches, no VirusTotal calls; returns category (telemetry / tracking / ads / functional / unknown), vendor, confidence, breakage risk and a reason. Telemetry is a category, not a 1–5 score.
-- **Review** — results land in a staging table and are approved in the AI Config UI.
-- **Publication** — approved domains go to the list repository once a day as one pull request (one branch rebuilt daily, so one PR at a time); the merge stays manual. Token: fine-grained PAT scoped to that repository, stored in Vault.
-- Domains only (FQDN): Pi-hole does not block IPs, and telemetry often shares CDN IPs with normal sites.
-- Optional: the main workflow's AI returns the same category for domains it already analyses and adds telemetry/tracking hits to the staging table.
+- **Query-interval pre-filter** — regular query intervals per device as a second candidate signal next to name patterns. Needs real client IPs from section 7.
+- **Category from the main workflow** — optional: the main workflow's AI returns the same category (telemetry / tracking) for domains it already analyses and adds hits to the review queue.
