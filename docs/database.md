@@ -38,7 +38,7 @@ Links to and from `dns_queries`, `threat_indicators` and `network_events` are ke
 
 | Object | What it does |
 |---|---|
-| `dns_queries` | Every DNS answer seen on the network. Partitioned by month. |
+| `dns_queries` | Every DNS query and answer from Pi-hole's log, with the client IP. `query_type`: `query`, `reply` (forwarded to Unbound), `cached` (Pi-hole cache), `blocked` (gravity / denylist). Partitioned by month. |
 | `threat_indicators` | Links a DNS query to its verdict; counts re-scans. Partitioned by month. |
 | `ai_analysis_results` | Final verdict: score 1–5, label, summary in English and Polish. |
 | `threat_indicator_details` | Which CTI provider contributed to a verdict, with a pointer to its raw response. |
@@ -102,7 +102,7 @@ erDiagram
 | Object | What it does |
 |---|---|
 | `v_pending_observables` | Work queue: new domain + IP pairs, without private IPs, allow-listed domains and pairs analysed in the last `cache_ttl_days`. |
-| `api_call_log` | One row per outgoing CTI / AI request: provider, caller, endpoint, HTTP status, outcome. Partitioned by month, kept 6 months. VirusTotal claims of the main workflow also stop overlapping runs from taking the same pair. |
+| `api_call_log` | One row per outgoing CTI / AI request: provider, caller, endpoint, HTTP status, outcome. Partitioned by month, kept 3 months. VirusTotal claims of the main workflow also stop overlapping runs from taking the same pair. |
 | `vt_lookup_log` | View on `api_call_log` (VirusTotal calls of the main workflow); a table until v2.2. |
 | `api_provider_quota` | Providers' own usage counters, written hourly by *API Usage Monitor* (kept 14 days). |
 | `v_vt_budget` | VirusTotal calls used today (the higher of the local count and VirusTotal's counter), in the last minute, calls left, reserve, next reset. |
@@ -162,7 +162,7 @@ Passwords come from `vault.yml` and are copied to HashiCorp Vault.
 
 | Job | Time | Action |
 |---|---|---|
-| `evt_drop_old_partitions` | 02:00 | Drops partitions older than 6 months |
+| `evt_drop_old_partitions` | 02:00 | Drops partitions older than 3 months (same for all tables, so links between them stay complete) |
 | `evt_add_future_partitions` | 03:00 | Creates partitions for the next 3 months |
 
 ```sql

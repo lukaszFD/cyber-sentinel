@@ -60,7 +60,7 @@ The live lookups of the AI Config UI simulator go through the same budget (`api_
 
 ## API Usage
 
-Every outgoing request is a row in `cyber_sentinel_ai.api_call_log`: provider, caller, endpoint, time, HTTP status and outcome (`ok`, `no_data`, `rate_limited`, `error`, or `claimed` when the run stopped before the result). The workflows log in one *Log API calls* node at the end of a run; VirusTotal is logged right after its call. The table is partitioned by month and kept 6 months, like `dns_queries`.
+Every outgoing request is a row in `cyber_sentinel_ai.api_call_log`: provider, caller, endpoint, time, HTTP status and outcome (`ok`, `no_data`, `rate_limited`, `error`, or `claimed` when the run stopped before the result). The workflows log in one *Log API calls* node at the end of a run; VirusTotal is logged right after its call. The table is partitioned by month and kept 3 months, like `dns_queries`.
 
 | Caller | Providers |
 |---|---|

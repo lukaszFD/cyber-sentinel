@@ -4,15 +4,15 @@
     {
       "parameters": {
         "content": "# Cyber Sentinel — Failure Guard\n\nError Workflow of every Cyber Sentinel workflow (workflow settings → *Error workflow*). n8n starts it after each failed run — **only while it is active**; playbook 06.3 activates it after every import.\n\nWhen the last `failure_guard_threshold` (default 10) runs of a workflow **all** failed, it deactivates that workflow through the n8n API and sends **one** e-mail per streak. A successful run in between starts the count again.\n\nWorks when Vault is sealed: it uses the n8n credentials *Postgres account*, *SMTP account* and *n8n API (Failure Guard)* directly. Sender and recipient come from `cyber_sentinel_ai.ops_settings` (written by playbook 04.3). The API key is issued by playbook 06.3.\n\nEvery alert is stored in `cyber_sentinel_ai.workflow_failure_alerts`.",
-        "height": 420,
-        "width": 560,
+        "height": 380,
+        "width": 640,
         "color": 4
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -420,
-        300
+        -720,
+        0
       ],
       "id": "0b6e4ff1-351a-5748-b17e-bcff7d34f39a",
       "name": "Note - overview"
@@ -22,8 +22,8 @@
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
-        260,
-        300
+        0,
+        0
       ],
       "id": "40a6c44c-c923-581a-9f8b-e5533a9d18d5",
       "name": "Error Trigger"
@@ -37,8 +37,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        480,
-        300
+        240,
+        0
       ],
       "id": "cf16c11a-c894-57e3-9b6a-f95d6dd69179",
       "name": "Guard settings",
@@ -81,8 +81,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        700,
-        300
+        480,
+        0
       ],
       "id": "464f1ef1-1f3d-5c78-8931-134a5d9b0e5c",
       "name": "Recent executions",
@@ -103,8 +103,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        920,
-        300
+        720,
+        0
       ],
       "id": "fd97efaf-da74-5a77-8abb-78d656df279d",
       "name": "Evaluate failures"
@@ -137,8 +137,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1140,
-        300
+        960,
+        0
       ],
       "id": "af8741a9-ede0-55dd-a0d5-8cae17fd3330",
       "name": "Stop workflow?"
@@ -162,8 +162,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1360,
-        300
+        1200,
+        0
       ],
       "id": "5ec6d8f4-24f8-5700-b3be-4a7cfbaac36c",
       "name": "Deactivate workflow",
@@ -188,8 +188,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1580,
-        300
+        1440,
+        0
       ],
       "id": "1dcd26f5-5500-52f1-b9d3-286530b413d3",
       "name": "Earlier alert for this streak?",
@@ -228,8 +228,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1800,
-        300
+        1680,
+        0
       ],
       "id": "fce7bdda-9215-541d-8f2e-eca8dcef617e",
       "name": "First alert of this streak?"
@@ -241,8 +241,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2020,
-        300
+        1920,
+        0
       ],
       "id": "640d3af6-ec8e-556e-b5e7-d10b2111d577",
       "name": "Build e-mail"
@@ -258,8 +258,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        2240,
-        300
+        2160,
+        0
       ],
       "id": "561685ed-fc97-54a0-9c36-5537a20c17f7",
       "name": "Log alert",
@@ -282,8 +282,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        2460,
-        300
+        2400,
+        0
       ],
       "id": "698e16cb-56f3-54bf-b27e-029077615a6f",
       "name": "Send an Email",

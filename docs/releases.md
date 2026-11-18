@@ -125,7 +125,7 @@ https://raw.githubusercontent.com/lukaszFD/sentinel-blocklists/main/lists/teleme
 
 ### Next
 
-API call monitoring: counting real requests per provider and caller, VirusTotal's own quota counter, usage in the AI Config UI and alerts before the daily limit. See the [roadmap](future-roadmap.md#next-api-call-monitoring).
+API call monitoring: counting real requests per provider and caller, VirusTotal's own quota counter, usage in the AI Config UI and alerts before the daily limit. Delivered in [v2.3.0](#v230).
 
 ---
 

@@ -6,7 +6,7 @@
 
 services:
 
-  # [SVC.DNS.RECURSIVE] Unbound — recursive resolver, upstream of passive_dns
+  # [SVC.DNS.RECURSIVE] Unbound — recursive resolver, upstream of Pi-hole
   unbound:
     image: "{{ cs_images.unbound }}"
     container_name: unbound
@@ -18,23 +18,9 @@ services:
       - './config/unbound/unbound.conf:/etc/unbound/unbound.conf'
     restart: unless-stopped
 
-  # [SVC.DNS.PASSIVE] passive_dns — dnsmasq that logs every query to dns.log
-  passive_dns:
-    build:
-      context: .
-      dockerfile: Dockerfile.pdns
-    container_name: passive_dns
-    hostname: passive_dns
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.3
-    volumes:
-      - './config/dns/dnsmasq.d:/etc/dnsmasq.d'
-      - './config/dns/var-log:/var/log'
-    restart: unless-stopped
-    command: ["dnsmasq", "-k", "--no-resolv", "--server=10.10.10.2#53", "--log-queries", "--log-facility=/var/log/dns.log"]
-
-  # [SVC.DNS.AD_BLOCK] Pi-hole — DNS for the LAN; upstream is passive_dns (set by 04.6)
+  # [SVC.DNS.AD_BLOCK] Pi-hole — DNS for the LAN; upstream is Unbound (set by 04.6).
+  # Its query log (pihole.log, extraLogging on) is the source of dns_queries:
+  # /var/log/pihole is bind-mounted so dns_log_processor can read it.
   # KNOWN ISSUE: './pihole' and './dnsmasq.d' lack the 'config/' prefix
   # used by 04.1 — one of the two layouts is wrong.
   pihole:
@@ -48,13 +34,13 @@ services:
     volumes:
       - './pihole:/etc/pihole'
       - './dnsmasq.d:/etc/dnsmasq.d'
+      - './config/pihole/log:/var/log/pihole'
     ports:
       - "53:53/tcp"
       - "53:53/udp"
     restart: unless-stopped
     depends_on:
       - unbound
-      - passive_dns
 
   # [SVC.UI.BROWSER] Firefox — isolated browser; tmpfs profile, nothing persists
   firefox:
@@ -77,7 +63,7 @@ services:
     shm_size: 2gb
     restart: unless-stopped
 
-  # [SVC.DNS.PROCESSOR] dns_log_processor — dns.log → cyber_sentinel.dns_queries
+  # [SVC.DNS.PROCESSOR] dns_log_processor — pihole.log → cyber_sentinel.dns_queries
   dns_log_processor:
     build:
       context: .
@@ -85,6 +71,7 @@ services:
     container_name: dns_log_processor
     depends_on:
       - postgres_db
+      - pihole
     networks:
       internal_network:
         ipv4_address: 10.10.10.6
@@ -92,7 +79,7 @@ services:
     env_file:
       - .env
     volumes:
-      - './config/dns/var-log:/var/log/dns:ro'
+      - './config/pihole/log:/var/log/pihole:ro'
     restart: unless-stopped
 
   # [SVC.AUTOMATION] n8n — runs the AI decision workflow

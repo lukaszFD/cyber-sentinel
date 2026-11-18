@@ -70,12 +70,10 @@ cs_images:
 #   Service             Dockerfile                  Note
 #   ai-config-ui        ai_config_ui/Dockerfile
 #   postgres_db         Dockerfile.postgres
-#   dns_log_processor   Dockerfile.log_processor    python 3.9 is EOL
-#   passive_dns         Dockerfile.pdns             alpine 3.18 is EOL
+#   dns_log_processor   Dockerfile.log_processor
 # ------------------------------------------------------------
 
 cs_base_images:
   ai_config_ui:       "python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
   postgres_db:        "pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a"
-  dns_log_processor:  "python:3.9-slim@sha256:2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b"
-  passive_dns:        "alpine:3.18@sha256:de0eb0b3f2a47ba1eb89389859a9bd88b28e82f5826b6969ad604979713c2d4f"
+  dns_log_processor:  "python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"

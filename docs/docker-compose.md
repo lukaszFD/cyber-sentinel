@@ -9,10 +9,9 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 | IP | Service | Image | Role |
 |---|---|---|---|
 | `.2` | `unbound` | registry | Recursive resolver — the end of the DNS chain |
-| `.3` | `passive_dns` | built (dnsmasq) | Logs every query to `dns.log`, forwards to Unbound |
-| `.4` | `pihole` | registry | DNS for the LAN, ad-block, denylist written by n8n |
+| `.4` | `pihole` | registry | DNS for the LAN, ad-block, denylist written by n8n; query log `pihole.log` |
 | `.5` | `firefox` | registry | Isolated browser; profile on tmpfs |
-| `.6` | `dns_log_processor` | built (Python) | `dns.log` → `dns_queries` |
+| `.6` | `dns_log_processor` | built (Python) | `pihole.log` (read-only mount) → `dns_queries` |
 | `.7` | `n8n` | registry | AI decision workflow |
 | `.8` | `ai-config-ui` | built (Flask) | AI pipeline configuration |
 | `.9` | `postgres_db` | built (pgvector + pg_cron) | The only database |
@@ -23,7 +22,7 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 | `.14` | `node_exporter` | registry | Host metrics |
 | `.100` | `nginx-proxy` | registry | TLS reverse proxy — started by playbook 05, not by compose |
 
-DNS path: `client → pihole → passive_dns → unbound → internet`.
+DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log).
 
 ## Exposure
 

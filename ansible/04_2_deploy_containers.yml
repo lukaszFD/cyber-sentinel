@@ -17,7 +17,7 @@
 #
 # Outputs:    All containers from docker-compose-cyber-sentinel.yml
 #             running in detached mode. The `--build` flag rebuilds the
-#             custom images (postgres_db, passive_dns, dns_log_processor,
+#             custom images (postgres_db, dns_log_processor,
 #             ai-config-ui) on every run, picking up Dockerfile or
 #             source changes.
 #
@@ -35,6 +35,15 @@
     # ============================================================
     # SECTION 1 — Build and start the stack
     # ============================================================
+
+    # passive_dns was removed from the compose file; `up` would leave the
+    # old container running (and holding 10.10.10.3) as an orphan.
+    # Removed by name, not with --remove-orphans, so nothing else in the
+    # project is touched.
+    - name: "[04.2.1.0] Remove the retired passive_dns container"
+      community.docker.docker_container:
+        name: passive_dns
+        state: absent
 
     - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:

@@ -15,8 +15,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -576,
-        112
+        0,
+        100
       ],
       "id": "409f0724-4b79-50cf-8655-247f7dcae085",
       "name": "Schedule Trigger"
@@ -29,8 +29,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        -416,
-        112
+        240,
+        100
       ],
       "id": "0d09130a-913f-5ad0-b679-0383ae3a29a8",
       "name": "Postgres Pass",
@@ -50,8 +50,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -576,
-        336
+        480,
+        100
       ],
       "id": "878783b7-fd36-57c2-97d4-cc575011c7c4",
       "name": "Load AI configuration",
@@ -71,8 +71,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -400,
-        336
+        720,
+        100
       ],
       "id": "3048802b-0bce-5dad-b067-c36795968720",
       "name": "Select pending observable",
@@ -91,8 +91,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        -144,
-        336
+        1080,
+        140
       ],
       "id": "bf20210b-fe8b-5d4c-9fef-5fa9f784e65a",
       "name": "Virus total API TOKEN",
@@ -128,8 +128,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        16,
-        336
+        1320,
+        140
       ],
       "id": "85825cda-21ec-5245-af30-6ea083524278",
       "name": "VirusTotal IP Scan"
@@ -142,8 +142,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        396,
-        336
+        1800,
+        140
       ],
       "id": "0ebc1555-41fd-5f0b-a8c1-bca98acd676e",
       "name": "Data reduction - VirusTotal"
@@ -176,8 +176,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        572,
-        336
+        2040,
+        140
       ],
       "id": "4e8b198f-8b03-5ac6-98d6-9a194c4ffb50",
       "name": "Shodan lookup enabled?"
@@ -198,8 +198,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        780,
-        256
+        2280,
+        140
       ],
       "id": "0fac3a89-0084-5ddf-8475-c26742ee7880",
       "name": "Shodan InternetDB",
@@ -216,8 +216,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        988,
-        256
+        2520,
+        140
       ],
       "id": "944718dd-7815-5376-ac86-159479295687",
       "name": "Data reduction - Shodan"
@@ -230,8 +230,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        884,
-        448
+        2520,
+        340
       ],
       "id": "ac17fab5-5cde-5a36-b3ac-e2d724d7fa15",
       "name": "Shodan not checked"
@@ -263,8 +263,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1232,
-        336
+        2760,
+        140
       ],
       "id": "0d0a154b-3439-588e-ab53-6d431fb9904b",
       "name": "VirusTotal detections ≥ threshold?"
@@ -277,8 +277,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        1424,
-        176
+        3000,
+        140
       ],
       "id": "7372b70a-91a8-5c22-9011-0631d1885155",
       "name": "Abuse API TOKEN",
@@ -318,8 +318,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1632,
-        176
+        3240,
+        140
       ],
       "id": "e4a6e6e8-31dc-5bb7-ad6c-9909c5fefaf0",
       "name": "Abuse.CH_ThreatFox request",
@@ -363,8 +363,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1840,
-        176
+        3480,
+        140
       ],
       "id": "c3884334-cf4a-512e-ab41-56cd8891b93a",
       "name": "Abuse.CH_URLHaus request",
@@ -380,8 +380,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2048,
-        176
+        3720,
+        140
       ],
       "id": "99f74541-5fc9-59dc-9cba-438108dd2219",
       "name": "Data reduction - abuse.ch"
@@ -414,8 +414,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2256,
-        176
+        3960,
+        140
       ],
       "id": "88e406de-9e32-5714-a22f-a1244d11c727",
       "name": "urlscan.io lookup enabled?"
@@ -428,8 +428,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        2464,
-        96
+        4200,
+        140
       ],
       "id": "d59a5af9-95e1-560a-a19e-e954fb4ac78e",
       "name": "urlscan.io API TOKEN",
@@ -479,8 +479,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2672,
-        96
+        4440,
+        140
       ],
       "id": "61aef942-d2a8-5627-af35-4505ee675ff5",
       "name": "urlscan.io search",
@@ -527,8 +527,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2880,
-        96
+        4680,
+        140
       ],
       "id": "d46c8e91-1c60-59ef-b85a-0c138a9d28fc",
       "name": "urlscan.io search by IP",
@@ -545,8 +545,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3088,
-        96
+        4920,
+        140
       ],
       "id": "bc3e3ef3-919a-5f3a-9bb2-1797909e04de",
       "name": "Data reduction - urlscan.io"
@@ -559,8 +559,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2672,
-        304
+        4920,
+        340
       ],
       "id": "744c481a-9112-51a3-ae11-dd16f67488fd",
       "name": "urlscan.io not checked"
@@ -573,8 +573,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1728,
-        512
+        4920,
+        540
       ],
       "id": "39d7d52b-4de8-5342-9e68-be2b2b1b7121",
       "name": "Supporting sources not checked"
@@ -590,8 +590,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        3328,
-        336
+        5280,
+        100
       ],
       "id": "8cb1cf9b-93a5-58d9-8368-4dd9abac3235",
       "name": "Compute rule-based score",
@@ -630,8 +630,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3584,
-        336
+        5520,
+        100
       ],
       "id": "53d12288-49a6-51d4-b030-f5e3632f97ef",
       "name": "AI analysis required?"
@@ -644,8 +644,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        3792,
-        176
+        5760,
+        100
       ],
       "id": "811f9fa4-23b0-5e7e-a8fd-f68a7dc128d5",
       "name": "Gemini AI Studio",
@@ -664,8 +664,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3984,
-        176
+        6000,
+        100
       ],
       "id": "5105373f-2574-58d6-a429-547bbd9e802d",
       "name": "Build AI prompt"
@@ -683,8 +683,8 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        4208,
-        176
+        6300,
+        100
       ],
       "id": "ae780cfb-46df-588c-846d-552399ada6b4",
       "name": "AI Agent",
@@ -704,8 +704,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        4080,
-        352
+        6240,
+        280
       ],
       "id": "16166117-61fd-5838-8064-3f2f275178a5",
       "name": "Google Gemini Chat Model",
@@ -730,8 +730,8 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
       "typeVersion": 1.2,
       "position": [
-        4192,
-        416
+        6360,
+        280
       ],
       "id": "21a328a8-5e53-5c1e-b294-d4719fe21eee",
       "name": "Postgres PGVector Store",
@@ -747,8 +747,8 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
       "typeVersion": 1,
       "position": [
-        4192,
-        544
+        6360,
+        440
       ],
       "id": "f446d55c-a260-5c6c-b5b9-bf42b28eb590",
       "name": "Embeddings Google Gemini",
@@ -767,8 +767,8 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        4480,
-        368
+        6480,
+        280
       ],
       "id": "4f283f27-39d3-5b12-a3a4-09ae818f1a9d",
       "name": "Structured Output Parser"
@@ -781,8 +781,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4592,
-        176
+        6820,
+        100
       ],
       "id": "c81d5aec-cf59-5322-a294-3d02392444dc",
       "name": "Parse AI Agent output"
@@ -795,8 +795,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4128,
-        768
+        6360,
+        640
       ],
       "id": "bd42cb73-99dc-504d-917e-a1c2515432b1",
       "name": "Build clean scan verdict"
@@ -812,8 +812,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        4896,
-        112
+        7060,
+        100
       ],
       "id": "2a46d21e-1b71-5ea3-aaf7-03f0acb185e1",
       "name": "Insert raw payloads",
@@ -835,8 +835,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5104,
-        112
+        7300,
+        100
       ],
       "id": "a4a513df-58c0-508a-b7b1-5a07f9354811",
       "name": "Insert AI verdict",
@@ -858,8 +858,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5312,
-        112
+        7540,
+        100
       ],
       "id": "a6f31845-cca6-58ae-ba99-4f0ff8beb2dc",
       "name": "Insert AI audit",
@@ -898,8 +898,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        5520,
-        112
+        7900,
+        100
       ],
       "id": "5fac1ca3-52ca-5421-a99e-3ab497f50621",
       "name": "AI verdict to remember?"
@@ -913,8 +913,8 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
       "typeVersion": 1.2,
       "position": [
-        5792,
-        96
+        8200,
+        100
       ],
       "id": "9dd38b79-9037-5491-80a2-297ef85bd4c2",
       "name": "Store verdict in vector memory",
@@ -964,8 +964,8 @@
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
       "position": [
-        5936,
-        272
+        8140,
+        280
       ],
       "id": "3474153c-2325-5c2a-975e-6ee8a2d86f02",
       "name": "Default Data Loader"
@@ -975,8 +975,8 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
       "typeVersion": 1,
       "position": [
-        5680,
-        272
+        8260,
+        280
       ],
       "id": "3d51f6c4-7dfe-5557-8401-5327b90f087c",
       "name": "Embeddings Google Gemini (store)",
@@ -1015,8 +1015,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        4896,
-        544
+        7900,
+        1000
       ],
       "id": "6525fd9a-c7ea-5d9e-ae96-19336bce3a03",
       "name": "Send alert?"
@@ -1029,8 +1029,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        5104,
-        544
+        8200,
+        1000
       ],
       "id": "48e1a5eb-1a9a-56e5-bb13-2ea6271e2790",
       "name": "Get Email Pass",
@@ -1049,8 +1049,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5312,
-        544
+        8600,
+        1000
       ],
       "id": "a8dff11a-9846-58f9-9ae8-fb9eb40d11cc",
       "name": "Build alert e-mail"
@@ -1066,8 +1066,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        5520,
-        544
+        8840,
+        1000
       ],
       "id": "621f571c-a241-5f0c-bdb0-e88633e12691",
       "name": "Send an Email",
@@ -1082,14 +1082,14 @@
     {
       "parameters": {
         "content": "# 🛡️ Project: Cyber Sentinel\n\n### **Purpose**\nAutonomous **Cyber Threat Intelligence (CTI)** & **Passive DNS Monitoring**. This workflow orchestrates the analysis of DNS telemetry using AI to detect malicious patterns and trigger autonomous response playbooks.\n\n---\n\n### **🚀 Setup Instructions**\n1.  **Secret Management:** Ensure **HashiCorp Vault** is connected to handle API keys and credentials securely.\n2.  **AI Engine:** Configure the **Google Gemini** credential used by the Chat Model and Embeddings nodes to enable bilingual threat assessment (**EN/PL**).\n3.  **Data Layer:** Verify the connection to the **PostgreSQL** database (Neural Lake) with **pgvector** — CTI data in `cyber_sentinel`, AI settings, prompt and vector memory in `cyber_sentinel_ai`.\n\n---\n\n### **🔗 Resources**\n* **Documentation:** [https://lukaszfd.github.io/cyber-sentinel/](https://lukaszfd.github.io/cyber-sentinel/)\n* **Author:** Łukasz Dejko",
-        "height": 432,
-        "width": 688
+        "height": 540,
+        "width": 640
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1332,
-        -464
+        -760,
+        0
       ],
       "id": "64e0139b-fe03-5459-861a-178fb64403de",
       "name": "Sticky Note11"
@@ -1097,14 +1097,14 @@
     {
       "parameters": {
         "content": "## Orchestration & Data Ingestion\n\n",
-        "height": 736,
-        "width": 416,
+        "height": 280,
+        "width": 900,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -640,
+        -40,
         0
       ],
       "id": "f03de7a5-aa71-5d69-9a5b-53e96a197770",
@@ -1113,14 +1113,14 @@
     {
       "parameters": {
         "content": "## Multi-Source Threat Intelligence Enrichment\n\nVirusTotal (primary) + Shodan InternetDB (every observable) → ThreatFox + URLhaus + urlscan.io search by domain and by IP (supporting, only above the VirusTotal gate)\n",
-        "height": 736,
-        "width": 3476,
+        "height": 720,
+        "width": 4020,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -176,
+        1040,
         0
       ],
       "id": "20694825-45ca-5a31-884b-adee855f9f74",
@@ -1129,14 +1129,14 @@
     {
       "parameters": {
         "content": "## AI Synthesis & Cognitive Analysis\n\n",
-        "height": 912,
-        "width": 1232,
+        "height": 840,
+        "width": 1360,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        3332,
+        5240,
         0
       ],
       "id": "b3c027dc-bd89-5cd6-a820-db4884fb2c42",
@@ -1145,14 +1145,14 @@
     {
       "parameters": {
         "content": "## Dual-Layer Persistence Strategy\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
-        "height": 416,
-        "width": 1488,
+        "height": 440,
+        "width": 1600,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        4596,
+        6780,
         0
       ],
       "id": "76c26e0e-6fc3-5b27-883f-bdd641d60b9a",
@@ -1186,8 +1186,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        4896,
-        736
+        7900,
+        1400
       ],
       "id": "7cfc9f18-b3aa-466a-afeb-69c2099546de",
       "name": "Block in Pi-hole?"
@@ -1200,8 +1200,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        5104,
-        736
+        8200,
+        1400
       ],
       "id": "40f3f21f-42f6-47a5-abae-15cefce9e448",
       "name": "Pi-hole API password",
@@ -1233,8 +1233,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5312,
-        736
+        8600,
+        1400
       ],
       "id": "63e4e278-3613-436d-9a43-0fb544c39718",
       "name": "Pi-hole login",
@@ -1272,8 +1272,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5520,
-        736
+        8840,
+        1400
       ],
       "id": "6116b117-89c0-485a-af52-c98280843490",
       "name": "Pi-hole add to denylist",
@@ -1305,8 +1305,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5728,
-        736
+        9080,
+        1400
       ],
       "id": "b71103f5-e631-42b0-8183-e45a7786c774",
       "name": "Pi-hole logout",
@@ -1320,8 +1320,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5936,
-        736
+        9320,
+        1400
       ],
       "id": "441f869b-a094-41b8-9660-f96a679977a3",
       "name": "Evaluate Pi-hole result"
@@ -1337,8 +1337,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        6144,
-        736
+        9560,
+        1400
       ],
       "id": "84ee3af0-8952-42c5-95b7-d3cefd8156f4",
       "name": "Log Pi-hole block",
@@ -1353,15 +1353,15 @@
     {
       "parameters": {
         "content": "## Autonomous Response — Pi-hole auto-block & Incident Reporting ",
-        "height": 448,
-        "width": 1488,
+        "height": 680,
+        "width": 1840,
         "color": 7
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        4596,
-        464
+        7860,
+        900
       ],
       "id": "8ba9497b-5ade-469a-8b84-4b2056389eb9",
       "name": "Sticky Note12"
@@ -1377,8 +1377,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        236,
-        336
+        1560,
+        140
       ],
       "id": "341cc0e8-440a-52f3-b246-65402bc574b9",
       "name": "Log VirusTotal call",
@@ -1398,8 +1398,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5532,
-        592
+        7900,
+        1200
       ],
       "id": "b18be190-d977-575c-9e2b-8e30970d1cc8",
       "name": "Collect API calls",
@@ -1416,8 +1416,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        5752,
-        592
+        8200,
+        1200
       ],
       "id": "d5d58fa9-fd7f-5e1a-bfa5-2de61b729bbf",
       "name": "Log API calls",
