@@ -4,7 +4,7 @@ Guidance for Claude (Claude Code and the Claude.ai "Cyber Sentinel" project) whe
 
 ## What this is
 
-Cyber Sentinel is a self-hosted, AI-driven network security stack: DNS filtering and logging (Pi-hole + recursive Unbound + passive DNS), threat-intel enrichment and AI verdicts in n8n (Gemini, VirusTotal, abuse.ch ThreatFox/URLhaus, urlscan.io, Shodan), PostgreSQL 16 + pgvector, HashiCorp Vault for secrets, Nginx TLS proxy, Prometheus/Grafana monitoring. Production runs on a Raspberry Pi 5.
+Cyber Sentinel is a self-hosted, AI-driven network security stack: DNS filtering and logging (Pi-hole + recursive Unbound; Pi-hole's query log feeds `dns_queries`), threat-intel enrichment and AI verdicts in n8n (Gemini, VirusTotal, abuse.ch ThreatFox/URLhaus, urlscan.io, Shodan), PostgreSQL 16 + pgvector, HashiCorp Vault for secrets, Nginx TLS proxy, Prometheus/Grafana monitoring. Production runs on a Raspberry Pi 5.
 
 There is no application build. The repo is infrastructure-as-code (Ansible + Docker Compose), plus a few Python services and SQL.
 
