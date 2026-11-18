@@ -7,13 +7,12 @@ Cyber Sentinel runs as one Docker Compose stack on a Raspberry Pi 5 (`arm64`); t
 ## 1. DNS Capture
 
 ```text
-client → pihole → passive_dns → unbound → internet
+client → pihole → unbound → internet
 ```
 
-- **Pi-hole** filters ads and known-bad domains and holds the denylist that n8n writes to.
-- **passive_dns** (dnsmasq) logs every query and answer.
+- **Pi-hole** filters ads and known-bad domains, holds the denylist that n8n writes to, and logs every query and answer to `pihole.log`. It answers LAN clients (`dns.listeningMode = ALL`, set by playbook 04.6), which reach it through the published port 53 with their own source IP.
 - **Unbound** resolves recursively, without a third-party resolver.
-- **dns_log_processor** turns the log into rows in `dns_queries`.
+- **dns_log_processor** follows `pihole.log` and turns it into rows in `dns_queries`: the query with the real client IP, and its answer — forwarded (`reply`), from Pi-hole's cache (`cached`) or blocked (`blocked`). The Pi-hole API and `pihole-FTL.db` do not keep the answer IP, which the pipeline needs, so the log is the source.
 
 ## 2. Decision Pipeline (n8n)
 

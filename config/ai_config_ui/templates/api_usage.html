@@ -2,7 +2,7 @@
 {% block title %}API usage{% endblock %}
 {% block content %}
 <h1>API usage</h1>
-<p class="muted">Every outgoing request of the n8n workflows and of the simulator is logged in <code>cyber_sentinel_ai.api_call_log</code> (kept 6 months). The day is the UTC day of the providers' quotas — it resets at 00:00 UTC (01:00/02:00 Polish time). <strong>Used</strong> is the higher of the local count and the provider's own counter, which the <em>API Usage Monitor</em> workflow reads every hour and which also sees calls from the dev environment or manual tests.</p>
+<p class="muted">Every outgoing request of the n8n workflows and of the simulator is logged in <code>cyber_sentinel_ai.api_call_log</code> (kept 3 months). The day is the UTC day of the providers' quotas — it resets at 00:00 UTC (01:00/02:00 Polish time). <strong>Used</strong> is the higher of the local count and the provider's own counter, which the <em>API Usage Monitor</em> workflow reads every hour and which also sees calls from the dev environment or manual tests.</p>
 {% if ready %}
 
 <section class="card">

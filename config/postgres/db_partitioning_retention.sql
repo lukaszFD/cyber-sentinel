@@ -2,7 +2,10 @@
 -- DATA RETENTION STRATEGY — POSTGRES
 -- Cyber Intelligence System — Postgres port
 -- ============================================
--- Strategy: Monthly declarative partitioning, 6-month retention
+-- Strategy: Monthly declarative partitioning, 3-month retention (one value
+--           for all tables, so links between them, e.g.
+--           threat_indicators.dns_query_id -> dns_queries, never point at
+--           dropped rows; long-term history lives in Sentinel Engram)
 -- Tables: cyber_sentinel.dns_queries, cyber_sentinel.network_events,
 --         cyber_sentinel.threat_indicators, cyber_sentinel_ai.api_call_log
 --         (the last one is created by db_ai_pipeline.sql; listed in
@@ -137,7 +140,7 @@ CREATE OR REPLACE FUNCTION cyber_sentinel.sp_drop_old_partitions()
 RETURNS void AS $$
 DECLARE
 rec RECORD;
-    v_cutoff DATE := date_trunc('month', CURRENT_DATE) - interval '6 months';
+    v_cutoff DATE := date_trunc('month', CURRENT_DATE) - interval '3 months';
     v_partition_month DATE;
     v_yyyymm TEXT;
 BEGIN

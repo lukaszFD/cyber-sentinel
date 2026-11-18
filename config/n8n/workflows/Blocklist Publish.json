@@ -16,8 +16,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -400,
-        300
+        0,
+        0
       ],
       "id": "4c41be24-72b8-5cbb-b542-e6ee3bced9ba",
       "name": "Schedule Trigger"
@@ -29,8 +29,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -180,
-        300
+        240,
+        0
       ],
       "id": "77fa320d-3618-51e7-9806-590115222c68",
       "name": "Publish settings"
@@ -44,8 +44,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        40,
-        300
+        480,
+        0
       ],
       "id": "94d6037c-4d99-50b2-99e5-cde010e282a1",
       "name": "Sync malicious list",
@@ -65,8 +65,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        260,
-        300
+        720,
+        0
       ],
       "id": "77a65362-6e30-5c6e-8820-ff8697e95d73",
       "name": "Render lists",
@@ -85,8 +85,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        480,
-        300
+        960,
+        0
       ],
       "id": "431df35f-2934-51d4-bd33-062af0ebfd57",
       "name": "GitHub token",
@@ -131,8 +131,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        700,
-        300
+        1200,
+        0
       ],
       "id": "0d6bb462-9eee-5262-bc9a-b01ba8c5a681",
       "name": "Get main branch",
@@ -148,8 +148,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        920,
-        300
+        1440,
+        0
       ],
       "id": "fca26fb5-7466-51a7-85ba-896e6b31e172",
       "name": "Plan list files"
@@ -188,8 +188,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1140,
-        300
+        1680,
+        0
       ],
       "id": "7fdb227b-dc45-568d-a8c2-2092d64e2556",
       "name": "Get list file",
@@ -205,8 +205,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1360,
-        300
+        1920,
+        0
       ],
       "id": "c4926e93-3d19-50a1-bc27-e02b91ec4e40",
       "name": "Compare lists"
@@ -239,8 +239,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1580,
-        300
+        2160,
+        0
       ],
       "id": "abd10c46-3588-53ae-857f-6f26937df2a5",
       "name": "Publishing on?"
@@ -278,8 +278,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1800,
-        300
+        2400,
+        0
       ],
       "id": "5fb85a56-a380-5f4c-84ef-9b0790ed8a0d",
       "name": "Find open PR",
@@ -321,8 +321,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2020,
-        300
+        2640,
+        0
       ],
       "id": "6b579f16-8fa8-5fb8-b811-a33369495179",
       "name": "Get branch",
@@ -338,8 +338,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2240,
-        300
+        2880,
+        0
       ],
       "id": "3e8bd00d-57e5-5684-9976-becb67156108",
       "name": "Plan PR"
@@ -372,8 +372,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2460,
-        300
+        3120,
+        0
       ],
       "id": "2e9fe4c0-bebc-5299-b426-679cb4032e51",
       "name": "Write commit?"
@@ -415,8 +415,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2680,
-        300
+        3360,
+        0
       ],
       "id": "25379f62-75d4-52cb-9630-f7d3c343246e",
       "name": "Create tree",
@@ -462,8 +462,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2900,
-        300
+        3600,
+        0
       ],
       "id": "74d7df89-8acd-535b-8fb0-d8bf604ecbe7",
       "name": "Create commit",
@@ -509,8 +509,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3120,
-        300
+        3840,
+        0
       ],
       "id": "069d4f81-b01d-5b6e-803e-0ba046f038e5",
       "name": "Point branch at commit",
@@ -547,8 +547,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        3340,
-        300
+        4080,
+        0
       ],
       "id": "d7b87951-3e1c-50a2-b9fc-3109312b4357",
       "name": "Branch updated?"
@@ -581,8 +581,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2680,
-        560
+        4080,
+        200
       ],
       "id": "e80af717-4e77-590b-8945-ca43dca2e450",
       "name": "Close stale PR?"
@@ -624,8 +624,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3560,
-        300
+        4320,
+        0
       ],
       "id": "3a152061-60d5-5ed3-b396-a5c2e859cfa9",
       "name": "Open, update or close PR",
@@ -641,8 +641,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3780,
-        300
+        4560,
+        200
       ],
       "id": "8206047e-3eac-50c6-8e16-9116a0f73e70",
       "name": "Evaluate result"
@@ -658,8 +658,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        4000,
-        300
+        4800,
+        200
       ],
       "id": "70278bfe-d77e-5ca0-a1d8-d98b29f4aff9",
       "name": "Log publish run",
@@ -698,8 +698,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        4220,
-        300
+        5040,
+        200
       ],
       "id": "605a1081-decf-595f-b37c-e59cfdba1c87",
       "name": "E-mail?"
@@ -712,8 +712,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        4440,
-        300
+        5280,
+        200
       ],
       "id": "ec5a2bd2-ce9f-5095-929d-50545cdab663",
       "name": "Get Email Pass",
@@ -733,8 +733,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4660,
-        300
+        5520,
+        200
       ],
       "id": "968447cc-a6a2-5af4-84b4-5d4af498a992",
       "name": "Build e-mail"
@@ -750,8 +750,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        4880,
-        300
+        5760,
+        200
       ],
       "id": "7ca3c302-1855-5e4b-9e85-f5a33437c4e0",
       "name": "Send an Email",
@@ -766,14 +766,14 @@
     {
       "parameters": {
         "content": "# Cyber Sentinel — Blocklist Publish\n\nOnce a day: copies Pi-hole auto-blocks into the malicious list, generates the three list files from the database (`blocklist_render()`) and compares them with `main` of **lukaszFD/sentinel-blocklists**.\n\nIf they differ, the files go as **one commit** to the branch `n8n/daily-update` (rebuilt from `main` every day) and one pull request is opened or updated. **The merge stays manual** — a ruleset on `main` requires a pull request. A PR left open while the lists became equal to `main` again is closed.\n\n`blocklist_publish_enabled = 0` → dry run: compared and logged only. Token: Vault `cyber-sentinel/api-keys/github/blocklists` (fine-grained PAT for that repository only). Every run → `blocklist_publish_log`.",
-        "height": 240,
-        "width": 880
+        "height": 340,
+        "width": 640
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -460,
-        -280
+        -720,
+        0
       ],
       "id": "7c7cd5a4-2520-5945-8782-7d6f7f4c14e6",
       "name": "Note - overview"

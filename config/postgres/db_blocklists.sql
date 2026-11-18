@@ -247,8 +247,8 @@ $$;
 
 -- Domains waiting for AI classification, most queried first. Public IPv4
 -- answers only (same rule as v_pending_observables: skips Pi-hole's
--- 0.0.0.0, local names and private addresses). Today dns_queries holds
--- only queries Pi-hole forwarded, i.e. allowed ones.
+-- 0.0.0.0, local names and private addresses), so blocked answers
+-- (query_type 'blocked') never enter the queue.
 -- The daily limit is applied by the workflow (blocklist_ai_daily_limit
 -- minus today's classifications).
 CREATE OR REPLACE VIEW cyber_sentinel_ai.v_blocklist_ai_queue AS

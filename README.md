@@ -30,7 +30,7 @@
   <p style="margin: 0 0 1.2rem; line-height: 1.9;">
     <img alt="Pi-hole" src="https://img.shields.io/badge/DNS-Pi--hole-96060C?style=flat-square&logo=pihole&logoColor=white">
     <img alt="Unbound" src="https://img.shields.io/badge/Resolver-Unbound%20%28recursive%29-2E7D32?style=flat-square" style="margin-left:6px;">
-    <img alt="Passive DNS" src="https://img.shields.io/badge/Passive%20DNS-dnsmasq-455A64?style=flat-square" style="margin-left:6px;">
+    <img alt="DNS log" src="https://img.shields.io/badge/DNS%20log-pihole.log%20%E2%86%92%20PostgreSQL-455A64?style=flat-square" style="margin-left:6px;">
   </p>
 
   <p style="margin: 0 0 0.5rem; font-size: 0.75rem; font-weight: 600; color: var(--md-default-fg-color--light); text-transform: uppercase; letter-spacing: 0.08em;">

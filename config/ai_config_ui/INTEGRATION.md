@@ -68,8 +68,8 @@ Python port of its two reduction nodes (`live_lookup.py`): VirusTotal by IP, the
 - Keys: `vault_virus_total_token`, `vault_abuse_api_key` — already in `vault.yml` for n8n.
   Empty `AI_UI_VT_API_KEY` disables the button; the rest of the UI works without it.
 - The FQDN is resolved directly against Unbound (`AI_UI_RESOLVER`, default `10.10.10.2`),
-  not via Pi-hole — otherwise passive_dns would log it and the domain would enter the real
-  n8n queue. Unbound's `access-control` must allow `10.10.10.0/24` (it already serves Pi-hole).
+  not via Pi-hole — otherwise Pi-hole's query log would record it and the domain would enter
+  the real n8n queue. Unbound's `access-control` must allow `10.10.10.0/24` (it already serves Pi-hole).
 - The VirusTotal free tier (4/min, 500/day) is shared with n8n, so the simulator uses the
   workflow's budget: `api_claim('simulator', ...)` before each VirusTotal call (same per-minute
   limit and reserve; refused when the budget does not allow it) and `api_call_finish()` after

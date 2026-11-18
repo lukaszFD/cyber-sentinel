@@ -4,15 +4,15 @@
     {
       "parameters": {
         "content": "# Cyber Sentinel — API Usage Monitor\n\nEvery hour at :05:\n\n1. reads VirusTotal's **own** usage counter for the API key (`/users/{key}/overall_quotas`) and stores it in `api_provider_quota` — `claim_next_observable()` budgets with the higher of this and the local count, so calls from the dev environment or manual tests also reduce the budget;\n2. checks `v_api_usage_today` and sends **one e-mail per provider and UTC day** when its usage crosses `api_alert_threshold_pct` (default 80 %) of its daily limit.\n\nEvery request of every workflow is logged in `cyber_sentinel_ai.api_call_log`; the AI Config UI shows it on the *API usage* page.",
-        "height": 420,
-        "width": 560,
+        "height": 340,
+        "width": 640,
         "color": 4
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -500,
-        300
+        -720,
+        0
       ],
       "id": "f0fb90cf-d241-5593-84d1-d70ec0977e94",
       "name": "Note - overview"
@@ -31,8 +31,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        140,
-        300
+        0,
+        0
       ],
       "id": "80825ec2-27cc-5a1e-b89f-1b0077d9f478",
       "name": "Schedule Trigger"
@@ -42,8 +42,8 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        140,
-        500
+        0,
+        200
       ],
       "id": "10585e33-6443-5bde-bdf0-70ade4c4322d",
       "name": "Run now"
@@ -56,8 +56,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        360,
-        300
+        240,
+        0
       ],
       "id": "1143a976-95e3-59b4-8f6c-e56d85e88693",
       "name": "Virus total API TOKEN",
@@ -94,8 +94,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        580,
-        300
+        480,
+        0
       ],
       "id": "b096f9cd-c088-5dc5-ab3e-890bc1ecf3ac",
       "name": "VirusTotal quota",
@@ -108,8 +108,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        800,
-        300
+        720,
+        0
       ],
       "id": "4deb8bd0-57b7-562f-bca2-ee1f11d7a66a",
       "name": "Data reduction - VirusTotal quota"
@@ -125,8 +125,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1020,
-        300
+        960,
+        0
       ],
       "id": "2e05f389-6ff4-5947-befa-20a71515f02f",
       "name": "Store quota and call",
@@ -147,8 +147,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1240,
-        300
+        1200,
+        0
       ],
       "id": "846c6e6f-b3eb-5cca-9439-4ed240e74193",
       "name": "Usage alerts due",
@@ -188,8 +188,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1460,
-        300
+        1440,
+        0
       ],
       "id": "6fa4f078-f4f4-5318-982f-adbba106b1f5",
       "name": "Any alerts?"
@@ -203,7 +203,7 @@
       "typeVersion": 1,
       "position": [
         1680,
-        300
+        0
       ],
       "id": "e793c644-4972-56ae-9c83-4a96c2346583",
       "name": "Get Email Pass",
@@ -221,8 +221,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1900,
-        300
+        1920,
+        0
       ],
       "id": "0014aee5-edd8-55b2-857d-345bd0e06dd6",
       "name": "Build e-mail"
@@ -238,8 +238,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        2120,
-        300
+        2160,
+        0
       ],
       "id": "f859c7b5-d65c-502f-bfc3-86dde0b25c55",
       "name": "Send an Email",

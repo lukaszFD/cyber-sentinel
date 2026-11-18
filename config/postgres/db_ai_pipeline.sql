@@ -830,7 +830,7 @@ GRANT SELECT ON cyber_sentinel_ai.v_pending_observables TO "{{ postgres_user }}"
 -- caller, endpoint, time, HTTP status and outcome. It is the source of
 -- every usage number (AI config UI, alerts) and of the VirusTotal budget.
 -- Partitioned by month like dns_queries; sp_drop_old_partitions()
--- (db_partitioning_retention.sql) drops months older than 6 months.
+-- (db_partitioning_retention.sql) drops months older than 3 months.
 --
 -- VirusTotal is the only provider with a hard budget. The main workflow
 -- runs every minute and calls claim_next_observable(), which hands out one

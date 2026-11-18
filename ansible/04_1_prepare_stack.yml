@@ -15,11 +15,11 @@
 #
 # Outputs:    Fully populated {{ remote_deploy_base }} tree containing:
 #               - docker-compose YAML (rendered — contains Jinja2)
-#               - Dockerfiles for custom images (postgres, pdns,
+#               - Dockerfiles for custom images (postgres,
 #                 log_processor, vault unsealer)
 #               - ai_config_ui/ build context (AI config editor)
 #               - Service configs (unbound, prometheus, grafana)
-#               - Pre-created log file with permissive ownership for DNS container
+#               - Pi-hole log directory (read by dns_log_processor)
 #               - Vault data directory with correct UID:GID
 #
 # ============================================================
@@ -66,8 +66,6 @@
         - "config/nginx/html"                          # Static error pages
         - "config/postgres"                            # Postgres init scripts (rendered in 04.3)
         - "config/unbound"                             # Recursive DNS resolver config
-        - "config/dns/dnsmasq.d"                       # Pi-hole local DNS overrides
-        - "config/dns/var-log"                         # Passive DNS log volume
         - "portainer_data"                             # Portainer state volume
         - "n8n_data"                                   # n8n workflows + credentials volume
         - "config/vault/data"                          # Vault file-backend storage (UID 100)
@@ -107,12 +105,17 @@
         owner: "{{ deployment_user }}"
         mode: '0644'
 
-    - name: "[04.1.2.3] Copy Dockerfile for Passive DNS sniffer"
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/dns/Dockerfile.pdns"
-        dest: "{{ remote_deploy_base }}/Dockerfile.pdns"
-        owner: "{{ deployment_user }}"
-        mode: '0644'
+    # passive_dns (dnsmasq between Pi-hole and Unbound) was removed:
+    # dns_log_processor reads Pi-hole's own log. Clean up its leftovers
+    # on hosts deployed before that change.
+    - name: "[04.1.2.3] Remove leftovers of the old passive_dns service"
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/{{ item }}"
+        state: absent
+      loop:
+        - "Dockerfile.pdns"
+        - "config/dns/dnsmasq.d"
+        - "config/dns/var-log"
 
     - name: "[04.1.2.4] Copy Dockerfile for DNS log processor"
       ansible.builtin.copy:
@@ -201,20 +204,21 @@
     # ============================================================
     # SECTION 4 — Container UID/permission fixes
     # ------------------------------------------------------------
-    # Two container images (pdns, vault) run as non-root UIDs that
-    # don't match deployment_user on the host. Bind-mounted volumes
+    # The vault image runs as a non-root UID that does
+    # not match deployment_user on the host. Bind-mounted volumes
     # inherit host ownership, so we pre-create files/dirs with the
     # UIDs the containers expect — otherwise they fail at startup
     # with "permission denied" or silently log nothing.
     # ============================================================
 
-    - name: "[04.1.4.1] Pre-create DNS log file with permissive ownership (UID 1000)"
+    # Pi-hole's query log directory, bind-mounted into pihole (rw) and
+    # dns_log_processor (ro). No owner/mode here on purpose: the pihole
+    # container sets the ownership it needs at start, and forcing it back
+    # on every run would fight with that.
+    - name: "[04.1.4.1] Create Pi-hole log directory"
       ansible.builtin.file:
-        path: "{{ remote_deploy_base }}/config/dns/var-log/dns.log"
-        state: touch
-        owner: "1000"
-        group: "1000"
-        mode: '0666'
+        path: "{{ remote_deploy_base }}/config/pihole/log"
+        state: directory
 
     - name: "[04.1.4.2] Set ownership for Vault data directory (UID 100)"
       ansible.builtin.file:

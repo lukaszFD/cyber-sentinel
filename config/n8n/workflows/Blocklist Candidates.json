@@ -16,8 +16,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -400,
-        300
+        0,
+        0
       ],
       "id": "99958404-7bc7-5374-af86-ebc6b4f5d82f",
       "name": "Schedule Trigger"
@@ -31,8 +31,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        -180,
-        300
+        240,
+        0
       ],
       "id": "8479dc18-276e-5a39-980c-7de91948c923",
       "name": "Load blocklist configuration",
@@ -71,8 +71,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        40,
-        300
+        480,
+        0
       ],
       "id": "dbecec06-17c2-5826-aa98-c4ad0bcf40d9",
       "name": "AI enabled and budget left?"
@@ -88,8 +88,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        260,
-        300
+        720,
+        0
       ],
       "id": "3ccb4476-7021-5c84-bba5-26ee73c4d208",
       "name": "Load candidates",
@@ -107,8 +107,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        480,
-        300
+        960,
+        0
       ],
       "id": "b330ea05-e6fb-57b3-a95a-7a94360954c6",
       "name": "Build batches"
@@ -130,8 +130,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.5,
       "position": [
-        700,
-        300
+        1200,
+        0
       ],
       "id": "aebaed2b-4562-5793-8e0a-c6d85cf21ee3",
       "name": "Blocklist classifier",
@@ -151,8 +151,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        620,
-        520
+        1200,
+        160
       ],
       "id": "ad9211bd-bbc3-5ae3-9709-01fdf14ba2dc",
       "name": "Google Gemini Chat Model",
@@ -171,8 +171,8 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        840,
-        520
+        1320,
+        160
       ],
       "id": "5ab6719b-426b-502b-b2ee-f561d874cd66",
       "name": "Structured Output Parser"
@@ -185,8 +185,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        920,
-        300
+        1540,
+        0
       ],
       "id": "8fff8b5e-3cd5-520c-b2d3-8707ffe59f7a",
       "name": "Validate classifications"
@@ -202,8 +202,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1140,
-        300
+        1780,
+        0
       ],
       "id": "7146f35b-c827-5050-a833-d4e699e401a4",
       "name": "Store classifications",
@@ -221,8 +221,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1360,
-        300
+        2020,
+        0
       ],
       "id": "5100d0bf-e1c2-52dd-8607-1f4b2754d4ca",
       "name": "Summarize run"
@@ -255,8 +255,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1580,
-        300
+        2260,
+        0
       ],
       "id": "d9e44519-1253-5aea-8053-96edca2e22d9",
       "name": "New candidates?"
@@ -269,8 +269,8 @@
       "type": "n8n-nodes-hashi-vault.hashiCorpVault",
       "typeVersion": 1,
       "position": [
-        1800,
-        300
+        2500,
+        0
       ],
       "id": "c1acd62e-af0f-5721-a165-6fc11e512387",
       "name": "Get Email Pass",
@@ -290,8 +290,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2020,
-        300
+        2740,
+        0
       ],
       "id": "32cb7e45-96c9-5fbf-bd04-4c491fe79d50",
       "name": "Build e-mail"
@@ -307,8 +307,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        2240,
-        300
+        2980,
+        0
       ],
       "id": "defbab29-8409-5674-8ee7-f26c94186524",
       "name": "Send an Email",
@@ -323,14 +323,14 @@
     {
       "parameters": {
         "content": "# Cyber Sentinel — Blocklist Candidates\n\nOnce a day, domains from `dns_queries` whose name matches an active pattern (`blocklist_name_patterns`) and that the AI has not seen yet (`v_blocklist_ai_queue`) are classified by Gemini in batches: telemetry / tracking / ads / functional / unknown. **No VirusTotal calls.**\n\nTelemetry and tracking at or above `blocklist_ai_min_confidence` become **candidates** — nothing is published until a human approves them on the Blocklists page of the AI config UI. Publishing is the job of **Blocklist Publish**.\n\nSettings: `blocklist_*` in `ai_settings`; prompt: `blocklist_prompt_templates`.",
-        "height": 240,
-        "width": 880
+        "height": 300,
+        "width": 640
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -460,
-        -280
+        -720,
+        0
       ],
       "id": "4db23c0b-4d84-5beb-985c-8005dd0384cc",
       "name": "Note - overview"
@@ -342,8 +342,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1580,
-        560
+        2260,
+        360
       ],
       "id": "722164f1-0d28-5a34-a3fd-63fefcd6a247",
       "name": "Collect API calls",
@@ -360,8 +360,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1800,
-        560
+        2500,
+        360
       ],
       "id": "806a77a0-6c9e-5341-808a-a373d77ab937",
       "name": "Log API calls",

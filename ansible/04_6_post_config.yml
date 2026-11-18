@@ -30,6 +30,20 @@
   become: yes
 
   vars:
+    # Pi-hole settings the DNS pipeline depends on ([04.6.2.3]). `value` is
+    # what is set; `current` is how `pihole-FTL --config <key>` prints it,
+    # used to skip the write when nothing changes.
+    pihole_dns_settings:
+      - { key: "dns.upstreams", value: '["10.10.10.2#53"]', current: "[ 10.10.10.2#53 ]" }
+      - { key: "dns.queryLogging", value: "true", current: "true" }
+      - { key: "misc.extraLogging", value: "true", current: "true" }
+      # Pi-hole sits on the Docker bridge (10.10.10.0/24), so with the
+      # default LOCAL mode it ignores every LAN client ("ignoring query from
+      # non-local network"). Docker keeps the client's source IP, so ALL
+      # makes LAN devices visible in dns_queries. Port 53 is published on
+      # the host: the host must not be reachable from the internet on 53.
+      - { key: "dns.listeningMode", value: "ALL", current: "ALL" }
+
     # Exact file names under config/n8n/workflows/ on the control host.
     # Override the main one per environment with n8n_workflow_file_name (group_vars).
     n8n_workflow_file: "{{ n8n_workflow_file_name | default('Automated Domain & IP Reputation Guard.json') }}"
@@ -122,22 +136,32 @@
         msg: "Pi-hole web interface password has been updated successfully."
       when: pihole_pass_result.changed
 
-    # Pi-hole's default upstream (unbound, 10.10.10.2) bypasses passive_dns
-    # entirely — no query/response ever reaches the file dns_log_processor
-    # tails, so dns_queries stays empty regardless of how correct the DB
-    # layer is. Correct chain: pihole -> passive_dns (10.10.10.3) -> unbound
-    # (10.10.10.2). Must run after [04.6.2.1] (pihole container confirmed
-    # reachable) and before [04.6.2.5]'s gravity rebuild.
-    - name: "[04.6.2.3] Set Pi-hole upstream DNS to passive_dns (10.10.10.3)"
+    # Pi-hole forwards straight to Unbound (10.10.10.2), and its own query
+    # log (/var/log/pihole/pihole.log) is what dns_log_processor turns into
+    # dns_queries. extraLogging (dnsmasq log-queries=extra) prefixes every
+    # line with the query id and client, so answers (reply / cached /
+    # blocked) can be attributed to the device that asked. queryLogging is
+    # the default, set explicitly because the pipeline depends on it.
+    # Must run after [04.6.2.1] (pihole container confirmed reachable) and
+    # before [04.6.2.5]'s gravity rebuild.
+    - name: "[04.6.2.3] Read current Pi-hole upstream, logging and listening settings"
       community.docker.docker_container_exec:
         container: pihole
-        argv:
-          - pihole-FTL
-          - --config
-          - dns.upstreams
-          - '["10.10.10.3#53"]'
-      register: pihole_upstream_result
-      changed_when: "'10.10.10.3' in (pihole_upstream_result.stdout | default(''))"
+        argv: [pihole-FTL, --config, "{{ item.key }}"]
+      loop: "{{ pihole_dns_settings }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: pihole_config_current
+      changed_when: false
+
+    - name: "[04.6.2.3] Set Pi-hole upstream (Unbound), query logging and listening mode"
+      community.docker.docker_container_exec:
+        container: pihole
+        argv: [pihole-FTL, --config, "{{ item.item.key }}", "{{ item.item.value }}"]
+      loop: "{{ pihole_config_current.results }}"
+      loop_control:
+        label: "{{ item.item.key }} = {{ item.item.value }}"
+      when: (item.stdout | trim) != item.item.current
 
     # KNOWN ISSUE: path may need "config/" prefix to match 04.1 layout.
     # Reads adlists.txt from the repo, one URL per line. Empty lines
@@ -145,7 +169,7 @@
     # on re-runs without needing a separate "exists" check.
     #
     # pihole-FTL writes to gravity.db itself (e.g. right after the
-    # upstream change in [04.6.2.3]). Without a busy timeout, sqlite3
+    # config change in [04.6.2.3]). Without a busy timeout, sqlite3
     # fails immediately with "database is locked (5)". `.timeout 10000`
     # makes it wait up to 10 s for the lock; until/retries covers a
     # lock held longer than that. A real failure still fails the task.

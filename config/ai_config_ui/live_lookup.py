@@ -12,8 +12,8 @@ node, so a live simulation produces the same features the workflow would:
 Differences from the workflow, all deliberate:
   * The FQDN is resolved by a minimal DNS client talking straight to Unbound
     (AI_UI_RESOLVER, default 10.10.10.2). The container's normal resolver is
-    Pi-hole -> passive_dns, which logs every query into dns_queries — a
-    simulation would then put the domain into the real n8n work queue.
+    Pi-hole, whose query log feeds dns_queries — a simulation would then put
+    the domain into the real n8n work queue.
   * VirusTotal errors (429 / 401 / 5xx) are raised as LiveLookupError and shown
     to the operator. The workflow throws too (the observable stays queued),
     so neither path ever scores an error as "clean".

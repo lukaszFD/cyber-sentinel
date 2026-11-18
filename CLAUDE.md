@@ -18,7 +18,7 @@ There is no application build. The repo is infrastructure-as-code (Ansible + Doc
 - `docker/docker-compose-cyber-sentinel.yml` — the whole stack; templated by Ansible (`{{ cs_images.* }}`), not run directly.
 - `config/` — per-service config copied to the host:
   - `ai_config_ui/` — Flask app for editing AI pipeline config (`app.py`, `live_lookup.py`).
-  - `dns/` — passive DNS + `log_processor.py` that ships DNS logs to Postgres.
+  - `dns/` — `log_processor.py` that ships Pi-hole's query log (`pihole.log`) to Postgres.
   - `hcv/` — Vault auto-unsealer.
   - `n8n/workflows/` — exported n8n workflows (JSON).
   - `postgres/` — schema SQL (`db_deployment.sql`, `db_ai_pipeline.sql`, partitioning/retention, AI config editor).
