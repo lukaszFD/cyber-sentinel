@@ -4,6 +4,7 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
+| [v2.4.0](#v240) | Stable | 18 November 2026 | Pi-hole query log as the DNS source: real client IPs, cached and blocked answers, `passive_dns` removed, 3-month retention |
 | [v2.3.0](#v230) | Stable | 16 November 2026 | API call log and usage page, VirusTotal budget from the provider's counter, Failure Guard |
 | [v2.2.0](#v220) | Stable | 16 November 2026 | Own Pi-hole blocklists: AI classification, review, daily pull request to sentinel-blocklists |
 | [v2.1.0](#v210) | Stable | 26 October 2026 | VirusTotal budget, urlscan.io and Shodan context, Deep Recon |
@@ -12,6 +13,100 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 | [v1.0.2-rc1](#v102-rc1) | Release candidate | 5 May 2026 | 1–5 threat scale, partitioning, unified Vault playbook |
 | [v1.0.1](#v101) | Release | — | Ansible deployment |
 | [v1.0.0](#v100) | Release | — | First version |
+
+---
+
+## v2.4.0
+
+`dns_queries` is now filled from Pi-hole's own query log instead of a separate dnsmasq container. Every row carries the real client IP, answers from Pi-hole's cache and blocked answers are captured, and the stack runs one container less. Upgrades v2.3.0 in place. **Retention is shortened from 6 to 3 months**: the next monthly partition job deletes data older than that.
+
+### Highlights
+
+- **Real client IPs** — `source_ip` is the device that asked (e.g. `192.168.0.69`), for queries and answers. Before, every query came from `10.10.10.4` (Pi-hole) and every answer had `'N/A'`.
+- **Cached and blocked answers** — new `query_type` values `cached` (answered from Pi-hole's cache) and `blocked` (gravity / denylist), next to `query` and `reply`.
+- **`passive_dns` removed** — Pi-hole forwards straight to Unbound (`10.10.10.2#53`); `Dockerfile.pdns` and the dnsmasq container are gone.
+- **LAN clients accepted** — Pi-hole `dns.listeningMode = ALL`, so devices on the LAN are answered and logged.
+- **3-month retention** for all partitioned tables.
+
+### DNS Pipeline
+
+- Chain: LAN client → Pi-hole → Unbound. Pi-hole writes `pihole.log`; `config/pihole/log` on the host is bind-mounted into `pihole` (rw) and `dns_log_processor` (ro).
+- Playbook 04.6 reads four Pi-hole settings and writes only those that differ: `dns.upstreams = ["10.10.10.2#53"]`, `dns.queryLogging = true`, `misc.extraLogging = true` (each line carries the query id and client, so answers are attributed to the device that asked), `dns.listeningMode = ALL`.
+- **Port 53 is published on the host: the host must not be reachable from the internet on port 53**, otherwise Pi-hole becomes an open resolver.
+
+### dns_log_processor
+
+- Rewritten; Python 3.12 (`python:3.12-slim`, pinned in `cs_base_images`), only `psycopg2-binary` as dependency.
+- Writes one row per query and per answer: `query`, `reply`, `cached`, `blocked`. An answer gets the client and record type of its query; Pi-hole v6's `UDP` / `TCP` line prefix is supported.
+- Reopens the log after rotation (inode change) or truncation (`copytruncate`).
+- Batched inserts (`BATCH_SIZE` 200 rows or every `FLUSH_INTERVAL` 2 s); after a Postgres restart it reconnects with backoff and keeps up to `MAX_BUFFER` rows; SIGTERM flushes the buffer.
+- Skips queries Pi-hole makes itself (`127.0.0.1`, `::1`: the 30-second `pi.hole` healthcheck, reverse lookups of client names); `SKIP_CLIENTS` overrides the list.
+- Starts at the end of the file, like `tail -f`: lines written while it was down are not imported.
+
+### Database
+
+- `sp_drop_old_partitions()` keeps **3 months** (was 6) for `dns_queries`, `network_events`, `threat_indicators` and `api_call_log`. One value for all tables, so `threat_indicators.dns_query_id` never points at a dropped row.
+- No table changes. `cached` and `blocked` are new values of `dns_queries.query_type`. The queue views (`v_pending_observables`, `v_blocklist_ai_queue`) still take public IPv4 answers only, so blocked answers (`0.0.0.0`) never enter them.
+- Cached answers now count towards `query_count` in the queue views, so `blocklist_min_queries` is reached sooner than before. Raise it in the AI Config UI if the blocklist queue grows too fast.
+
+### Upgrading from v2.3.0
+
+No new `vault.yml` keys. The SQL scripts are idempotent; existing rows stay, apart from the shorter retention.
+
+1. **Before the upgrade:** export whatever you want to keep that is older than 3 months. The partition job on the 1st of the month at 02:00 drops it.
+2. Check that port 53 of the host is not reachable from the internet (no port forward on the router).
+3. Stage the new files:
+
+```bash
+cd ansible
+ansible-playbook -i hosts.ini 04_1_prepare_stack.yml --limit rpi5-prod
+```
+
+4. **Switch Pi-hole to Unbound before 04.2.** 04.2 removes `passive_dns`, while Pi-hole still forwards to it (`10.10.10.3`) until 04.6 runs. Without this step the LAN has no DNS between 04.2 and 04.6:
+
+```bash
+ssh <user>@<host> 'docker exec pihole pihole-FTL --config dns.upstreams "[\"10.10.10.2#53\"]"'
+```
+
+5. Remove `passive_dns`, rebuild `dns_log_processor`, apply the retention change and set the Pi-hole options:
+
+```bash
+ansible-playbook -i hosts.ini 04_2_deploy_containers.yml --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_3_db_postgres.yml       --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_6_post_config.yml       --limit rpi5-prod
+```
+
+6. 04.6 re-imports all workflows and leaves them **inactive**: publish the main workflow, Deep Recon, Blocklist Candidates, Blocklist Publish and API Usage Monitor again in n8n. Run `06_3_n8n_api_key.yml` afterwards to re-activate Failure Guard.
+7. Check:
+
+```bash
+ssh <user>@<host> 'docker logs --tail 5 dns_log_processor'   # "Following /var/log/pihole/pihole.log", "Connected to Postgres"
+```
+
+```sql
+SELECT query_type, count(*), count(DISTINCT source_ip)
+FROM cyber_sentinel.dns_queries
+WHERE timestamp > LOCALTIMESTAMP - interval '10 minutes'
+GROUP BY 1;
+```
+
+Rows written between 04.2 and 04.6 (before `extraLogging` is on) may have `source_ip = 'N/A'`; they are harmless.
+
+### Fresh Installs
+
+A new installation from this release needs no extra steps: `00_main.yml` sets up the Pi-hole log, the processor and the Pi-hole options. Upgrade-only code changes nothing on a new host, because each step is guarded or only removes something that is not there:
+
+- `[04.1.2.3]` removes the leftovers of `passive_dns`; on a new host there is nothing to remove.
+- `[04.2.1.0]` removes the `passive_dns` container only if it exists.
+- The *Upgrade from v2.2* block in `db_ai_pipeline.sql` runs only while `vt_lookup_log` is still a table.
+
+These steps stay for one or two releases so that older installations can upgrade, and will be removed after that.
+
+### Tested
+
+- Dev, fresh install of the release branch: full `00_main.yml` on a VM restored from a base backup, `failed=0`; Pi-hole options set, the processor waited for `pihole.log` and then followed it; queries from a LAN device stored as `query` / `reply` / `blocked` with its own IP and queued in `v_pending_observables`; retention function at 3 months.
+- Dev, during development: real Pi-hole lines (400) parsed; every `reply` / `cached` / `blocked` row has a client IP; a query from a LAN device stored with its own IP; `v_pending_observables.source_ips` shows real clients; 04.1 and the 04.6 Pi-hole task re-run without changes; log rotation and truncation tested locally.
+- Prod (RPi 5), upgrade from v2.3.0 with the steps above: within minutes `query` / `reply` / `cached` / `blocked` rows from LAN devices and containers, no new rows without a client, `v_pending_observables` filling with real client IPs.
 
 ---
 
