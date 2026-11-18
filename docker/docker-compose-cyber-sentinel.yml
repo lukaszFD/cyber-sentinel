@@ -3,6 +3,8 @@
 # Images are pinned in group_vars/all/images.yml; built services pin
 # their base image in the Dockerfile.
 # Network 10.10.10.0/24, static IPs; .100 is nginx-proxy (playbook 05).
+# Browser sandbox: sandbox_network 10.10.20.0/24 (internal, no route out)
+# + sandbox_egress 10.10.21.0/24 (mitmproxy only). See docs/sandbox.md.
 
 services:
 
@@ -41,27 +43,6 @@ services:
     restart: unless-stopped
     depends_on:
       - unbound
-
-  # [SVC.UI.BROWSER] Firefox — isolated browser; tmpfs profile, nothing persists
-  firefox:
-    image: "{{ cs_images.firefox }}"
-    container_name: firefox
-    hostname: firefox
-    tmpfs:
-      - /config
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.5
-    dns: 10.10.10.4
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Warsaw
-      - FIREFOX_CLI=https://www.linuxserver.io/
-    security_opt:
-      - seccomp=unconfined
-    shm_size: 2gb
-    restart: unless-stopped
 
   # [SVC.DNS.PROCESSOR] dns_log_processor — pihole.log → cyber_sentinel.dns_queries
   dns_log_processor:
@@ -265,6 +246,107 @@ services:
     dns: 10.10.10.4
     restart: unless-stopped
 
+  # ------------------------------------------------------------------
+  # Browser sandbox — "dirty browsing" whose full URL stream is CTI data.
+  # sandbox_network is internal (no route out); the only way out is
+  # mitmproxy, which alone sits on sandbox_egress. Post-config (CA trust
+  # policy, Pi-hole without adlists, nightly reset) is playbook 04.7.
+  # Nothing here touches pihole (.4) or cyber_sentinel.dns_queries.
+  # ------------------------------------------------------------------
+
+  # [SVC.SANDBOX.BROWSER] ungoogled-chromium in a web viewer (port 3000,
+  # via Nginx as sandbox.<suffix>). No volumes except the read-only
+  # managed policy (proxy, mitmproxy CA, WebRTC); profile on tmpfs,
+  # recreated by `sandbox-reset` (cron 04:00).
+  sandbox-browser:
+    image: "{{ cs_images.sandbox_browser }}"
+    container_name: sandbox-browser
+    hostname: sandbox-browser
+    networks:
+      sandbox_network:
+        ipv4_address: 10.10.20.10
+    dns: 10.10.20.3
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Warsaw
+      - CHROME_CLI=about:blank
+    tmpfs:
+      - /config
+    volumes:
+      - './config/sandbox/browser/policies:/etc/chromium/policies/managed:ro'
+    security_opt:
+      - seccomp=unconfined
+    shm_size: 512m
+    mem_limit: 1536m
+    restart: unless-stopped
+    depends_on:
+      - sandbox-mitmproxy
+
+  # [SVC.SANDBOX.PROXY] mitmproxy — the sandbox's single egress. The addon
+  # logs every flow to config/sandbox/logs/urls.jsonl and refuses private,
+  # loopback and link-local destinations (LAN and the stack stay out of reach).
+  sandbox-mitmproxy:
+    image: "{{ cs_images.mitmproxy }}"
+    container_name: sandbox-mitmproxy
+    hostname: sandbox-mitmproxy
+    networks:
+      sandbox_network:
+        ipv4_address: 10.10.20.2
+      sandbox_egress:
+        ipv4_address: 10.10.21.2
+    dns: 10.10.20.3
+    command:
+      - mitmdump
+      - --listen-port=8080
+      - --set=ssl_insecure=true
+      - --set=stream_large_bodies=20m
+      - --set=termlog_verbosity=warn
+      - -s
+      - /addons/sandbox_logger.py
+    environment:
+      - SANDBOX_LOG_FILE=/logs/urls.jsonl
+      - SANDBOX_LOG_DAYS=14
+    volumes:
+      - './config/sandbox/mitmproxy:/home/mitmproxy/.mitmproxy'
+      - './config/sandbox/addons:/addons:ro'
+      - './config/sandbox/logs:/logs'
+    mem_limit: 384m
+    restart: unless-stopped
+    depends_on:
+      - sandbox-pihole
+
+  # [SVC.SANDBOX.DNS] Pi-hole for the sandbox only — NO adlists (04.7 keeps
+  # gravity empty), upstream Unbound. Also on internal_network (.16) to reach
+  # Unbound; port 53 is not published. UI via Nginx as sandbox-dns.<suffix>.
+  sandbox-pihole:
+    image: "{{ cs_images.pihole }}"
+    container_name: sandbox-pihole
+    hostname: sandbox-pihole
+    networks:
+      sandbox_network:
+        ipv4_address: 10.10.20.3
+      internal_network:
+        ipv4_address: 10.10.10.16
+    environment:
+      TZ: "Europe/Warsaw"
+      FTLCONF_dns_upstreams: "10.10.10.2#53"
+      FTLCONF_dns_listeningMode: "ALL"
+      FTLCONF_dns_queryLogging: "true"
+      FTLCONF_misc_extraLogging: "true"
+      # One client (mitmproxy) makes all queries; the default limit would cut it off.
+      FTLCONF_dns_rateLimit_count: "0"
+      FTLCONF_dns_specialDomains_mozillaCanary: "false"
+      FTLCONF_dns_specialDomains_iCloudPrivateRelay: "false"
+      FTLCONF_dns_specialDomains_designatedResolver: "false"
+    volumes:
+      - './config/sandbox/pihole/etc:/etc/pihole'
+      - './config/sandbox/pihole/log:/var/log/pihole'
+    mem_limit: 256m
+    restart: unless-stopped
+    depends_on:
+      - unbound
+
   # [SVC.SECRETS.UNSEALER] vault_unsealer — DISABLED; unsealing is done by 06.1
   #  vault_unsealer:
   #    build:
@@ -288,6 +370,19 @@ networks:
     ipam:
       config:
         - subnet: 10.10.10.0/24
+  # Browser sandbox: no route out of this network (internal).
+  sandbox_network:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.10.20.0/24
+  # Only mitmproxy is attached: the sandbox's single way to the internet.
+  sandbox_egress:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.21.0/24
 
 volumes:
   n8n_data:

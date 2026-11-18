@@ -38,5 +38,6 @@ vault_grafana_cert: ''
 vault_grafana_key: ''
 vault_portainer_cert: ''
 vault_portainer_key: ''
+# firefox pair: now used by the browser sandbox (sandbox.<suffix>)
 vault_firefox_cert: ''
 vault_firefox_key: ''

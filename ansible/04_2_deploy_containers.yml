@@ -36,14 +36,17 @@
     # SECTION 1 — Build and start the stack
     # ============================================================
 
-    # passive_dns was removed from the compose file; `up` would leave the
-    # old container running (and holding 10.10.10.3) as an orphan.
-    # Removed by name, not with --remove-orphans, so nothing else in the
-    # project is touched.
-    - name: "[04.2.1.0] Remove the retired passive_dns container"
+    # passive_dns and firefox (replaced by the browser sandbox, 04.7) were
+    # removed from the compose file; `up` would leave the old containers
+    # running as orphans. Removed by name, not with --remove-orphans, so
+    # nothing else in the project is touched.
+    - name: "[04.2.1.0] Remove retired containers (passive_dns, firefox)"
       community.docker.docker_container:
-        name: passive_dns
+        name: "{{ item }}"
         state: absent
+      loop:
+        - passive_dns
+        - firefox
 
     - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:

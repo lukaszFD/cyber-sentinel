@@ -3,8 +3,8 @@
 # Cyber Sentinel — Playbook 05 — Nginx Reverse Proxy with SSL
 # ============================================================
 # Purpose:    Deploys an Nginx reverse proxy in front of all web-facing
-#             services (Pi-hole, n8n, Portainer, Firefox, Grafana,
-#             HashiCorp Vault, AI config editor). Provisions per-service
+#             services (Pi-hole, n8n, Portainer, Grafana, HashiCorp
+#             Vault, AI config editor, browser sandbox + its Pi-hole). Provisions per-service
 #             TLS certs from Ansible Vault and renders Nginx server
 #             blocks from a Jinja2 template.
 #
@@ -56,15 +56,20 @@
     #   - server_name <hostname|name>.<domain_suffix>
     # The internal_host is the Docker DNS name Nginx uses to reach
     # the upstream container; port is the container-internal port.
+    # Optional `cert` reuses another service's vault_<cert>_cert/key
+    # (the files on disk are still named after `name`). The sandbox
+    # entries reuse the certs of the retired firefox and of pihole, so
+    # browsers warn about the name until dedicated certs are added.
     # Present on every host in the inventory.
     services:
       - { name: "pihole",          port: 80,   internal_host: "pihole" }
       - { name: "n8n",             port: 5678, internal_host: "n8n-server" }
       - { name: "portainer",       port: 9000, internal_host: "portainer" }
-      - { name: "firefox",         port: 3000, internal_host: "firefox" }
       - { name: "grafana",         port: 3000, internal_host: "grafana" }
       - { name: "hashicorp_vault", port: 8200, internal_host: "hashicorp_vault" }
       - { name: "ai_config",       port: 8000, internal_host: "ai-config-ui", hostname: "ai-config" }
+      - { name: "sandbox",         port: 3000, internal_host: "sandbox-browser", cert: "firefox" }
+      - { name: "sandbox_dns",     port: 80,   internal_host: "sandbox-pihole", hostname: "sandbox-dns", cert: "pihole" }
 
   tasks:
     # ============================================================
@@ -97,7 +102,7 @@
 
     - name: "[05.2.1] Save TLS certificates (.crt) for each service"
       ansible.builtin.copy:
-        content: "{{ lookup('vars', 'vault_' + item.name + '_cert') }}"
+        content: "{{ lookup('vars', 'vault_' + (item.cert | default(item.name)) + '_cert') }}"
         dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.crt"
         owner: "{{ deployment_user }}"
         mode: '0600'
@@ -106,7 +111,7 @@
 
     - name: "[05.2.2] Save TLS private keys (.key) for each service"
       ansible.builtin.copy:
-        content: "{{ lookup('vars', 'vault_' + item.name + '_key') }}"
+        content: "{{ lookup('vars', 'vault_' + (item.cert | default(item.name)) + '_key') }}"
         dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.key"
         owner: "{{ deployment_user }}"
         mode: '0600'
@@ -121,6 +126,16 @@
     # optional hostname) and the play-level `domain_suffix` to
     # assemble server_name.
     # ============================================================
+
+    # firefox was replaced by the browser sandbox (sandbox.<suffix>).
+    - name: "[05.3.0] Remove the retired firefox server block and cert"
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/nginx/{{ item }}"
+        state: absent
+      loop:
+        - conf.d/firefox.conf
+        - certs/firefox.crt
+        - certs/firefox.key
 
     - name: "[05.3.1] Render Nginx server block for each service"
       ansible.builtin.template:
@@ -152,6 +167,11 @@
         networks:
           - name: cyber-sentinel_internal_network
             ipv4_address: 10.10.10.100
+          # Reaches sandbox-browser, which lives only on the internal
+          # sandbox network. The sandbox cannot use Nginx as a way out:
+          # Chromium is forced through mitmproxy, which refuses private IPs.
+          - name: cyber-sentinel_sandbox_network
+            ipv4_address: 10.10.20.100
         volumes:
           - "{{ remote_deploy_base }}/config/nginx/conf.d:/etc/nginx/conf.d:ro"
           - "{{ remote_deploy_base }}/config/nginx/certs:/etc/nginx/certs:ro"

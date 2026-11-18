@@ -64,6 +64,7 @@
 - import_playbook: 04_4_tranco_allowlist.yml         # [00.2.4] Tranco allow-list: weekly cron + initial load
 - import_playbook: 04_5_ai_config_editor.yml         # [00.2.5] AI config editor: DB role + ai-config-ui
 - import_playbook: 04_6_post_config.yml              # [00.2.6] Fail2Ban, Pi-hole, Portainer/n8n owners, workflow import
+- import_playbook: 04_7_browser_sandbox.yml          # [00.2.7] Browser sandbox: CA policy, Pi-hole without adlists, reset cron
 
 # ------------------------------------------------------------
 # [00.3] Stage 3 — Edge layer (proxy + secret store)

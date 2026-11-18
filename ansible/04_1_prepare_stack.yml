@@ -20,6 +20,7 @@
 #               - ai_config_ui/ build context (AI config editor)
 #               - Service configs (unbound, prometheus, grafana)
 #               - Pi-hole log directory (read by dns_log_processor)
+#               - Browser sandbox dirs + mitmproxy addon (config/sandbox)
 #               - Vault data directory with correct UID:GID
 #
 # ============================================================
@@ -74,6 +75,10 @@
         - "config/grafana/provisioning/dashboards"     # Dashboard provisioning manifest
         - "config/grafana/dashboards"                  # Actual dashboard JSON files
         - "ai_config_ui"                               # AI config editor build context
+        - "config/sandbox/addons"                      # Browser sandbox: mitmproxy addon
+        - "config/sandbox/logs"                        # Browser sandbox: urls.jsonl (mitmproxy)
+        - "config/sandbox/mitmproxy"                   # Browser sandbox: mitmproxy CA (per host)
+        - "config/sandbox/browser/policies"            # Browser sandbox: Chromium policy (04.7)
 
     # ============================================================
     # SECTION 2 — Stack manifests (docker-compose + build inputs)
@@ -176,6 +181,15 @@
         owner: "{{ deployment_user }}"
         mode: '0644'
 
+    # mitmproxy addon of the browser sandbox (URL log + egress guard),
+    # mounted read-only at /addons in sandbox-mitmproxy.
+    - name: "[04.1.3.5] Copy browser sandbox mitmproxy addon"
+      ansible.builtin.copy:
+        src: "{{ main_repo_source_dir }}/config/sandbox/sandbox_logger.py"
+        dest: "{{ remote_deploy_base }}/config/sandbox/addons/sandbox_logger.py"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+
     - name: "[04.1.3.2] Copy Prometheus scrape configuration"
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/prometheus/prometheus.yml"
@@ -219,6 +233,14 @@
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/config/pihole/log"
         state: directory
+
+    # Browser sandbox Pi-hole (/etc/pihole and its query log). Same as
+    # [04.1.4.1]: the container sets the ownership it needs at start.
+    - name: "[04.1.4.3] Create sandbox Pi-hole directories"
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/sandbox/pihole/{{ item }}"
+        state: directory
+      loop: [etc, log]
 
     - name: "[04.1.4.2] Set ownership for Vault data directory (UID 100)"
       ansible.builtin.file:

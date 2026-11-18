@@ -72,6 +72,8 @@ vault_n8n_alert_to: ""             # alert recipient (defaults to the sender)
 
 # TLS: one cert/key pair per service behind Nginx
 # pihole, n8n, grafana, portainer, firefox, hashicorp_vault, ai_config
+# (firefox's pair now serves the browser sandbox, sandbox.<suffix>;
+#  sandbox-dns.<suffix> reuses pihole's)
 vault_pihole_cert: |
   -----BEGIN CERTIFICATE-----
 vault_pihole_key: |
@@ -119,6 +121,7 @@ Each playbook starts with a header describing its purpose, dependencies and sect
 | 04.4 | `04_4_tranco_allowlist.yml` | Tranco allow-list: initial load + weekly cron |
 | 04.5 | `04_5_ai_config_editor.yml` | Database role for AI Config UI, rebuilds `ai-config-ui` |
 | 04.6 | `04_6_post_config.yml` | Fail2Ban, Pi-hole, Portainer and n8n accounts, workflow import |
+| 04.7 | `04_7_browser_sandbox.yml` | Browser sandbox: mitmproxy CA into the Chromium policy, sandbox Pi-hole without adlists, `sandbox-reset` + nightly cron ([details](sandbox.md)) |
 | 05 | `05_deploy_proxy.yml` | Nginx reverse proxy with TLS |
 | 06.1 | `06_1_initialize_provision_vault.yml` | Vault init/unseal, secrets, n8n token, Pi-hole API password |
 | 06.2 | `06_2_n8n_bootstrap.yml` | n8n community nodes and credentials |
@@ -166,6 +169,7 @@ Web UIs (`<suffix>` is `prod` or `local`):
 | Grafana | `https://grafana.<suffix>` |
 | Portainer | `https://portainer.<suffix>` |
 | Vault | `https://hashicorp_vault.<suffix>` |
-| Firefox (isolated browser) | `https://firefox.<suffix>` |
+| Browser sandbox | `https://sandbox.<suffix>` |
+| Sandbox Pi-hole | `https://sandbox-dns.<suffix>` |
 
 Add these names to your local DNS (Pi-hole → Local DNS records) pointing at the host.

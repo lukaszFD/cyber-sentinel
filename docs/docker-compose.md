@@ -10,7 +10,6 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 |---|---|---|---|
 | `.2` | `unbound` | registry | Recursive resolver — the end of the DNS chain |
 | `.4` | `pihole` | registry | DNS for the LAN, ad-block, denylist written by n8n; query log `pihole.log` |
-| `.5` | `firefox` | registry | Isolated browser; profile on tmpfs |
 | `.6` | `dns_log_processor` | built (Python) | `pihole.log` (read-only mount) → `dns_queries` |
 | `.7` | `n8n` | registry | AI decision workflow |
 | `.8` | `ai-config-ui` | built (Flask) | AI pipeline configuration |
@@ -20,9 +19,19 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 | `.12` | `vault` | registry | Secrets for n8n |
 | `.13` | `prometheus` | registry | Metrics |
 | `.14` | `node_exporter` | registry | Host metrics |
+| `.16` | `sandbox-pihole` | registry | DNS of the browser sandbox (also in `sandbox_network`), to reach Unbound |
 | `.100` | `nginx-proxy` | registry | TLS reverse proxy — started by playbook 05, not by compose |
 
-DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log).
+DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log); `.5` is free (it was `firefox`, replaced by the browser sandbox).
+
+### Browser sandbox networks
+
+See [Browser Sandbox](sandbox.md).
+
+| Network | Subnet | Members |
+|---|---|---|
+| `sandbox_network` (`internal: true`, no route out) | `10.10.20.0/24` | `.2` `sandbox-mitmproxy`, `.3` `sandbox-pihole`, `.10` `sandbox-browser`, `.100` `nginx-proxy` |
+| `sandbox_egress` | `10.10.21.0/24` | `.2` `sandbox-mitmproxy` only — the sandbox's single way out |
 
 ## Exposure
 
@@ -40,7 +49,8 @@ All other services have no published ports.
 
 - `ai-config-ui` — read-only filesystem, all capabilities dropped, `no-new-privileges`, 128 MB / 0.25 CPU limit; receives only its own `AI_UI_*` variables and its own least-privilege database role.
 - `vault` — `IPC_LOCK` so secrets are not swapped to disk; TLS terminated by Nginx.
-- `firefox` — stateless, profile in tmpfs.
+- `sandbox-browser` — stateless (profile in tmpfs), only on the internal sandbox network, forced through mitmproxy; recreated nightly by `sandbox-reset`.
+- `sandbox-mitmproxy` — refuses private/loopback/link-local destinations, so the sandbox cannot reach the LAN or the stack.
 - `node_exporter` — host `/proc`, `/sys` and `/` mounted read-only.
 - `portainer` — has the Docker socket, i.e. full control of the host's Docker. Keep it behind Nginx.
 
@@ -54,5 +64,8 @@ All other services have no published ports.
 | `prometheus_data` | metrics history |
 | `./config/vault/data` | Vault storage (bind mount) |
 | `./portainer_data` | Portainer settings (bind mount) |
+| `./config/sandbox/mitmproxy` | mitmproxy CA of the browser sandbox (bind mount) |
+| `./config/sandbox/logs` | Sandbox URL log `urls.jsonl` (bind mount) |
+| `./config/sandbox/pihole` | Sandbox Pi-hole config and query log (bind mount) |
 
 Removing a volume deletes its data. Vault data cannot be recovered without the unseal keys.

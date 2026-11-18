@@ -47,8 +47,12 @@ cs_images:
 
   # Admin UIs
   portainer:      "portainer/portainer-ce:2.45.1@sha256:4d616db18cfeb5dd41a69c0958bc825c84483ea9cde1106eb82a5d26f3bd8b0e"
-  # Digest only — LinuxServer version label is not a reliable registry tag
-  firefox:        "lscr.io/linuxserver/firefox@sha256:2637935d2bb9d5e4f474c92942d8ade7fa4df823cc4cfbcb57564217ebc6c0d6"
+
+  # Browser sandbox (isolated network, playbook 04.7). Sandbox Pi-hole
+  # reuses `pihole` above. Digests read from the registry on 2026-11-18;
+  # both indexes include linux/arm64.
+  sandbox_browser: "lscr.io/linuxserver/ungoogled-chromium:156.0.8078.79-1-ls201@sha256:1face3f574f8bf96fc6cff656dd77bdccc17fcb73da3a82f1c0579270cc1bbe0"
+  mitmproxy:       "mitmproxy/mitmproxy:12.3.1@sha256:2711066c855659b5af8b1dbb84494ed3eff69b42ece439c60b4fe09a2db829d4"
 
   # Reverse proxy (outside compose — playbook 05)
   # Note (2026-10-05): the 1.31.6 tag on Docker Hub now points to a newer

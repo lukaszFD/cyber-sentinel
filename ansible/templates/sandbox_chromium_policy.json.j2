@@ -1,0 +1,18 @@
+{# Managed policy for the sandbox ungoogled-chromium (playbook 04.7).      #}
+{# Mounted read-only at /etc/chromium/policies/managed in sandbox-browser. #}
+{
+  "ProxySettings": {
+    "ProxyMode": "fixed_servers",
+    "ProxyServer": "http://10.10.20.2:8080",
+    "ProxyBypassList": "<-loopback>"
+  },
+  "CACertificates": ["{{ sandbox_ca_der_b64 }}"],
+  "WebRtcIPHandling": "disable_non_proxied_udp",
+  "DnsOverHttpsMode": "off",
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "MetricsReportingEnabled": false,
+  "BackgroundModeEnabled": false,
+  "DefaultBrowserSettingEnabled": false
+}
