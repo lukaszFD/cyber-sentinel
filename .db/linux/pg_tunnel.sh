@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================
-# Cyber Sentinel — Postgres SSH port-forward helper
+# Cyber Sentinel — Postgres SSH port-forward helper (Linux)
 # ============================================================
 # postgres_db has no `ports:` mapping in docker-compose-postgres.yml —
-# only an internal_network address (10.10.10.16:5432). It was never meant
+# only an internal_network address (10.10.10.9:5432). It was never meant
 # to be reachable from outside the Docker host (same as mysqldb, mongo,
 # no host port either). This script opens a local SSH forward through the
 # same SSH access you already use for Ansible, so psql on your Mint
@@ -76,6 +76,6 @@ echo
 # -N: no remote command, tunnel only. -I: PKCS#11 module for YubiKey auth,
 # same as your normal SSH login. -L: local_port:target_host:target_port
 # through the SSH connection to REMOTE_HOST — target_host is resolved from
-# REMOTE_HOST's own network view, so 10.10.10.16 (the Docker bridge IP)
+# REMOTE_HOST's own network view, so 10.10.10.9 (the Docker bridge IP)
 # works even though your Mint machine has no route to it directly.
 ssh -I "${PKCS11_MODULE}" -N -L "${LOCAL_PORT}:${POSTGRES_CONTAINER_IP}:${POSTGRES_PORT}" "${SSH_USER}@${REMOTE_HOST}"
