@@ -159,6 +159,9 @@ Open ports (everything else is denied):
 | 80/tcp | redirect to HTTPS |
 | 443/tcp | Nginx |
 
+!!! warning "Port 53"
+    Pi-hole answers every client that reaches it (`dns.listeningMode = ALL`, needed to log LAN devices with their own IP). The host must not be reachable from the internet on port 53 — no port forward on the router — otherwise Pi-hole becomes an open resolver.
+
 Web UIs (`<suffix>` is `prod` or `local`):
 
 | Service | URL |

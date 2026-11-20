@@ -48,18 +48,9 @@ Constraints for all items: VirusTotal free tier (500 requests/day), Gemini free 
 
 - Prometheus and node_exporter become the data source for the health agent instead of something to look at: disk usage, Pi temperature, SSD SMART (playbook 07), read by n8n through the Prometheus HTTP API.
 - Grafana will be removed. Its job — showing what happens in the pipeline — is taken over by the n8n agents: the health agent's daily report and alerts, plus operational views in the AI Config UI.
-## 7. DNS Source: Pi-hole Log
-
-Replace `passive_dns` (dnsmasq) with Pi-hole's own query log as the source of `dns_queries`. The Pi-hole API and `pihole-FTL.db` do not store the answer IP, which the pipeline needs, so `dns_log_processor` reads `pihole.log` (same dnsmasq log format) instead.
-
-- Remove `passive_dns`, `Dockerfile.pdns` and `config/dns/dnsmasq.d`; Pi-hole forwards straight to Unbound (`10.10.10.2#53`).
-- Mount the Pi-hole log directory read-only into `dns_log_processor`.
-- `log_processor.py`: reopen the log after rotation (truncate / inode change), batch commits, reconnect after a Postgres restart, move off Python 3.9.
-- Result: real client IPs in `dns_queries` (today every query comes from `10.10.10.4`), cache-answered queries captured, one container less. Required by sections 3 and 8.
-
-## 8. Own Blocklists — Follow-ups
+## 7. Own Blocklists — Follow-ups
 
 The first version shipped in [v2.2.0](releases.md#v220): name patterns, AI classification, review in the AI Config UI and a daily pull request to [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists) — see [n8n Workflows](n8n.md#own-blocklists). Still open:
 
-- **Query-interval pre-filter** — regular query intervals per device as a second candidate signal next to name patterns. Needs real client IPs from section 7.
+- **Query-interval pre-filter** — regular query intervals per device as a second candidate signal next to name patterns. Real client IPs are in `dns_queries` since [v2.4.0](releases.md#v240).
 - **Category from the main workflow** — optional: the main workflow's AI returns the same category (telemetry / tracking) for domains it already analyses and adds hits to the review queue.
