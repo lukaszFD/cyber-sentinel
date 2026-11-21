@@ -48,9 +48,86 @@ Constraints for all items: VirusTotal free tier (500 requests/day), Gemini free 
 
 - Prometheus and node_exporter become the data source for the health agent instead of something to look at: disk usage, Pi temperature, SSD SMART (playbook 07), read by n8n through the Prometheus HTTP API.
 - Grafana will be removed. Its job — showing what happens in the pipeline — is taken over by the n8n agents: the health agent's daily report and alerts, plus operational views in the AI Config UI.
+
 ## 7. Own Blocklists — Follow-ups
 
 The first version shipped in [v2.2.0](releases.md#v220): name patterns, AI classification, review in the AI Config UI and a daily pull request to [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists) — see [n8n Workflows](n8n.md#own-blocklists). Still open:
 
 - **Query-interval pre-filter** — regular query intervals per device as a second candidate signal next to name patterns. Real client IPs are in `dns_queries` since [v2.4.0](releases.md#v240).
 - **Category from the main workflow** — optional: the main workflow's AI returns the same category (telemetry / tracking) for domains it already analyses and adds hits to the review queue.
+
+## 8. SDLC and Testing
+
+Most building blocks are already in place: dev → prod environments (new versions go to `dev_vm` first), images pinned by digest, Ansible + Docker Compose with n8n workflows exported to the repo, CodeQL, Trivy, OpenSSF Scorecard, branch rulesets, Prometheus/Grafana and the MkDocs site. What is missing is one gate that ties them together: **PR → CI → release → deploy → verification**.
+
+Planned order (the first three give the most value):
+
+1. Branch protection and all changes through pull requests
+2. pre-commit hooks
+3. CI with an SQL migration test
+4. Renovate
+5. release-please
+6. Smoke tests after deploy
+
+### Planning and design
+
+- GitHub Issues and a Project board, with issue templates: feature, bug, security.
+- `docs/adr/` — short architecture decision records (e.g. dropping Liquibase, a queue table instead of webhooks).
+- A half-page STRIDE threat model for larger features.
+
+### Development
+
+- Feature branch → PR → `main`, also when working solo. No direct pushes to `main`; green checks required.
+- `.pre-commit-config.yaml`: ansible-lint, yamllint, shellcheck, hadolint, gitleaks, sqlfluff.
+- Conventional Commits, so the changelog can be generated.
+- PR template with a Definition of Done checklist: tested on dev, docs updated, SQL migration, n8n JSON exported.
+
+### CI — `.github/workflows/ci.yml`
+
+- The pre-commit linters run in CI as well.
+- SQL migration test: a pgvector container runs all numbered schema files in order.
+- AI Config UI: build and unit tests.
+- Trivy scan of images and compose files.
+- n8n workflow JSON validation: no leaked credentials or instance IDs.
+- Actions pinned by SHA.
+- Image builds on both amd64 and arm64 (`ubuntu-24.04-arm` runner).
+
+### Dependencies and release
+
+- Renovate for image digests in `group_vars/all/images.yml` and compose; its PRs go through CI.
+- SemVer and `CHANGELOG.md` from release-please: a release draft is created automatically and approved manually.
+- SBOM (syft) attached to each GitHub Release; optionally signed tags.
+
+### Deploy and operate
+
+- Prod deploys only from a tag, preceded by `ansible-playbook --check --diff`, followed by a smoke test.
+- Deploys stay manual from the control machine — no self-hosted runner with access to the home network.
+- `SECURITY.md` and an incident runbook in the docs. The health agent (section 2) closes this phase.
+- **PostgreSQL backup** — there is none today. A storage failure on the Pi would lose the verdict history and the data vector memory is built from.
+
+### Tests
+
+Unit tests (every PR):
+
+- **DNS log processor** — fixtures with `pihole.log` lines: parsing, filtering, edge cases (IDN, empty lines, truncated log).
+- **AI Config UI** — config validation, reads and writes against a mocked database (pytest).
+- **Deterministic scoring** — URLhaus +1 modifier, 1–5 thresholds, VirusTotal budget pacing. Needs the logic moved out of n8n Code nodes into JS files tested in Node (vitest); this changes the workflows and needs a separate decision.
+- **SQL** — pgTAP: constraints, foreign keys, partitions, functions.
+
+Integration tests (CI, Docker Compose):
+
+- Test stack: PostgreSQL + pgvector, AI Config UI, n8n, Vault in `-dev` mode.
+- Migrations and seed data → AI Config UI API tests → rows checked in the database.
+- n8n: workflows loaded with `n8n import:workflow`; external APIs (VirusTotal, ThreatFox, urlscan.io, Gemini) replaced by a mock server.
+- Scenario: insert a row into the queue table → run the workflow → check the status transitions and the result in `threat_indicators`.
+
+LLM tests (separate, not on PRs):
+
+- Contract test: the Gemini response matches the JSON schema (score, rationale EN/PL).
+- Golden set of ~30 domains with an expected score range, run manually or weekly (free tier limits, non-determinism). Doubles as the regression suite for the prompt tuning agent (section 2, item 4).
+
+Smoke / E2E (after each deploy to dev and prod):
+
+- `dig` a test domain → row in `dns_queries` → the domain goes through the whole pipeline.
+
+Rules: no chasing coverage percentages — what matters is parsing, scoring, config validation and migrations. First batch: pytest for the DNS log processor and the migration test in CI.
