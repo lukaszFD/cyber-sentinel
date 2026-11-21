@@ -128,7 +128,7 @@ Planned order (the first three give the most value):
 - Feature branch → PR → `main`, also when working solo. No direct pushes to `main`; green checks required.
 - `.pre-commit-config.yaml`: ansible-lint, yamllint, shellcheck, hadolint, gitleaks, sqlfluff.
 - Conventional Commits, so the changelog can be generated.
-- PR template with a Definition of Done checklist: tested on dev, docs updated, SQL migration, n8n JSON exported.
+- PR template with a Definition of Done checklist: tests added for new code and green in GitHub Actions, tested on dev, docs updated, SQL migration, n8n JSON exported.
 
 ### CI — `.github/workflows/ci.yml`
 
@@ -178,4 +178,4 @@ Smoke / E2E (after each deploy to dev and prod):
 
 - `dig` a test domain → row in `dns_queries` → the domain goes through the whole pipeline.
 
-Rules: no chasing coverage percentages — what matters is parsing, scoring, config validation and migrations. First batch: pytest for the DNS log processor and the migration test in CI.
+Rules: every new piece of code comes with its tests in the same PR, and those tests run in GitHub Actions on every PR — a change without tests or with red checks is not merged. The same applies to code written by AI agents. No chasing coverage percentages — what matters is parsing, scoring, config validation and migrations. First batch: pytest for the DNS log processor and the migration test in CI.
