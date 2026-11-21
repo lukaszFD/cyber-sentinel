@@ -9,8 +9,56 @@ What is planned next. Delivered work is listed in [Releases](releases.md).
 Planned on the Cyber Sentinel side:
 
 - **Ship the export in this repo** — move `db_engram_export.sql` (role `engram_reader`, schema `engram_export`) and the `engram-tunnel` user into Cyber Sentinel's playbooks, so a dev deploy no longer removes them.
-- **Graph context for the AI agent** — n8n queries Synapse (user `n8n-agent`: read, `ai.*` tags only) to give the agent history the database does not have: blocklist membership, related domains on the same IP, first-seen dates.
+- **Graph context for the AI agent** — n8n queries Synapse over MCP to give the agent history the database does not have: blocklist membership, related domains on the same IP, first-seen dates (see below).
 - **Anomaly agent** — a scheduled n8n agent compares daily device behaviour in the graph against a baseline and tags findings with `ai.*`. Device data must be anonymised before it leaves Cyber Sentinel.
+
+### Graph context over MCP
+
+While analysing an indicator, the n8n AI Agent asks the Engram CTI graph whether the domain or IP links to known infrastructure, whether a similar pattern was seen before and which tags it carries. The answer goes into Gemini's context as one more enrichment.
+
+```
+Cyber Sentinel (rpi5-prod)               Proxmox VM: Sentinel Engram
+n8n AI Agent                    HTTPS    Nginx (TLS)
+  └─ MCP Client Tool  ─────────────────▶  └─ Synapse Cortex /api/v1/mcp
+AI Config UI (settings)       X-API-KEY  Neo4j (visualisation)
+Vault (API key)
+```
+
+- **Server:** the MCP server built into Synapse Cortex (`/api/v1/mcp`, JSON-RPC 2.0 over Streamable HTTP). **Client:** the MCP Client Tool node attached to the AI Agent.
+- **In scope:** the agent reads the graph (Storm queries, data model search), connection settings in the AI Config UI, a fallback when Engram is down.
+- **Out of scope:** ingesting verdicts and blocklists into Synapse stays on the regular API (deterministic and testable); the agent writing to the graph (maybe later, only through a forked view and a manual merge); MCP in the other direction (an n8n MCP Server Trigger for Engram or Claude Code) is a separate item.
+
+Steps:
+
+1. **Check Synapse** — version on the VM (MCP is documented for 2.258.0), whether MCP is enabled (`initialize`), which tools `tools/list` exposes, and whether the `storm` tool accepts the `readonly` option.
+2. **Synapse user** — a dedicated `n8n-agent` user with a read-only role on the production view (no `node.add`, `node.del`, `node.prop.set`, no view management) and an API key with an expiry date.
+3. **Secrets** — the API key lives in Vault; n8n reads it from there, never from the repo or the UI.
+4. **Network** — Nginx with TLS in front of Synapse, a Pi-hole local DNS record for Engram (IP kept in ansible-vault), UFW on the VM opening the MCP port only to `rpi5-prod` (and `dev_vm`).
+5. **AI Config UI settings** — `engram_mcp_enabled`, `engram_mcp_url`, `engram_mcp_timeout_s`, `engram_mcp_allowed_tools` (default `storm`, `model_find`, `get_service_info`), optionally a minimum score before the graph is queried.
+6. **n8n** — an MCP credential (`X-API-KEY` header), the MCP Client Tool limited to the allowlist, prompt rules for when to use the graph and how to cite it in the rationale. On timeout or no answer the enrichment is skipped and logged and the pipeline carries on. The graph result is stored with the analysis, so the audit shows what the agent saw.
+7. **Ansible** — Engram tasks (Synapse user, Nginx, UFW) and Cyber Sentinel tasks (DNS record, Vault secret); dev (`dev_vm` ↔ Engram) first, then prod.
+
+Security:
+
+- MCP in Synapse is **not read-only** — Storm runs with the user's permissions and can change or delete data. Protection comes from the user's permissions, not from the agent behaving.
+- Tool allowlist on the n8n side — no `view_del`, `view_merge`, `view_fork`.
+- Graph content is data, not instructions (prompt injection through CTI data, e.g. descriptions from external feeds).
+- API key with an expiry date, rotated through Vault. Per-device data from the graph is anonymised before it goes to Gemini.
+
+Tests (in line with section 8):
+
+- Integration: Synapse in a CI container with a small seed — `initialize` → `tools/list` → Storm query.
+- Negative: `n8n-agent` cannot add or delete a node.
+- Fallback: with Engram stopped, the workflow finishes correctly without the enrichment.
+- Smoke after deploy: a query for a known seeded indicator returns a result.
+
+Open questions:
+
+- Query the graph for every indicator, or only above a given score?
+- Should the graph result change the score (a modifier in `compute_threat_score()`) or only add context for Gemini?
+- Will the Engram VM run 24/7, or only a few hours a day as before?
+
+Done when: the agent on prod queries Engram over MCP and the result shows in the rationale, the agent user is proven read-only by a test, stopping Engram does not break the pipeline, and settings are in the AI Config UI, the secret in Vault and the deploy in Ansible, with MkDocs updated.
 
 ## 2. Agentic Development
 
@@ -22,7 +70,7 @@ Goal: a system that checks itself, corrects its own mistakes and improves its ow
 4. **Prompt and threshold tuning agent** — analyses `verdict_audit` and feedback: where the AI deviates from the rules and why, which rules produce false positives, how often the agent fails. Creates a new prompt version or setting change as an **inactive draft**, replays it against stored evidence from recent verdicts (no CTI API calls) and shows the difference. Activation stays manual in the AI Config UI.
 5. **Retro-hunting** — daily download of new ThreatFox IOCs, searched backwards in `dns_queries`: which device contacted a domain before it was known to be malicious. Needs no VirusTotal calls; can run in parallel with the items above.
 6. **Agent-chosen enrichment** — CTI sources become tools the agent picks within a budget instead of a fixed sequence. Already in place: urlscan.io search and Shodan InternetDB in the main workflow; RDAP, crt.sh and urlscan.io page scans in Deep Recon. Next: Shodan host details and pivots (needs a paid Shodan membership) as a Deep Recon source.
-7. **Engram tools** — the Synapse graph as an agent tool and the device anomaly agent (see section 1). Optional at run time: the Engram host is up only a few hours a day, so anomaly analysis runs in batches.
+7. **Engram tools** — the Synapse graph as an agent tool over MCP ([Graph context over MCP](#graph-context-over-mcp)) and the device anomaly agent (see section 1). Optional at run time: the Engram host is up only a few hours a day, so anomaly analysis runs in batches.
 8. **Agent-decided actions** — blocking and alerting decided by the agent instead of fixed thresholds, with hard limits enforced by the workflow: never block trusted infrastructure, a daily block limit, every block with an expiry. Depends on item 2, so wrong decisions undo themselves.
 
 Constraints for all items: VirusTotal free tier (500 requests/day), Gemini free tier limits, Raspberry Pi 5 with 8 GB RAM.
