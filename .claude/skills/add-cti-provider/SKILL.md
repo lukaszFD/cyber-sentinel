@@ -13,6 +13,9 @@ git show 306c111 --stat
 
 ## 0. Decide first (grill if unclear)
 
+Start from the GitHub issue (or create it: `type:feature`, `area:n8n`, milestone, parent epic) and work on a branch `<issue-nr>-<slug>`.
+
+
 Run `grill-me` style questions for anything not stated:
 - Main workflow (per observable) or a separate workflow (like *Deep Recon*)?
 - **Context only, or does it change the score?** Default is context only (VirusTotal decides; others confirm or add context). If the user wants it in the score, the change to `compute_threat_score()` is part of this task — show the rule change and its effect on existing verdicts before writing it.
@@ -21,9 +24,9 @@ Run `grill-me` style questions for anything not stated:
 
 ## 1. Secret (skip if no key)
 
-- `docs/deployment.md` vault.yml example: add `vault_<provider>_api_key: ""` with a comment on what it is for.
+- `ansible/host_vars/*/vault.yml.example` (every host) and the vault example in `docs/deployment.md`: add `vault_<provider>_api_key: ''` with a comment on what it is for. The user adds the real value to every `host_vars/<host>/vault.yml`.
 - `ansible/06_1_initialize_provision_vault.yml`: add the var to `required_vars_always` and a line to the loop in `[06.1.4.1]` → path `cyber-sentinel/api-keys/<provider>/api-key`.
-- Never write the real key anywhere in the repo.
+- Never write the real key anywhere in the repo, an issue or a PR. To use a key in a one-off check, read it inside an Ansible task with `no_log: true` and print only the result.
 
 ## 2. Database (`config/postgres/`)
 
@@ -52,10 +55,10 @@ Add each new `ai_settings` key to the settings dict, in the existing style: `min
 ## 6. Test on dev
 
 - Claude may run on dev only: `cd ansible && ansible-playbook -i hosts.ini 04_3_db_postgres.yml --limit vm-prox-dev` (plus `06_1_…`, `04_5_ai_config_editor.yml`, `04_6_post_config.yml` as needed). SSH uses the user's YubiKey — if the run needs a touch/PIN or fails on auth, hand the command to the user.
-- Run the SQL twice to prove idempotency (see `db-schema-change`).
+- Run the SQL twice to prove idempotency (see `db-schema-change`), and time any new view over `dns_queries` on prod data (read-only).
 - On dev the new prompt version may be activated for testing; on prod it stays an inactive draft.
 - Prod (`rpi5-prod`): never run. Give the user the exact commands.
 
 ## Done when
 
-Secret provisioned, settings in DB and UI, workflow handles all failure modes, prompt draft written, docs updated, dev deploy passed, and the list of manual steps (n8n import/publish, prompt activation, vault.yml value) is written down for the release notes.
+Issue linked (`Closes #N`), secret provisioned, settings in DB and UI, workflow handles all failure modes, prompt draft written, docs updated, dev deploy passed, and the list of manual steps (n8n import/publish, prompt activation, vault.yml value) is written down for the release notes.

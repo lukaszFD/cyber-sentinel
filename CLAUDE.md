@@ -19,9 +19,10 @@ There is no application build. The repo is infrastructure-as-code (Ansible + Doc
 - `config/` — per-service config copied to the host:
   - `ai_config_ui/` — Flask app for editing AI pipeline config (`app.py`, `live_lookup.py`).
   - `dns/` — `log_processor.py` that ships Pi-hole's query log (`pihole.log`) to Postgres.
+  - `sandbox/` — browser sandbox: mitmproxy addon, Chromium policy, `processor/` (`sandbox_log_processor`).
   - `hcv/` — Vault auto-unsealer.
   - `n8n/workflows/` — exported n8n workflows (JSON).
-  - `postgres/` — schema SQL (`db_deployment.sql`, `db_ai_pipeline.sql`, partitioning/retention, AI config editor).
+  - `postgres/` — schema SQL (`db_deployment.sql`, partitioning/retention, `db_ai_pipeline.sql`, `db_blocklists.sql`, `db_sandbox.sql`, AI config editor).
   - `pihole/`, `unbound/`, `prometheus/`, `grafana/provisioning/`.
 - `.db/` — SSH tunnel to Postgres, split by OS: `.db/mac/` and `.db/linux/` (`pg_tunnel.sh dev|prod`, `db_dev.sh`, `db_prod.sh`; Mac also has `pgadmin-servers.json`), plus shared ad-hoc SQL. See `.db/README.md`.
 - `docs/` + `mkdocs.yml` — MkDocs Material site published to https://lukaszfd.github.io/cyber-sentinel/.
@@ -40,6 +41,8 @@ ansible-playbook -i hosts.ini 00_main.yml --limit vm-prox-dev
 - SSH (Ansible and `.db/*/pg_tunnel.sh`) uses the user's YubiKey; if a run needs a touch/PIN or fails on auth, hand the command to the user.
 - Database: full access on dev, read-only `SELECT` on prod.
 - Secrets flow: `host_vars/<host>/vault.yml` (ansible-vault) → HashiCorp Vault (playbook `06_1`) → read by n8n at runtime.
+- HashiCorp Vault has no auto-unsealer: after a host reboot it is sealed until unsealed with three keys (06.1 or `vault operator unseal`). n8n cannot read secrets meanwhile.
+- 04.6 re-imports the n8n workflows **inactive**; they must be published again afterwards (n8n UI or `n8n publish:workflow --id=…` + restart).
 
 ## Conventions
 
@@ -50,13 +53,21 @@ ansible-playbook -i hosts.ini 00_main.yml --limit vm-prox-dev
 - When behaviour changes, update the related page in `docs/` (and `docs/releases.md` for a release).
 - Never commit secrets, `.env`, `ansible/.vault_pass` or decrypted vault files.
 
+## Issues and pull requests
+
+- Work is tracked in GitHub Issues: an **epic** (`type:epic`) per roadmap section, **tasks** as its sub-issues, each closed by one PR. Labels `type:*`, `area:*`, `prio:*`. Milestones are versions (`v2.6.0`); the backlog has none. `docs/future-roadmap.md` keeps the direction and links to the epics.
+- New work starts from an issue (create one if missing, with labels, milestone and parent epic). Branch `<issue-nr>-<short-slug>`; PR title `<type>(<area>): <summary>` (it becomes the commit on `main`); PR body `Closes #N` and the template checklist.
+- `main` requires a PR, **linear history** (squash or rebase merge; merge commits are refused) and **all review threads resolved** — code scanning comments from Trivy/CodeQL count too.
+- A release tag goes on the **merge commit after the PR is merged** — never before (see `release-docs`).
+- Claude does not commit, push, merge or tag unless the user asks for that step explicitly.
+
 ## Skills (`.claude/skills/`)
 
 - `grill-me` — interview the user about a plan until every decision is made; use before any non-trivial change.
 - `add-cti-provider` — new threat-intel source end to end (Vault, SQL, n8n, prompt, UI, docs).
 - `db-schema-change` — idempotent Postgres changes and dev testing.
 - `add-stack-service` — new container behind Nginx TLS with a pinned multi-arch image.
-- `release-docs` — release notes with upgrade path, version bumps, PR, tag and GitHub Release.
+- `release-docs` — release notes with upgrade path, version bumps, milestone, tag on the merge commit and GitHub Release.
 
 ## Claude.ai project notes
 

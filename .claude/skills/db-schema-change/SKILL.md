@@ -7,14 +7,19 @@ description: Change the Cyber Sentinel PostgreSQL schema or seed data (tables, v
 
 ## Files and order
 
-Rendered by Ansible (`04_3_db_postgres.yml`, Jinja2: `{{ postgres_user }}`, `{{ ai_config_db_user }}`) and run in this order on `cyber_intelligence`:
+Rendered by Ansible (Jinja2: `{{ postgres_user }}`, `{{ ai_config_db_user }}`, `{{ sandbox_db_user }}`) and run on `cyber_intelligence`:
+
+Playbook `04_3_db_postgres.yml`, in this order:
 
 1. `db_deployment.sql` — schema `cyber_sentinel` (CTI tables, dictionaries, Grafana views).
-2. `db_partitioning_retention.sql` — partitions + pg_cron retention.
+2. `db_partitioning_retention.sql` — partitions + pg_cron retention; every partitioned table is listed in `partitioned_tables()`.
 3. `db_ai_pipeline.sql` — schema `cyber_sentinel_ai` (settings, prompts, queue, budget, Deep Recon).
-4. `db_ai_config_editor.sql` — AI Config UI role, grants, change log.
+4. `db_blocklists.sql` — own blocklists (entries, AI queue, render, publish log).
+5. `db_sandbox.sql` — schema `cyber_sentinel_sandbox` (browser sandbox events, observables, checks).
 
-Put the change in the file that owns the object. In `db_ai_pipeline.sql` add a new numbered `SECTION` instead of scattering edits.
+Playbook `04_5_ai_config_editor.yml`: `db_ai_config_editor.sql` — AI Config UI role, grants, change log. **Run 04.5 after every 04.3**: 04.3 re-grants table privileges that 04.5 narrows again.
+
+Put the change in the file that owns the object. In `db_ai_pipeline.sql` add a new numbered `SECTION` instead of scattering edits. A later file may read objects of an earlier one; a reference the other way (e.g. `db_blocklists.sql` reading the sandbox schema) must be inside PL/pgSQL guarded by `to_regclass(...) IS NOT NULL`.
 
 ## Rules
 
@@ -26,18 +31,21 @@ Put the change in the file that owns the object. In `db_ai_pipeline.sql` add a n
 - Do not break Grafana views (`v_grafana_*`) or the n8n queries; grep `config/n8n/workflows/` and `config/grafana/` for any column you rename.
 - Grants: n8n role and `ai_config_db_user` need explicit grants on new objects.
 - Bump `Version:` in the file header and describe the new section there.
+- **Performance at prod volume.** `dns_queries` holds ~750k rows a week on prod, dev only a few thousand — a view that is instant on dev can take a minute on prod. When a view groups raw rows and then filters with a function (`is_allowlisted()`, `blocklist_is_protected()`, `NOT EXISTS`), write the grouping CTE `AS MATERIALIZED`: otherwise the planner pushes the filter below `GROUP BY` and runs it per raw row (v2.5.0: 51 s → 4 s). The UI role has `statement_timeout = 15s`; the n8n queue runs every minute.
+- Functions with side effects (`claim_*`, `record_*`, `*_sync_*`) are tested inside `BEGIN … ROLLBACK`, never called bare on a shared database.
 
 ## Test on dev
 
-Database access:
+Database access (or `ssh hunter@<host> 'docker exec -i postgres_db sh -c "psql -U \$POSTGRES_USER -d cyber_intelligence -X"' < file.sql`):
 - **Dev:** full. Tunnel with `.db/mac/pg_tunnel.sh dev` (on Linux `.db/linux/pg_tunnel.sh dev`) (run in background; needs the user's YubiKey — if it prompts, ask the user to start it) and use `psql -h localhost -p 5432 -d cyber_intelligence`. Or deploy with `cd ansible && ansible-playbook -i hosts.ini 04_3_db_postgres.yml --limit vm-prox-dev`.
-- **Prod:** read-only. Only `SELECT` (e.g. `.db/db_inventory_check.sql`) through `.db/mac/pg_tunnel.sh prod` (Mac: localhost:5433; Linux: 5432). No DDL, no DML, no deploy.
+- **Prod:** read-only. Only `SELECT` (e.g. `.db/db_inventory_check.sql`) through `.db/mac/pg_tunnel.sh prod` (Mac: localhost:5433; Linux: 5432). No DDL, no DML, no deploy. Timing a changed view on prod data is allowed: run the new query text as a plain `SELECT` (`\timing`, `EXPLAIN ANALYZE`) before shipping it.
 
 Checks:
 1. Run the playbook (or the rendered scripts) **twice** on dev; the second run must succeed with no changes or errors.
 2. Run `.db/db_inventory_check.sql` and compare object counts with before.
-3. Exercise the change: query the new view/function, call `setting('<key>')`, confirm grants by connecting as the app role.
-4. If verdict logic changed, `.db/reset_ai_verdicts.sql` can re-queue on dev — never on prod.
+3. Exercise the change: query the new view/function, call `setting('<key>')`, confirm grants by connecting as the app role (and as `ai_config_editor` with its 15 s timeout for anything the UI reads).
+4. Views over `dns_queries` / `url_events`: time the query on prod data (read-only, see above).
+5. If verdict logic changed, `.db/reset_ai_verdicts.sql` can re-queue on dev — never on prod.
 
 ## Done when
 
