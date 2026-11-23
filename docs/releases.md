@@ -19,7 +19,7 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 ## v2.5.0
 
-Adds a browser sandbox for opening suspicious links: an isolated ungoogled-chromium whose whole traffic goes through mitmproxy and its own Pi-hole. Every request and DNS query lands in a separate schema, `cyber_sentinel_sandbox`, and is checked against abuse.ch and urlscan.io; hits are e-mailed and shown on a new Sandbox page. Upgrades v2.4.0 in place; no data is lost. **The `firefox` container is removed** — the sandbox replaces it.
+Adds a browser sandbox for opening suspicious links: an isolated ungoogled-chromium whose whole traffic goes through mitmproxy and its own Pi-hole. Every request and DNS query lands in a separate schema, `cyber_sentinel_sandbox`, and is checked against abuse.ch and urlscan.io; hits are e-mailed, shown on a new Sandbox page and blocked for the whole LAN through the own blocklist. Also fixes two queue views that had become slow with the v2.4.0 DNS volume (51 s → 4 s). Upgrades v2.4.0 in place; no data is lost. **The `firefox` container is removed** — the sandbox replaces it.
 
 ### Highlights
 
@@ -32,6 +32,7 @@ Adds a browser sandbox for opening suspicious links: an isolated ungoogled-chrom
 - **Sandbox hits blocked for the LAN** — the full host of every hit goes to the own malicious blocklist and into the daily pull request in sentinel-blocklists.
 - **Isolated** — the sandbox never reaches the LAN, the stack or the main Pi-hole; none of its traffic lands in `cyber_sentinel.dns_queries` or the main queue.
 - **Firefox removed** — container, Nginx entry and certificate files.
+- **Faster queue views** — the main workflow's queue and the Blocklists page went from ~50 s to 3–4 s on prod (the Blocklists page no longer returns 503).
 
 ### Browser Sandbox
 
@@ -95,11 +96,13 @@ New keys in `ansible/host_vars/rpi5/vault.yml` (letters and digits only — they
     cd ansible && ansible-inventory -i hosts.ini --host rpi5 | grep -c '"vault_'
     ```
 
-2. **RPi memory limits.** Docker ignores the sandbox memory limits (browser 1.5 GB) unless the memory cgroup is on. Append `cgroup_enable=memory cgroup_memory=1` to the single line in `/boot/firmware/cmdline.txt`, reboot, then check:
+2. **RPi memory limits.** Docker ignores the sandbox memory limits (browser 1.5 GB) unless the memory cgroup is on. Append `cgroup_enable=memory cgroup_memory=1` to the single line in `/boot/firmware/cmdline.txt` (once — check the line before rebooting), reboot, then check:
 
     ```bash
     ssh <user>@<host> 'docker info 2>/dev/null | grep -i "no memory limit" || echo "memory limits OK"'
     ```
+
+    HashiCorp Vault comes back **sealed** after the reboot (there is no auto-unsealer): unseal it with three of the keys before the playbooks, `ssh -t <user>@<host> 'for i in 1 2 3; do docker exec -it hashicorp_vault vault operator unseal; done'`.
 
 3. **Disk space.** The sandbox browser image is about 5 GB; keep at least 8 GB free on `/` before 04.2 (`ssh <user>@<host> 'df -h /'`; `docker image prune` frees old layers).
 4. Add two Local DNS records in the main Pi-hole pointing at the host: `sandbox.<suffix>` and `sandbox-dns.<suffix>`. The `firefox.<suffix>` record can go. On a Mac, names ending in `.local` are resolved by mDNS and never reach Pi-hole: put them in `/etc/hosts` instead (not needed for `.prod`).
@@ -144,7 +147,7 @@ Create `ansible/host_vars/<host>/vault.yml` with every key (templates above) and
 ### Tested
 
 - Dev (2026-11-23): full `00_main.yml`. Sandbox: Chromium viewer, traffic only through mitmproxy (direct egress refused), `http://192.168.0.1` blocked, `urls.jsonl` with server IP and upstream TLS, nothing in the main `dns_queries`, processor following both logs, rows in `url_events` / `dns_queries` / `observables`, allow-listed hosts `skipped_trusted`. Sandbox Scan: URLhaus / ThreatFox `no_hit` and a private urlscan.io scan for a clean page; two offline URLhaus entries → `hit` on host and URL, e-mail flagged, both hosts in `v_blocklist_hits` and on the rendered malicious list (sync tested in a rolled-back transaction; publishing is off on dev). A dead phishing page (`error`) now gives a URL observable and an urlscan.io search hit. View fix: same results, Blocklists queries pass under the UI role's 15 s limit. Open: `sandbox-reset` (needs sudo) and the Sandbox page in the browser.
-- Prod (RPi 5): _to be filled in after the upgrade._
+- Prod (RPi 5, 2026-11-23), upgrade from v2.4.0 with the steps above: memory cgroup on (sandbox browser capped at 1.5 GB), Vault unsealed by hand after the reboot, all playbooks `failed=0`; the four sandbox containers up, `sandbox_log_processor` connected and following both logs, schema and the `sandbox` blocklist source in place, all workflows published, `sandbox.prod` and `sandbox-dns.prod` answering through Nginx. The view fix was found on prod right after the upgrade (main queue 51 s, Blocklists page 503, Postgres at 100% CPU) and applied with 04.3 + 04.5: 3.9 s and 2.6 s, Postgres at ~5% CPU.
 
 ---
 
