@@ -29,7 +29,10 @@ Walk the decision tree of the user's plan one branch at a time until nothing is 
 - **Architectures:** works on `arm64` (prod RPi 5) and `amd64` (dev).
 - **Rollout:** what is tested on `vm-prox-dev` first, and what the user must do by hand in n8n or the AI Config UI.
 - **Failure modes:** API down, timeout, empty result, rate-limit response, partial data.
+- **Prod volume:** does a new view, query or job still work at prod size (`dns_queries` ~750k rows a week, RPi 5 CPU), not only on the small dev database? Who calls it and how often (n8n every minute, UI with a 15 s timeout)?
+- **Host steps:** reboot, cgroup, disk space for new images, Vault sealed afterwards, workflows to publish again after 04.6.
+- **Work items:** which issue(s) this becomes — epic, sub-issues, milestone, labels — and what "done" means for each.
 
 ## Finish
 
-End with a summary: each decision and the chosen answer, risks accepted, and the next step (usually the matching skill: `add-cti-provider`, `db-schema-change`, `add-stack-service`, `release-docs`). Ask whether to proceed.
+End with a summary: each decision and the chosen answer, risks accepted, the issue(s) to create or update (title in `<type>(<area>): …` form, labels, milestone, parent epic), and the next step (usually the matching skill: `add-cti-provider`, `db-schema-change`, `add-stack-service`, `release-docs`). Ask whether to proceed.
