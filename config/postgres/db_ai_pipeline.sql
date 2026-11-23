@@ -1,5 +1,7 @@
 -- ============================================
 -- Cyber Sentinel — AI pipeline schema — POSTGRES
+-- Version: 2.6 (v_pending_observables: MATERIALIZED candidates, the
+--               allow-list check once per domain instead of per DNS row)
 -- Version: 2.5 (Section 8b: api_call_log for every CTI / AI request, VirusTotal
 --               budget from the higher of the local and the provider counter,
 --               usage views and alerts; Section 10: Failure Guard)
@@ -788,7 +790,10 @@ OUTPUT (fields of the structured response)
 -- The workflow reads it through claim_next_observable() (Section 8b).
 
 CREATE OR REPLACE VIEW cyber_sentinel_ai.v_pending_observables AS
-WITH candidates AS (
+-- MATERIALIZED: without it the planner pushes is_allowlisted(c.fqdn) below
+-- the GROUP BY and runs it for every raw dns_queries row (~750k a week on
+-- prod: 51 s per call) instead of once per domain/IP pair (~4 s).
+WITH candidates AS MATERIALIZED (
     SELECT dq.domain                               AS fqdn,
            dq.response_ip                          AS observable_ip,
            MAX(dq.id)                              AS dns_query_id,

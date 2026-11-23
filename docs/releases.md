@@ -70,6 +70,10 @@ Adds a browser sandbox for opening suspicious links: an isolated ungoogled-chrom
 - 06.1 checks the root token against the host's Vault (`[06.1.2.4]`) and stops with a clear message instead of a hidden 403.
 - 04.2 pulls registry images in a separate, retried step (`[04.2.1.0a]`): the sandbox browser image is about 5 GB and a slow registry could time out the whole `up`.
 
+### Performance Fix
+
+- `v_pending_observables` (main workflow, every minute) and `v_blocklist_ai_queue` (Blocklists page, Blocklist Candidates) group a week of `dns_queries`. Postgres pushed the allow-list checks (`is_allowlisted()`, `blocklist_is_protected()`) below the `GROUP BY`, so they ran for every raw DNS row instead of once per domain. With the Pi-hole log as the source (v2.4.0) that is ~750k rows a week on prod: 51 s and 55 s per call, Postgres at 100% CPU, and the Blocklists page returned 503 (the UI role times out at 15 s). The grouping CTE is now `MATERIALIZED`: 3.9 s and 2.6 s on the same data, same results. Ships with 04.3 (`db_ai_pipeline.sql` 2.6, `db_blocklists.sql` 1.1); run 04.5 after it.
+
 ### Database Helpers
 
 - `.db/` split by OS: `.db/mac/` (Homebrew YubiKey module, uses ssh-agent after `yk`, prod on local port 5433, `pgadmin-servers.json` for pgAdmin) and `.db/linux/` (previous scripts). See `.db/README.md`.
@@ -139,7 +143,7 @@ Create `ansible/host_vars/<host>/vault.yml` with every key (templates above) and
 
 ### Tested
 
-- Dev: _to be filled in after the dev deployment._
+- Dev (2026-11-23): full `00_main.yml`. Sandbox: Chromium viewer, traffic only through mitmproxy (direct egress refused), `http://192.168.0.1` blocked, `urls.jsonl` with server IP and upstream TLS, nothing in the main `dns_queries`, processor following both logs, rows in `url_events` / `dns_queries` / `observables`, allow-listed hosts `skipped_trusted`. Sandbox Scan: URLhaus / ThreatFox `no_hit` and a private urlscan.io scan for a clean page; two offline URLhaus entries → `hit` on host and URL, e-mail flagged, both hosts in `v_blocklist_hits` and on the rendered malicious list (sync tested in a rolled-back transaction; publishing is off on dev). A dead phishing page (`error`) now gives a URL observable and an urlscan.io search hit. View fix: same results, Blocklists queries pass under the UI role's 15 s limit. Open: `sandbox-reset` (needs sudo) and the Sandbox page in the browser.
 - Prod (RPi 5): _to be filled in after the upgrade._
 
 ---

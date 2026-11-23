@@ -1,6 +1,7 @@
 -- ============================================
 -- Cyber Sentinel — Own blocklists (sentinel-blocklists) — POSTGRES
--- Version: 1.1 (source 'sandbox': browser sandbox hits on the malicious list)
+-- Version: 1.1 (source 'sandbox': browser sandbox hits on the malicious list;
+--               v_blocklist_ai_queue: MATERIALIZED, checks once per domain)
 -- ============================================
 -- Runs AFTER db_ai_pipeline.sql, as the `postgres` superuser, connected to
 -- `cyber_intelligence`. Rendered by Ansible (playbook 04_3_db_postgres.yml).
@@ -256,7 +257,10 @@ $$;
 -- The daily limit is applied by the workflow (blocklist_ai_daily_limit
 -- minus today's classifications).
 CREATE OR REPLACE VIEW cyber_sentinel_ai.v_blocklist_ai_queue AS
-WITH seen AS (
+-- MATERIALIZED: keeps blocklist_is_protected() and the NOT EXISTS checks
+-- after the GROUP BY (once per domain), not pushed down to every raw
+-- dns_queries row (prod: 55 s -> 3 s; the UI times out at 15 s).
+WITH seen AS MATERIALIZED (
     SELECT lower(rtrim(dq.domain, '.'))      AS fqdn,
            COUNT(*)                          AS query_count,
            COUNT(DISTINCT dq.source_ip)      AS client_count,
