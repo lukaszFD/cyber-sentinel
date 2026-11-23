@@ -10,9 +10,10 @@
 # Loaded by:  All playbooks (00–07). Variables here are referenced
 #             inside playbooks as {{ variable_name }}.
 #
-# Pairs with: group_vars/all_servers/vault.yml — encrypted file
+# Pairs with: host_vars/<host>/vault.yml — one encrypted file per host
 #             containing all `vault_*` secrets (API keys, passwords,
-#             certs). This file is for non-sensitive defaults only.
+#             certs, that host's Vault credentials). This file is for
+#             non-sensitive defaults only.
 #
 # ============================================================
 
@@ -80,3 +81,14 @@ vault_address: "10.10.10.12"
 # Secrets in vault.yml: vault_ai_config_db_password,
 # vault_ai_ui_secret_key, vault_ai_ui_users, vault_ai_config_cert/key.
 ai_config_db_user: "ai_config_editor"
+
+# ------------------------------------------------------------
+# [VARS.SANDBOX] Browser sandbox (playbooks 04.3, 04.7)
+# ------------------------------------------------------------
+# Login of sandbox_log_processor: EXECUTE on the ingest functions of
+# cyber_sentinel_sandbox only (db_sandbox.sql). Must differ from
+# postgres_user, ai_config_db_user and "postgres".
+# Secrets in vault.yml: vault_sandbox_db_password,
+# vault_sandbox_pihole_admin_password, vault_sandbox_cert/key,
+# vault_sandbox_dns_cert/key.
+sandbox_db_user: "sandbox_ingest"

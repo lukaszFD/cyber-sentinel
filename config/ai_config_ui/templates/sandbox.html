@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Sandbox{% endblock %}
+{% block content %}
+<h1>Browser sandbox</h1>
+<p class="muted">Everything opened in the isolated sandbox browser (<code>https://sandbox.&lt;suffix&gt;</code>): every request mitmproxy saw, the sandbox Pi-hole's DNS queries, and the CTI checks of the <em>Sandbox Scan</em> workflow (abuse.ch, urlscan.io). Kept apart from your network's traffic in <code>cyber_sentinel_sandbox</code>. URLs below come from browsed sites — they are shown as text, never as links; open them only inside the sandbox.</p>
+{% if ready %}
+
+<div class="grid">
+  <section class="card">
+    <h2>Checks</h2>
+    {% if settings.sandbox_scan_enabled == 1 %}<p class="stat-sm"><span class="tag ok">ON</span> · every 2 minutes, {{ settings.sandbox_scan_batch_size|int }} per run</p>
+    {% else %}<p class="stat-sm"><span class="tag bad">OFF</span> — traffic is recorded, nothing is looked up</p>{% endif %}
+    <dl>
+      <dt>Waiting for a check</dt><dd class="mono">{{ queue }}</dd>
+      <dt>urlscan.io private scans today</dt><dd class="mono">{{ budget.used_today }} / {{ budget.daily_limit }}{% if settings.sandbox_urlscan_enabled != 1 %} <span class="tag">off</span>{% endif %}</dd>
+      <dt>E-mail on hits</dt><dd>{% if settings.sandbox_alert_enabled == 1 %}<span class="tag ok">on</span>{% else %}<span class="tag">off</span>{% endif %}</dd>
+    </dl>
+    <p class="small muted">Settings: <a href="{{ url_for('settings_page') }}#stage-10">Settings → Browser sandbox</a>.</p>
+  </section>
+  <section class="card">
+    <h2>Observables</h2>
+    <dl>
+      <dt>Hits</dt><dd>{% if counts.hit %}<a href="{{ url_for('sandbox_page', verdict='hit') }}" class="tag bad">{{ counts.hit }}</a>{% else %}<span class="muted">0</span>{% endif %}</dd>
+      <dt>Clean</dt><dd class="mono">{{ counts.clean }}</dd>
+      <dt>Not checked yet</dt><dd class="mono">{{ counts.pending }}</dd>
+      <dt>Lookup failed</dt><dd class="mono">{{ counts.error }}</dd>
+      <dt>Skipped (allow-list)</dt><dd class="mono">{{ counts.trusted }}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Ingest</h2>
+    <dl>
+      {% for r in ingest %}<dt>{{ 'URL log' if r.source == 'urls' else 'DNS log' }}</dt><dd class="mono">last batch {{ r.at|dt }}</dd>
+      {% else %}<dt>—</dt><dd class="muted">Nothing ingested yet. Is <code>sandbox_log_processor</code> running?</dd>{% endfor %}
+    </dl>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Sessions</h2>
+  <p class="small muted">A pause longer than {{ settings.sandbox_session_gap_minutes|int }} minutes starts a new session. Session times are UTC; request times inside a session are Polish time.</p>
+  <table class="list">
+    <thead><tr><th>Start</th><th>End</th><th>First page</th><th>Requests</th><th>Pages</th><th>Hosts</th><th>Files hashed</th><th>Blocked</th><th>Errors</th><th>Hits</th><th></th></tr></thead>
+    <tbody>
+    {% for s in sessions %}
+    <tr{% if selected and s.session_start == selected.session_start %} class="selected"{% endif %}>
+      <td class="mono">{{ s.session_start|dt }}</td>
+      <td class="mono">{{ s.session_end|dt }}</td>
+      <td class="mono small" style="word-break:break-all">{{ (s.first_page or '—')[:120] }}</td>
+      <td class="mono">{{ s.events }}</td>
+      <td class="mono">{{ s.navigations }}</td>
+      <td class="mono">{{ s.hosts }}</td>
+      <td class="mono">{{ s.hashes }}</td>
+      <td>{% if s.blocked %}<span class="tag warn">{{ s.blocked }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td class="mono">{{ s.errors }}</td>
+      <td>{% if s.hit_events %}<span class="tag bad">{{ s.hit_events }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td><a href="{{ url_for('sandbox_page', session=s.session_start.isoformat(), verdict=verdict) }}#session">open</a></td>
+    </tr>
+    {% else %}<tr><td colspan="11" class="muted">No sandbox traffic yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if selected %}
+<section class="card" id="session">
+  <h2>Session {{ selected.session_start|dt }} UTC — {{ events|length }} request{{ 's' if events|length != 1 }}{% if events|length >= 1000 %} (first 1000){% endif %}</h2>
+  <p class="small muted"><span class="tag">page</span> = opened as a top-level page (only those go to urlscan.io). <span class="tag warn">blocked</span> = mitmproxy refused a private or local destination. TLS: the real upstream certificate as mitmproxy saw it.</p>
+  <table class="list">
+    <thead><tr><th>Time</th><th>Event</th><th>Request</th><th>Server</th><th>Status</th><th>Type / size</th><th>TLS</th><th>Hits</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+    <tr>
+      <td class="mono small">{{ e.at.strftime('%H:%M:%S') }}</td>
+      <td>{% if e.event == 'blocked' %}<span class="tag warn">blocked</span>{% elif e.event != 'http' %}<span class="tag bad">{{ e.event }}</span>{% elif e.is_navigation %}<span class="tag">page</span>{% endif %}</td>
+      <td class="mono small" style="word-break:break-all">{{ e.method or '' }} {{ (e.url or e.host or '')[:300] }}
+        {% if e.redirect_location %}<div class="muted">→ {{ e.redirect_location[:200] }}</div>{% endif %}
+        {% if e.error %}<div class="muted">{{ e.error[:200] }}</div>{% endif %}</td>
+      <td class="mono small">{{ e.server_ip or '' }}</td>
+      <td class="mono">{{ e.status or '' }}</td>
+      <td class="small">{{ (e.content_type or '')[:40] }}{% if e.size %}<div class="muted mono">{{ e.size }} B</div>{% endif %}
+        {% if e.sha256 %}<div class="muted mono" title="{{ e.sha256 }}">sha256 {{ e.sha256[:12] }}…</div>{% endif %}</td>
+      <td class="small">{% if e.tls_verified == 'true' %}<span class="tag ok">valid</span>{% elif e.tls_verified == 'false' %}<span class="tag bad" title="{{ e.tls_issuer or '' }}">invalid</span>{% endif %}</td>
+      <td>{% if e.hits %}{% for h in e.hits %}<span class="tag bad">{{ h }}</span> {% endfor %}{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>DNS (sandbox Pi-hole, no blocklists)</h3>
+  <table class="list">
+    <thead><tr><th>Domain</th><th>Queries</th><th>Answers</th></tr></thead>
+    <tbody>
+    {% for d in dns %}<tr><td class="mono small">{{ d.domain }}</td><td class="mono">{{ d.queries }}</td><td class="mono small">{{ (d.answers or '')[:200] }}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">No DNS rows in this time window.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="card" id="observables">
+  <h2>Observables</h2>
+  <p class="small">
+    {% for v in verdicts %}<a href="{{ url_for('sandbox_page', verdict=v, session=request.args.get('session', '')) }}#observables" class="tag {{ 'ok' if v == verdict }}">{{ v or 'all' }}</a> {% endfor %}
+  </p>
+  <table class="list">
+    <thead><tr><th>Type</th><th>Value</th><th>Seen</th><th>Verdict</th><th>Latest checks</th></tr></thead>
+    <tbody>
+    {% for o in observables %}
+    <tr>
+      <td><span class="tag">{{ o.kind }}</span>{% if o.is_navigation %} <span class="tag">page</span>{% endif %}</td>
+      <td class="mono small" style="word-break:break-all">{{ o.value[:300] }}
+        {% if o.example_url and o.kind != 'url' %}<div class="muted">from {{ o.example_url[:160] }}</div>{% endif %}
+        {% if o.content_type and o.kind == 'sha256' %}<div class="muted">{{ o.content_type[:60] }}</div>{% endif %}</td>
+      <td class="small"><span class="mono">{{ o.seen_count }}×</span><div class="muted">{{ o.last_local|dt }}</div></td>
+      <td>{% if o.status == 'skipped_trusted' %}<span class="tag">allow-list</span>
+          {% elif o.verdict == 'hit' %}<span class="tag bad">hit</span>
+          {% elif o.verdict == 'clean' %}<span class="tag ok">clean</span>
+          {% elif o.verdict == 'error' %}<span class="tag warn">error</span>
+          {% else %}<span class="muted">pending</span>{% endif %}
+          {% if o.urlscan_state %}<div class="small muted">urlscan: {{ o.urlscan_state }}</div>{% endif %}</td>
+      <td class="small">
+        {% for c in (o.checks or []) %}
+          <div><span class="tag {{ {'hit': 'bad', 'no_hit': 'ok', 'error': 'warn'}.get(c.outcome, '') }}">{{ c.provider }}</span>
+          {{ (c.summary or c.outcome)[:160] }}
+          {% set link = c.report_url|sandbox_report_link %}{% if link %} <a href="{{ link }}" target="_blank" rel="noopener noreferrer">report</a>{% endif %}</div>
+        {% endfor %}
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="5" class="muted">Nothing here.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="small muted">Up to 200 rows, hits first. Allow-listed hosts (Tranco top domains, manual allow-list) and their URLs are never looked up; downloaded files always are.</p>
+</section>
+{% endif %}
+{% endblock %}

@@ -179,3 +179,8 @@ Smoke / E2E (after each deploy to dev and prod):
 - `dig` a test domain → row in `dns_queries` → the domain goes through the whole pipeline.
 
 Rules: every new piece of code comes with its tests in the same PR, and those tests run in GitHub Actions on every PR — a change without tests or with red checks is not merged. The same applies to code written by AI agents. No chasing coverage percentages — what matters is parsing, scoring, config validation and migrations. First batch: pytest for the DNS log processor and the migration test in CI.
+
+## 9. Browser Sandbox — Follow-ups
+
+- AI verdict for sandbox hits (Gemini, with the page evidence from urlscan.io), and sandbox findings as material for Sentinel Engram.
+- Optional automatic block in the main Pi-hole for hosts with a confirmed sandbox hit.

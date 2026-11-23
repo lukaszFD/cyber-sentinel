@@ -1,0 +1,26 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Cyber Sentinel DEV",
+      "Group": "Cyber Sentinel",
+      "Host": "localhost",
+      "Port": 5432,
+      "MaintenanceDB": "cyber_intelligence",
+      "Username": "hunter",
+      "SSLMode": "prefer",
+      "Comment": "Start the tunnel first: .db/mac/db_dev.sh"
+    },
+    "2": {
+      "Name": "Cyber Sentinel PROD (read-only)",
+      "Group": "Cyber Sentinel",
+      "Host": "localhost",
+      "Port": 5433,
+      "MaintenanceDB": "cyber_intelligence",
+      "Username": "hunter",
+      "SSLMode": "prefer",
+      "BGColor": "#B71C1C",
+      "FGColor": "#FFFFFF",
+      "Comment": "SELECT only. Start the tunnel first: .db/mac/db_prod.sh"
+    }
+  }
+}

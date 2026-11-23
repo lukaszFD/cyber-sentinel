@@ -1,11 +1,12 @@
 # Database
 
-One PostgreSQL 16 instance (`postgres_db`) with the `pgvector` and `pg_cron` extensions. Database `cyber_intelligence`, two schemas:
+One PostgreSQL 16 instance (`postgres_db`) with the `pgvector` and `pg_cron` extensions. Database `cyber_intelligence`, three schemas:
 
 | Schema | Holds | Written by |
 |---|---|---|
 | `cyber_sentinel` | DNS traffic, CTI results and verdicts — the data | `dns_log_processor`, n8n |
 | `cyber_sentinel_ai` | Everything that drives the AI pipeline — settings, prompts, allow-lists, audit, vector memory | AI Config UI, n8n, Tranco sync |
+| `cyber_sentinel_sandbox` | What the browser sandbox saw — requests, DNS, observables, CTI checks ([Data & CTI](sandbox/data.md)) | `sandbox_log_processor`, n8n *Sandbox Scan* |
 
 The SQL lives in [`config/postgres/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/postgres) and is applied in this order. Every file is idempotent and re-runs on each deployment.
 
@@ -15,7 +16,8 @@ The SQL lives in [`config/postgres/`](https://github.com/lukaszFD/cyber-sentinel
 | 2 | `db_partitioning_retention.sql` | 04.3 | partitions, retention functions, pg_cron jobs |
 | 3 | `db_ai_pipeline.sql` | 04.3 | `cyber_sentinel_ai` schema, scoring, allow-list, work queue, API call log and VirusTotal budget, Deep Recon, Failure Guard |
 | 4 | `db_blocklists.sql` | 04.3 | own blocklists: entries, AI classifications, name patterns, classifier prompt, publish log |
-| 5 | `db_ai_config_editor.sql` | 04.5 | AI Config UI role, audit log, guard triggers |
+| 5 | `db_sandbox.sql` | 04.3 | `cyber_sentinel_sandbox` schema, ingest role, check queue, session views |
+| 6 | `db_ai_config_editor.sql` | 04.5 | AI Config UI role, audit log, guard triggers |
 
 ## Schema `cyber_sentinel`
 
@@ -151,14 +153,15 @@ erDiagram
 | Role | Access |
 |---|---|
 | `postgres` | Superuser; runs the deployment scripts and pg_cron jobs. |
-| app role (`postgres_user`) | n8n and `dns_log_processor`: read/write in both schemas, read-only on the audit log. |
-| `ai_config_editor` | AI Config UI only: the configuration objects above, nothing from the data tables. Reads `deep_recon`, the recon queue, the VirusTotal budget, the API call log and Failure Guard alerts; logs simulator calls through `api_claim()` / `api_call_finish()` only. Guard triggers stop it from breaking the pipeline (active prompts are read-only, one prompt of each kind always active, malicious levels stay a contiguous top range). |
+| app role (`postgres_user`) | n8n and `dns_log_processor`: read/write in `cyber_sentinel` and `cyber_sentinel_ai`, read-only on the audit log; in `cyber_sentinel_sandbox` read, plus the check results (`claim_checks()`, `record_checks()`). |
+| `sandbox_ingest` (`sandbox_db_user`) | `sandbox_log_processor` only: EXECUTE on the ingest functions of `cyber_sentinel_sandbox`, no table privileges. |
+| `ai_config_editor` | AI Config UI only: the configuration objects above, nothing from the data tables (read-only on `cyber_sentinel_sandbox` for the Sandbox page). Reads `deep_recon`, the recon queue, the VirusTotal budget, the API call log and Failure Guard alerts; logs simulator calls through `api_claim()` / `api_call_finish()` only. Guard triggers stop it from breaking the pipeline (active prompts are read-only, one prompt of each kind always active, malicious levels stay a contiguous top range). |
 
 Passwords come from `vault.yml` and are copied to HashiCorp Vault.
 
 ## Partitioning and Retention
 
-`dns_queries`, `threat_indicators`, `network_events` and `cyber_sentinel_ai.api_call_log` are partitioned by month (`<table>_pYYYYMM`) with a default partition catching anything outside the range. The list lives in `cyber_sentinel.partitioned_tables()`. Two pg_cron jobs run on the 1st of each month:
+`dns_queries`, `threat_indicators`, `network_events`, `cyber_sentinel_ai.api_call_log` and the sandbox's `url_events` and `dns_queries` are partitioned by month (`<table>_pYYYYMM`) with a default partition catching anything outside the range. The list lives in `cyber_sentinel.partitioned_tables()`. Two pg_cron jobs run on the 1st of each month:
 
 | Job | Time | Action |
 |---|---|---|

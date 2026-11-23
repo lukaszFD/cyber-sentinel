@@ -36,14 +36,32 @@
     # SECTION 1 — Build and start the stack
     # ============================================================
 
-    # passive_dns was removed from the compose file; `up` would leave the
-    # old container running (and holding 10.10.10.3) as an orphan.
-    # Removed by name, not with --remove-orphans, so nothing else in the
-    # project is touched.
-    - name: "[04.2.1.0] Remove the retired passive_dns container"
+    # passive_dns and firefox (replaced by the browser sandbox, 04.7) were
+    # removed from the compose file; `up` would leave the old containers
+    # running as orphans. Removed by name, not with --remove-orphans, so
+    # nothing else in the project is touched.
+    - name: "[04.2.1.0] Remove retired containers (passive_dns, firefox)"
       community.docker.docker_container:
-        name: passive_dns
+        name: "{{ item }}"
         state: absent
+      loop:
+        - passive_dns
+        - firefox
+
+    # Registry images first, retried: a fresh host pulls ~10 images at
+    # once (the sandbox browser alone is ~5 GB), and a slow registry
+    # (lscr.io) can time out the TLS handshake. A failed pull here is
+    # retried; layers already downloaded are kept. Locally built images
+    # are skipped (--ignore-buildable) and built by `up --build` below.
+    - name: "[04.2.1.0a] Pull registry images (retried on timeouts)"
+      ansible.builtin.shell:
+        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} pull --ignore-buildable"
+        chdir: "{{ remote_deploy_base }}"
+      register: pull_output
+      until: pull_output.rc == 0
+      retries: 5
+      delay: 30
+      changed_when: "' Pulled' in pull_output.stderr"
 
     - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:

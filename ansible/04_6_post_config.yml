@@ -54,6 +54,7 @@
       - "Blocklist Publish.json"
       - "Failure Guard.json"
       - "API Usage Monitor.json"
+      - "Sandbox Scan.json"
 
   tasks:
     # ============================================================
@@ -318,12 +319,13 @@
     # Each JSON keeps its workflow id (main: ILhKRbyvF5NaIRYL, Deep Recon:
     # DpRecon2SentnlX1, Blocklist Candidates: BlkCandidates01X, Blocklist
     # Publish: BlkPublish0001XY, Failure Guard: FailureGuard0001, API Usage
-    # Monitor: ApiUsageMonitor1), so a re-import updates it in place instead of
+    # Monitor: ApiUsageMonitor1, Sandbox Scan: SandboxScan0001X), so a re-import updates it in place instead of
     # adding a second copy. The CLI import leaves workflows INACTIVE —
     # publish them in the n8n UI. Failure Guard is activated by playbook
     # 06.3, which must run after this one (00_main.yml does).
     # Requires config/postgres/db_ai_pipeline.sql (playbook 04.3 [04.3.1.4]);
-    # the blocklist workflows also db_blocklists.sql ([04.3.1.6]).
+    # the blocklist workflows also db_blocklists.sql ([04.3.1.6]), Sandbox
+    # Scan db_sandbox.sql ([04.3.1.7]).
     #
     # Pre-check on the control host: fails with the list of files that DO
     # exist, instead of the lookup plugin's bare "File not found". Path is

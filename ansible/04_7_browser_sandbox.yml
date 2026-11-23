@@ -1,0 +1,155 @@
+---
+# ============================================================
+# Cyber Sentinel — Playbook 04.7 — Browser Sandbox
+# ============================================================
+# Purpose:    Post-configuration of the browser sandbox started by 04.2
+#             (sandbox-browser, sandbox-mitmproxy, sandbox-pihole on the
+#             internal sandbox_network 10.10.20.0/24):
+#               1. trusts mitmproxy's CA and forces the proxy in Chromium
+#                  through a managed policy, then recreates the browser
+#               2. keeps the sandbox Pi-hole WITHOUT any adlist (the full
+#                  picture of what the sandbox resolves) and sets its
+#                  admin password
+#               3. installs `sandbox-reset` and its nightly cron (04:00)
+#
+# Depends on: - 04.1 (sandbox dirs + addon staged)
+#             - 04.2 (sandbox containers running; mitmproxy creates its
+#               CA in config/sandbox/mitmproxy on first start)
+#             - vault_sandbox_pihole_admin_password (falls back to
+#               vault_pihole_admin_password while it is not set)
+#
+# Outputs:    - config/sandbox/browser/policies/cyber_sentinel.json
+#             - empty adlist table in config/sandbox/pihole/etc/gravity.db
+#             - /usr/local/bin/sandbox-reset + root cron entry
+#             - URL log: config/sandbox/logs/urls.jsonl (written by the
+#               mitmproxy addon, rotated daily, 14 days)
+#
+# Never touches the main Pi-hole (10.10.10.4) or cyber_sentinel.dns_queries.
+# Idempotent: the browser is recreated only when the policy changes.
+# ============================================================
+
+- name: 04.7 - Browser sandbox
+  hosts: all_servers
+  become: yes
+
+  vars:
+    project_name: "cyber-sentinel"
+    docker_compose_file_name: "docker-compose-cyber-sentinel.yml"
+    sandbox_dir: "{{ remote_deploy_base }}/config/sandbox"
+
+  tasks:
+    # ============================================================
+    # SECTION 1 — mitmproxy CA → Chromium managed policy
+    # ------------------------------------------------------------
+    # The CA is generated per host by mitmproxy and never leaves it;
+    # only the public certificate goes into the policy (base64 DER,
+    # policy CACertificates). The private key stays 0600 in
+    # config/sandbox/mitmproxy (owned by the mitmproxy user).
+    # ============================================================
+
+    - name: "[04.7.1.1] Wait for the mitmproxy CA certificate"
+      ansible.builtin.wait_for:
+        path: "{{ sandbox_dir }}/mitmproxy/mitmproxy-ca-cert.pem"
+        timeout: 120
+
+    - name: "[04.7.1.2] Read the mitmproxy CA certificate"
+      ansible.builtin.slurp:
+        src: "{{ sandbox_dir }}/mitmproxy/mitmproxy-ca-cert.pem"
+      register: sandbox_ca_pem
+
+    - name: "[04.7.1.3] Render the Chromium managed policy (proxy, CA, WebRTC)"
+      ansible.builtin.template:
+        src: templates/sandbox_chromium_policy.json.j2
+        dest: "{{ sandbox_dir }}/browser/policies/cyber_sentinel.json"
+        owner: root
+        group: root
+        mode: '0644'
+      vars:
+        sandbox_ca_der_b64: >-
+          {{ sandbox_ca_pem.content | b64decode
+             | regex_replace('-----[A-Z ]+-----', '')
+             | regex_replace('\s+', '') }}
+      register: sandbox_policy
+
+    - name: "[04.7.1.4] Recreate sandbox-browser so Chromium loads the policy"
+      ansible.builtin.command:
+        cmd: >-
+          docker compose -f {{ docker_compose_file_name }} -p {{ project_name }}
+          up -d --force-recreate --no-deps sandbox-browser
+        chdir: "{{ remote_deploy_base }}"
+      when: sandbox_policy.changed
+
+    # ============================================================
+    # SECTION 2 — Sandbox Pi-hole: no adlists, admin password
+    # ------------------------------------------------------------
+    # Pi-hole seeds a default adlist on first start. The sandbox must
+    # see everything, so every adlist is deleted and gravity rebuilt
+    # (empty). Upstream, logging and listening mode come from
+    # FTLCONF_* in the compose file.
+    # Wait for `healthy` first: on a fresh volume the first gravity run
+    # migrates the default list into gravity.db AFTER the file appears,
+    # and would undo an earlier delete.
+    # ============================================================
+
+    - name: "[04.7.2.1] Wait until the sandbox Pi-hole is healthy (first gravity run done)"
+      ansible.builtin.command:
+        cmd: "docker inspect -f '{{ '{{' }}.State.Health.Status{{ '}}' }}' sandbox-pihole"
+      register: sandbox_pihole_health
+      until: sandbox_pihole_health.stdout == 'healthy'
+      retries: 36
+      delay: 5
+      changed_when: false
+
+    - name: "[04.7.2.2] Count adlists in the sandbox Pi-hole"
+      ansible.builtin.command:
+        cmd: >-
+          sqlite3 -cmd ".timeout 10000" {{ sandbox_dir }}/pihole/etc/gravity.db
+          "SELECT COUNT(*) FROM adlist;"
+      register: sandbox_adlists
+      changed_when: false
+
+    - name: "[04.7.2.3] Delete every adlist and rebuild an empty gravity"
+      ansible.builtin.shell:
+        cmd: >-
+          sqlite3 -cmd ".timeout 10000" {{ sandbox_dir }}/pihole/etc/gravity.db
+          "DELETE FROM adlist;" && docker exec sandbox-pihole pihole -g
+      when: (sandbox_adlists.stdout | int) > 0
+
+    - name: "[04.7.2.4] Verify the sandbox Pi-hole blocks nothing"
+      ansible.builtin.command:
+        cmd: >-
+          sqlite3 -cmd ".timeout 10000" {{ sandbox_dir }}/pihole/etc/gravity.db
+          "SELECT (SELECT COUNT(*) FROM adlist) + (SELECT COUNT(*) FROM gravity);"
+      register: sandbox_gravity_left
+      changed_when: false
+      failed_when: (sandbox_gravity_left.stdout | int) != 0
+
+    - name: "[04.7.2.5] Set sandbox Pi-hole admin password"
+      community.docker.docker_container_exec:
+        container: sandbox-pihole
+        # Own password (the sandbox browser can reach this UI, see docs);
+        # falls back to the main Pi-hole's until it is set in vault.yml.
+        argv: [pihole, setpassword, "{{ vault_sandbox_pihole_admin_password | default(vault_pihole_admin_password, true) }}"]
+      register: sandbox_pihole_pass
+      changed_when: "'New password set' in (sandbox_pihole_pass.stdout | default(''))"
+      no_log: true
+
+    # ============================================================
+    # SECTION 3 — Session reset
+    # ============================================================
+
+    - name: "[04.7.3.1] Install sandbox-reset"
+      ansible.builtin.template:
+        src: templates/sandbox-reset.sh.j2
+        dest: /usr/local/bin/sandbox-reset
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: "[04.7.3.2] Recreate the sandbox browser every night at 04:00"
+      ansible.builtin.cron:
+        name: "cyber-sentinel sandbox-reset"
+        minute: "0"
+        hour: "4"
+        job: "/usr/local/bin/sandbox-reset >/dev/null 2>&1"
+        user: root

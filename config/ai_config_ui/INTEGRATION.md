@@ -23,7 +23,7 @@ dedicated least-privilege role — never as `postgres` and never as the n8n role
 ai_config_db_user: "ai_config_editor"
 ```
 
-`group_vars/all/vault.yml` (ansible-vault):
+`host_vars/<host>/vault.yml` (ansible-vault, every host):
 
 ```yaml
 # openssl rand -hex 24 — hex only: the value lands in a SQL literal and in .env

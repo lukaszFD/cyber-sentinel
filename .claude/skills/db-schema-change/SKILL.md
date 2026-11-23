@@ -30,8 +30,8 @@ Put the change in the file that owns the object. In `db_ai_pipeline.sql` add a n
 ## Test on dev
 
 Database access:
-- **Dev:** full. Tunnel with `.db/pg_tunnel.sh dev` (run in background; needs the user's YubiKey — if it prompts, ask the user to start it) and use `psql -h localhost -p 5432 -d cyber_intelligence`. Or deploy with `cd ansible && ansible-playbook -i hosts.ini 04_3_db_postgres.yml --limit vm-prox-dev`.
-- **Prod:** read-only. Only `SELECT` (e.g. `.db/db_inventory_check.sql`) through `.db/pg_tunnel.sh prod`. No DDL, no DML, no deploy.
+- **Dev:** full. Tunnel with `.db/mac/pg_tunnel.sh dev` (on Linux `.db/linux/pg_tunnel.sh dev`) (run in background; needs the user's YubiKey — if it prompts, ask the user to start it) and use `psql -h localhost -p 5432 -d cyber_intelligence`. Or deploy with `cd ansible && ansible-playbook -i hosts.ini 04_3_db_postgres.yml --limit vm-prox-dev`.
+- **Prod:** read-only. Only `SELECT` (e.g. `.db/db_inventory_check.sql`) through `.db/mac/pg_tunnel.sh prod` (Mac: localhost:5433; Linux: 5432). No DDL, no DML, no deploy.
 
 Checks:
 1. Run the playbook (or the rendered scripts) **twice** on dev; the second run must succeed with no changes or errors.

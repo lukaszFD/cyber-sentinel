@@ -7,8 +7,9 @@
 --           threat_indicators.dns_query_id -> dns_queries, never point at
 --           dropped rows; long-term history lives in Sentinel Engram)
 -- Tables: cyber_sentinel.dns_queries, cyber_sentinel.network_events,
---         cyber_sentinel.threat_indicators, cyber_sentinel_ai.api_call_log
---         (the last one is created by db_ai_pipeline.sql; listed in
+--         cyber_sentinel.threat_indicators, cyber_sentinel_ai.api_call_log,
+--         cyber_sentinel_sandbox.url_events, cyber_sentinel_sandbox.dns_queries
+--         (created later by db_ai_pipeline.sql / db_sandbox.sql; listed in
 --         cyber_sentinel.partitioned_tables())
 -- Automation: pg_cron (jobs evt_drop_old_partitions / evt_add_future_partitions)
 --
@@ -83,12 +84,14 @@ CREATE TABLE IF NOT EXISTS cyber_sentinel.threat_indicators_p_default PARTITION 
 
 -- Partitioned tables under maintenance, as 'schema.table'. Tables of
 -- other schemas are listed explicitly; a table that does not exist yet
--- (cyber_sentinel_ai.api_call_log before db_ai_pipeline.sql ran) is skipped.
+-- (cyber_sentinel_ai.api_call_log before db_ai_pipeline.sql ran, the sandbox
+-- tables before db_sandbox.sql ran) is skipped.
 CREATE OR REPLACE FUNCTION cyber_sentinel.partitioned_tables()
 RETURNS TEXT[]
 LANGUAGE sql IMMUTABLE AS $$
 SELECT ARRAY['cyber_sentinel.dns_queries', 'cyber_sentinel.network_events',
-             'cyber_sentinel.threat_indicators', 'cyber_sentinel_ai.api_call_log'];
+             'cyber_sentinel.threat_indicators', 'cyber_sentinel_ai.api_call_log',
+             'cyber_sentinel_sandbox.url_events', 'cyber_sentinel_sandbox.dns_queries'];
 $$;
 
 CREATE OR REPLACE FUNCTION cyber_sentinel.sp_add_future_partitions()

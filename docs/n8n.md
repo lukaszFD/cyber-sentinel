@@ -1,11 +1,12 @@
 # n8n Workflows
 
-Six workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), all imported by playbook 04.6:
+Seven workflows in [`config/n8n/workflows/`](https://github.com/lukaszFD/cyber-sentinel/tree/main/config/n8n/workflows), all imported by playbook 04.6:
 
 - **Automated Domain & IP Reputation Guard** — the main pipeline. Runs every minute and analyses one observable — a domain and the IP it resolved to — per run, as long as the VirusTotal budget allows it (see [VirusTotal Budget](#virustotal-budget)).
 - **Deep Recon** — runs hourly (at :20) after the verdict: domain age, certificate history and the web page of high-scored domains, then an AI re-assessment. See [Deep Recon](#deep-recon).
 - **Blocklist Candidates** and **Blocklist Publish** — daily (03:20 and 05:20): own Pi-hole blocklists for malicious, tracking and telemetry domains, published to [sentinel-blocklists](https://github.com/lukaszFD/sentinel-blocklists). See [Own Blocklists](#own-blocklists).
 - **API Usage Monitor** — hourly (at :05): VirusTotal's own usage counter and the daily usage e-mail. See [API Usage](#api-usage).
+- **Sandbox Scan** — every 2 minutes: abuse.ch and urlscan.io checks of what the browser sandbox saw. See [Sandbox Scan](#sandbox-scan).
 - **Failure Guard** — the Error Workflow of all the others: stops a workflow after `failure_guard_threshold` failed runs in a row and sends one e-mail. See [Failure Guard](#failure-guard).
 
 An earlier version is published in the n8n library: [Score DNS Threats with VirusTotal, Abuse.ch, HashiCorp Vault, and Gemini](https://n8n.io/workflows/14127-score-dns-threats-with-virustotal-abusech-hashicorp-vault-and-gemini/).
@@ -159,7 +160,7 @@ flowchart TD
 
 ## Own Blocklists
 
-Domains that get through Pi-hole but should not — malicious ones the main workflow blocked, telemetry and tracking — are published as plain domain lists to the public repository **lukaszFD/sentinel-blocklists**. Pi-hole pulls them as adlists. The database is the source of truth; the files are generated from it.
+Domains that get through Pi-hole but should not — malicious ones the main workflow blocked or the browser sandbox confirmed, telemetry and tracking — are published as plain domain lists to the public repository **lukaszFD/sentinel-blocklists**. Pi-hole pulls them as adlists. The database is the source of truth; the files are generated from it.
 
 ```mermaid
 flowchart TD
@@ -168,6 +169,7 @@ flowchart TD
     AI --> C[blocklist_entries 'candidate']
     C --> UI[AI Config UI: approve / reject]
     B[pihole_block_log] --> M[malicious, approved,<br>expires after blocklist_malicious_ttl_days]
+    SB[sandbox hits<br>v_blocklist_hits] --> M
     UI --> R[blocklist_render: 3 files]
     M --> R
     R --> D{equal to main?}
@@ -179,8 +181,35 @@ flowchart TD
 - **Candidates** — domains with a public IPv4 answer in the last `blocklist_lookback_days`, queried at least `blocklist_min_queries` times, whose name contains an active pattern (`blocklist_name_patterns`), not classified yet and not on any list. At most `blocklist_ai_daily_limit` per day, `blocklist_ai_batch_size` per request. No VirusTotal calls. Answers about domains that were not in the batch are dropped.
 - **Review** — telemetry and tracking at or above `blocklist_ai_min_confidence` wait for approval on the Blocklists page; an e-mail announces them. Rejected domains are kept and never proposed again.
 - **Malicious** — every Pi-hole auto-block is copied as approved; a new block extends the expiry. A rejected malicious domain stays rejected.
+- **Sandbox hits** — a host, URL or payload hash with a CTI hit in the [browser sandbox](sandbox/data.md#blocklist) puts its full host (FQDN, not the registered domain) on the malicious list as approved, source `sandbox`, expiry from the latest hit. Allow-listed hosts (Tranco top N, manual), IP literals and shared platforms themselves (`storage.googleapis.com`) never; a host already listed by another source is left as is. It reaches the pull request on the next daily run.
 - **Protection** — a domain covered by a manual allow-list entry is never published. Tranco entries and trusted infrastructure do not protect: telemetry usually sits on popular vendor domains.
 - **Publish** — the branch `n8n/daily-update` is rebuilt from `main` every run with the full generated files, so one pull request always shows the whole difference. A pull request left open after the lists became equal to `main` again is closed. The merge stays manual: a ruleset on `main` requires a pull request. `blocklist_publish_enabled = 0` (default) is a dry run — compared and logged only. Every run is logged in `blocklist_publish_log`; a new or updated pull request and errors are e-mailed.
+
+## Sandbox Scan
+
+Checks the observables of the [browser sandbox](sandbox/data.md) — hosts, IPs, URLs and payload hashes that `sandbox_log_processor` stored in `cyber_sentinel_sandbox`.
+
+```mermaid
+flowchart LR
+    C[claim_checks<br>sandbox_scan_batch_size] --> P[Plan requests]
+    P --> H[CTI request<br>one HTTP node, 300 ms apart]
+    H --> E[Evaluate results]
+    E --> L[Log API calls] --> S[record_checks]
+    S --> M{new hits?} -- yes --> X[E-mail]
+    S --> U{page without<br>earlier urlscan scan?} -- yes --> V[private scan] --> S2[record_checks: submitted]
+```
+
+| Observable | Lookups |
+|---|---|
+| host, IP | ThreatFox `search_ioc`, URLhaus `host` |
+| URL | URLhaus `url`; top-level pages also urlscan.io (search, else a private scan) |
+| SHA-256 | MalwareBazaar `get_info`, ThreatFox `search_hash` |
+
+- Allow-listed hosts and their URLs never reach the queue; downloaded payloads always do.
+- A private scan is fetched by a later run (after a minute); after 15 minutes without a result it is marked failed. At most `sandbox_urlscan_daily_limit` private scans per UTC day.
+- Every request is logged in `api_call_log` with caller `sandbox` (providers `abusech`, `urlscan`).
+- An observable is checked once; seen again after `sandbox_recheck_days`, it is checked again.
+- One e-mail per run for the observables that became a hit (`sandbox_alert_enabled`).
 
 ## Secrets
 
@@ -190,11 +219,11 @@ The workflows read secrets from HashiCorp Vault at run time:
 |---|---|
 | `cyber-sentinel/credentials/postgres/app_manager` | PostgreSQL |
 | `cyber-sentinel/api-keys/virustotal` | VirusTotal |
-| `cyber-sentinel/api-keys/abuse/api-key` | ThreatFox, URLhaus |
+| `cyber-sentinel/api-keys/abuse/api-key` | ThreatFox, URLhaus, MalwareBazaar (Sandbox Scan) |
 | `cyber-sentinel/api-keys/gemini/home-network-guardian` | Gemini |
 | `cyber-sentinel/credentials/gmail` | Email: SMTP login and alert recipient (`to`) |
 | `cyber-sentinel/credentials/pihole-api` | Pi-hole API |
-| `cyber-sentinel/api-keys/urlscanio/api-key` | urlscan.io search (main) and page scans (Deep Recon) |
+| `cyber-sentinel/api-keys/urlscanio/api-key` | urlscan.io search (main, Sandbox Scan), page scans (Deep Recon) and private scans (Sandbox Scan) |
 | `cyber-sentinel/api-keys/github/blocklists` | GitHub fine-grained token for sentinel-blocklists: Contents and Pull requests read/write (Blocklist Publish) |
 
 The n8n credentials needed by the AI and database nodes (Vault token, PostgreSQL, Gemini, SMTP) are created with fixed IDs by playbook 06.2, and the n8n API key of Failure Guard by playbook 06.3, so the imported workflows work without manual setup.

@@ -1,0 +1,718 @@
+-- ============================================
+-- Cyber Sentinel — Browser sandbox data — POSTGRES
+-- Version: 1.0
+-- ============================================
+-- Runs AFTER db_ai_pipeline.sql and db_blocklists.sql, as the `postgres`
+-- superuser, connected to `cyber_intelligence`. Rendered by Ansible
+-- (playbook 04_3_db_postgres.yml): {{ postgres_user }} is the n8n app role,
+-- {{ sandbox_db_user }} the ingest role of sandbox_log_processor.
+-- Fully idempotent — safe to re-run.
+--
+-- PURPOSE:
+--   Everything the browser sandbox saw, kept apart from the LAN pipeline
+--   (cyber_sentinel.dns_queries never sees sandbox traffic):
+--     url_events         one row per mitmproxy record (urls.jsonl)
+--     dns_queries        sandbox Pi-hole query log
+--     observables        unique hosts, IPs, URLs and payload hashes
+--     observable_checks  every CTI lookup of an observable (n8n "Sandbox Scan")
+--
+-- FLOW:
+--   urls.jsonl / pihole.log --sandbox_log_processor--> ingest_events() /
+--   ingest_dns() --> url_events, dns_queries, observables
+--   observables --claim_checks()--> n8n Sandbox Scan --> abuse.ch, urlscan.io
+--   --> record_checks() --> observable_checks, observables.verdict
+--   new hits --> e-mail (sandbox_alert_enabled)
+--
+-- NOISE FILTER (same idea as the main pipeline):
+--   * hosts and URLs on the domain allow-list (Tranco top N + manual,
+--     cyber_sentinel_ai.is_allowlisted()) get status 'skipped_trusted' and
+--     are never looked up; IPs of such hosts likewise;
+--   * URLs of static assets (images, fonts, CSS, media) are not stored as
+--     observables (their host still is);
+--   * hashes only for files that can be a payload (payload_type()), whatever
+--     the host.
+--
+-- RETENTION: url_events and dns_queries are partitioned by month and listed
+-- in cyber_sentinel.partitioned_tables(), so the existing pg_cron jobs keep
+-- 3 months. observables and observable_checks are small and kept.
+--
+-- Timestamps are TIMESTAMPTZ (mitmproxy writes UTC with an offset).
+-- ============================================
+
+-- ============================================
+-- SECTION 1: SCHEMA, ROLES, SETTINGS
+-- ============================================
+
+CREATE SCHEMA IF NOT EXISTS cyber_sentinel_sandbox AUTHORIZATION postgres;
+
+-- Ingest role: login of sandbox_log_processor. It reads attacker-controlled
+-- data (URLs, headers), so it gets EXECUTE on the ingest functions and
+-- nothing else (no table privileges at all).
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '{{ sandbox_db_user }}') THEN
+        CREATE ROLE "{{ sandbox_db_user }}" LOGIN PASSWORD '{{ vault_sandbox_db_password }}'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
+            CONNECTION LIMIT 3;
+    ELSE
+        ALTER ROLE "{{ sandbox_db_user }}" WITH LOGIN PASSWORD '{{ vault_sandbox_db_password }}'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS
+            CONNECTION LIMIT 3;
+    END IF;
+END
+$$;
+ALTER ROLE "{{ sandbox_db_user }}" SET statement_timeout = '30s';
+ALTER ROLE "{{ sandbox_db_user }}" SET search_path = pg_catalog;
+GRANT CONNECT ON DATABASE cyber_intelligence TO "{{ sandbox_db_user }}";
+GRANT USAGE ON SCHEMA cyber_sentinel_sandbox TO "{{ sandbox_db_user }}";
+
+GRANT USAGE ON SCHEMA cyber_sentinel_sandbox TO "{{ postgres_user }}";
+
+-- category 'pipeline' like every other key (the column allows only
+-- 'scoring' / 'pipeline'); the "Sandbox:" prefix groups them in the UI.
+-- ON CONFLICT DO NOTHING keeps values tuned in the UI.
+INSERT INTO cyber_sentinel_ai.ai_settings (key, value, category, description) VALUES
+    ('sandbox_scan_enabled',        1,  'pipeline', 'Sandbox: 1 = the Sandbox Scan workflow checks new observables with abuse.ch and urlscan.io, 0 = off'),
+    ('sandbox_scan_batch_size',     20, 'pipeline', 'Sandbox: observables checked per Sandbox Scan run (every 2 minutes)'),
+    ('sandbox_recheck_days',        7,  'pipeline', 'Sandbox: an observable seen again is re-checked when its last check is older than N days'),
+    ('sandbox_session_gap_minutes', 30, 'pipeline', 'Sandbox: a pause longer than N minutes starts a new browsing session (sessions view)'),
+    ('sandbox_urlscan_enabled',     1,  'pipeline', 'Sandbox: 1 = top-level pages are looked up on urlscan.io (search, then a private scan), 0 = off'),
+    ('sandbox_urlscan_daily_limit', 20, 'pipeline', 'Sandbox: at most N private urlscan.io scans per UTC day (free plan: 50 private scans per day)'),
+    ('sandbox_alert_enabled',       1,  'pipeline', 'Sandbox: 1 = e-mail when a provider reports a hit for a sandbox observable, 0 = no e-mail')
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================
+-- SECTION 2: EVENTS (partitioned)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.url_events (
+    id                BIGINT GENERATED BY DEFAULT AS IDENTITY,
+    ts                TIMESTAMPTZ NOT NULL,
+    event             VARCHAR(20) NOT NULL,           -- http, error, blocked, client_tls_failed
+    method            VARCHAR(16),
+    url               TEXT,
+    scheme            VARCHAR(10),
+    host              TEXT,
+    port              INT,
+    http_version      VARCHAR(16),
+    server_ip         VARCHAR(45),
+    status            INT,
+    reason            TEXT,
+    content_type      TEXT,
+    redirect_location TEXT,
+    referer           TEXT,
+    user_agent        TEXT,
+    size              BIGINT,
+    sha256            CHAR(64),
+    streamed          BOOLEAN,
+    is_navigation     BOOLEAN NOT NULL DEFAULT FALSE, -- top-level page (Sec-Fetch-Mode navigate + Dest document)
+    error             TEXT,
+    req_headers       JSONB,
+    resp_headers      JSONB,
+    upstream_tls      JSONB,
+    ingested_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (id, ts)
+) PARTITION BY RANGE (ts);
+CREATE INDEX IF NOT EXISTS idx_sandbox_url_events_ts   ON cyber_sentinel_sandbox.url_events (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_url_events_host ON cyber_sentinel_sandbox.url_events (host, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_url_events_sha  ON cyber_sentinel_sandbox.url_events (sha256) WHERE sha256 IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.dns_queries (
+    id          BIGINT GENERATED BY DEFAULT AS IDENTITY,
+    ts          TIMESTAMPTZ NOT NULL,
+    query_type  VARCHAR(10) NOT NULL,                 -- query, reply, cached, blocked
+    record_type VARCHAR(10),
+    domain      TEXT NOT NULL,
+    client      VARCHAR(45),
+    answer      VARCHAR(45),
+    PRIMARY KEY (id, ts)
+) PARTITION BY RANGE (ts);
+CREATE INDEX IF NOT EXISTS idx_sandbox_dns_queries_ts     ON cyber_sentinel_sandbox.dns_queries (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_sandbox_dns_queries_domain ON cyber_sentinel_sandbox.dns_queries (domain, ts DESC);
+
+-- Current month + 3 ahead, plus DEFAULT so no INSERT is ever rejected.
+-- Later months: sp_add_future_partitions() (pg_cron), see Section 7.
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.url_events_p_default
+    PARTITION OF cyber_sentinel_sandbox.url_events DEFAULT;
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.dns_queries_p_default
+    PARTITION OF cyber_sentinel_sandbox.dns_queries DEFAULT;
+DO $$
+DECLARE
+    v_month DATE;
+    v_table TEXT;
+    v_name  TEXT;
+BEGIN
+    FOREACH v_table IN ARRAY ARRAY['url_events', 'dns_queries'] LOOP
+        FOR i IN 0..3 LOOP
+            v_month := date_trunc('month', CURRENT_DATE) + make_interval(months => i);
+            v_name  := v_table || '_p' || to_char(v_month, 'YYYYMM');
+            IF to_regclass('cyber_sentinel_sandbox.' || v_name) IS NULL THEN
+                EXECUTE format('CREATE TABLE cyber_sentinel_sandbox.%I PARTITION OF cyber_sentinel_sandbox.%I '
+                               'FOR VALUES FROM (%L) TO (%L)', v_name, v_table, v_month, v_month + interval '1 month');
+            END IF;
+        END LOOP;
+    END LOOP;
+END
+$$;
+
+-- Read position of each log file, written in the same transaction as the
+-- rows, so a restart neither loses nor duplicates lines.
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.ingest_state (
+    source      VARCHAR(20) PRIMARY KEY CHECK (source IN ('urls', 'dns')),
+    inode       BIGINT NOT NULL,
+    file_offset BIGINT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================
+-- SECTION 3: OBSERVABLES AND CHECKS
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.observables (
+    id                   BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    kind                 VARCHAR(10) NOT NULL CHECK (kind IN ('host', 'ip', 'url', 'sha256')),
+    value                TEXT NOT NULL,
+    first_seen           TIMESTAMPTZ NOT NULL,
+    last_seen            TIMESTAMPTZ NOT NULL,
+    seen_count           INT NOT NULL DEFAULT 1,
+    is_navigation        BOOLEAN NOT NULL DEFAULT FALSE,  -- URL opened as a top-level page
+    content_type         TEXT,                            -- sha256: type of the file
+    example_url          TEXT,                            -- sha256 / ip: one URL it came from
+    status               VARCHAR(16) NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active', 'skipped_trusted')),
+    claimed_until        TIMESTAMPTZ,                     -- a Sandbox Scan run is working on it
+    checked_at           TIMESTAMPTZ,                     -- last completed abuse.ch check
+    verdict              VARCHAR(10) CHECK (verdict IN ('clean', 'hit', 'error')),
+    hit_providers        TEXT[],
+    alerted_at           TIMESTAMPTZ,
+    urlscan_state        VARCHAR(12) CHECK (urlscan_state IN ('found', 'submitted', 'done', 'failed')),
+    urlscan_uuid         UUID,
+    urlscan_submitted_at TIMESTAMPTZ,
+    UNIQUE (kind, value)
+);
+CREATE INDEX IF NOT EXISTS idx_sandbox_observables_due
+    ON cyber_sentinel_sandbox.observables (checked_at NULLS FIRST) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_sandbox_observables_verdict
+    ON cyber_sentinel_sandbox.observables (verdict, last_seen DESC);
+
+CREATE TABLE IF NOT EXISTS cyber_sentinel_sandbox.observable_checks (
+    id            BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    observable_id BIGINT NOT NULL REFERENCES cyber_sentinel_sandbox.observables (id) ON DELETE CASCADE,
+    provider      VARCHAR(20) NOT NULL CHECK (provider IN ('urlhaus', 'threatfox', 'malwarebazaar', 'urlscan')),
+    checked_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    outcome       VARCHAR(10) NOT NULL CHECK (outcome IN ('hit', 'no_hit', 'pending', 'error')),
+    http_status   INT,
+    summary       TEXT,
+    report_url    TEXT,
+    details       JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_sandbox_checks_observable
+    ON cyber_sentinel_sandbox.observable_checks (observable_id, checked_at DESC);
+
+-- ============================================
+-- SECTION 4: INGEST (sandbox_log_processor)
+-- ============================================
+
+-- Files that can carry a payload: by content type, or by the file name
+-- extension when the server sends a generic type.
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.payload_type(p_content_type TEXT, p_url TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql IMMUTABLE AS $$
+SELECT lower(split_part(COALESCE(p_content_type, ''), ';', 1)) ~
+           ('^(application/(x-msdownload|x-dosexec|x-executable|x-elf|x-mach-binary|x-sharedlib|octet-stream|'
+            'zip|x-zip-compressed|x-rar|x-rar-compressed|vnd\.rar|x-7z-compressed|gzip|x-gzip|x-tar|x-bzip2|x-xz|'
+            'java-archive|x-java-archive|vnd\.android\.package-archive|pdf|msword|rtf|vnd\.ms-|vnd\.openxmlformats|'
+            'x-sh|x-msi|x-ms-installer|x-apple-diskimage|x-iso9660-image|hta|x-shockwave-flash|'
+            'javascript|x-javascript|ecmascript|x-powershell|x-bat)|text/(javascript|ecmascript|x-sh|x-python|vbscript|x-powershell))')
+    OR (lower(COALESCE(p_content_type, '')) !~ '^text/html'
+        AND lower(split_part(split_part(COALESCE(p_url, ''), '?', 1), '#', 1)) ~
+           ('\.(exe|dll|scr|msi|msix|bat|cmd|ps1|vbs|vbe|js|jse|wsf|hta|lnk|jar|apk|dmg|pkg|iso|img|'
+            'zip|rar|7z|gz|tgz|xz|cab|docm|xlsm|pptm|doc|xls|rtf|pdf|sh|elf|bin)$'));
+$$;
+
+-- Literal IP addresses that are not public (a blocked attempt at the LAN):
+-- nothing to look up.
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.private_ip_literal(p_host TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+    v INET;
+BEGIN
+    IF p_host IS NULL OR p_host !~ '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' THEN
+        RETURN FALSE;
+    END IF;
+    v := p_host::inet;                       -- 999.0.0.1 raises: not an address
+    RETURN v << '0.0.0.0/8' OR v << '10.0.0.0/8' OR v << '100.64.0.0/10' OR v << '127.0.0.0/8'
+        OR v << '169.254.0.0/16' OR v << '172.16.0.0/12' OR v << '192.168.0.0/16' OR v >= '224.0.0.0';
+EXCEPTION WHEN invalid_text_representation THEN
+    RETURN FALSE;
+END
+$$;
+
+-- Static assets: not worth a URL lookup (the host is still checked).
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.static_asset(p_content_type TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql IMMUTABLE AS $$
+SELECT lower(split_part(COALESCE(p_content_type, ''), ';', 1)) ~ '^(image/|font/|text/css$|application/font|application/x-font|video/|audio/)'
+   AND lower(split_part(COALESCE(p_content_type, ''), ';', 1)) <> 'image/svg+xml';
+$$;
+
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.trusted_host(p_host TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+SELECT COALESCE(p_host <> ''
+   AND cyber_sentinel_ai.setting('allowlist_enabled') = 1
+   AND cyber_sentinel_ai.is_allowlisted(p_host), FALSE);
+$$;
+
+-- urls.jsonl records (JSON array, one object per line as written by the
+-- mitmproxy addon, plus is_navigation set by the processor) as rows.
+-- Every value is length-capped and type-checked: the data is attacker
+-- controlled.
+-- Dropped first: CREATE OR REPLACE cannot change a RETURNS TABLE.
+DROP FUNCTION IF EXISTS cyber_sentinel_sandbox.events_from_json(JSONB);
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.events_from_json(p_events JSONB)
+RETURNS TABLE (ts TIMESTAMPTZ, event TEXT, method TEXT, url TEXT, scheme TEXT, host TEXT, port INT,
+               http_version TEXT, server_ip TEXT, status INT, reason TEXT, content_type TEXT,
+               redirect_location TEXT, referer TEXT, user_agent TEXT, size BIGINT, sha256 TEXT,
+               streamed BOOLEAN, is_navigation BOOLEAN, error TEXT, req_headers JSONB,
+               resp_headers JSONB, upstream_tls JSONB)
+LANGUAGE sql IMMUTABLE AS $$
+SELECT COALESCE((e->>'ts')::timestamptz, now()),
+       LEFT(COALESCE(e->>'event', 'unknown'), 20),
+       LEFT(e->>'method', 16),
+       LEFT(e->>'url', 8192),
+       LEFT(e->>'scheme', 10),
+       NULLIF(LEFT(lower(rtrim(e->>'host', '.')), 255), ''),
+       CASE WHEN e->>'port' ~ '^[0-9]{1,5}$' THEN (e->>'port')::int END,
+       LEFT(e->>'http_version', 16),
+       CASE WHEN e->>'server_ip' ~ '^[0-9a-fA-F.:]{3,45}$' THEN e->>'server_ip' END,
+       CASE WHEN e->>'status' ~ '^[0-9]{1,3}$' THEN (e->>'status')::int END,
+       LEFT(e->>'reason', 200),
+       LEFT(e->>'content_type', 200),
+       LEFT(e->>'redirect_location', 8192),
+       LEFT(e->>'referer', 8192),
+       LEFT(e->>'user_agent', 500),
+       CASE WHEN e->>'size' ~ '^[0-9]{1,15}$' THEN (e->>'size')::bigint END,
+       CASE WHEN e->>'sha256' ~ '^[0-9a-f]{64}$' THEN e->>'sha256' END,
+       CASE WHEN jsonb_typeof(e->'streamed') = 'boolean' THEN (e->>'streamed')::boolean END,
+       COALESCE(jsonb_typeof(e->'is_navigation') = 'boolean' AND (e->>'is_navigation')::boolean, FALSE),
+       LEFT(e->>'error', 500),
+       CASE WHEN jsonb_typeof(e->'req_headers') = 'array' THEN e->'req_headers' END,
+       CASE WHEN jsonb_typeof(e->'resp_headers') = 'array' THEN e->'resp_headers' END,
+       CASE WHEN jsonb_typeof(e->'upstream_tls') = 'object' THEN e->'upstream_tls' END
+FROM jsonb_array_elements(COALESCE(p_events, '[]'::jsonb)) e
+WHERE jsonb_typeof(e) = 'object';
+$$;
+
+-- Stores a batch of urls.jsonl records, upserts the observables they
+-- contain and saves the read position, in one transaction.
+-- Returns the number of events stored.
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.ingest_events(
+    p_events JSONB, p_inode BIGINT, p_offset BIGINT)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    v_count INT;
+BEGIN
+    INSERT INTO cyber_sentinel_sandbox.url_events
+        (ts, event, method, url, scheme, host, port, http_version, server_ip, status, reason,
+         content_type, redirect_location, referer, user_agent, size, sha256, streamed,
+         is_navigation, error, req_headers, resp_headers, upstream_tls)
+    SELECT b.ts, b.event, b.method, b.url, b.scheme, b.host, b.port, b.http_version, b.server_ip,
+           b.status, b.reason, b.content_type, b.redirect_location, b.referer, b.user_agent, b.size,
+           b.sha256, b.streamed, b.is_navigation, b.error, b.req_headers, b.resp_headers, b.upstream_tls
+    FROM cyber_sentinel_sandbox.events_from_json(p_events) b;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+
+    -- Observables of the batch. Blocked attempts and errors still name a host.
+    WITH b AS (
+        SELECT * FROM cyber_sentinel_sandbox.events_from_json(p_events)
+    ), obs AS (
+        SELECT 'host'::text AS kind, b.host AS value, b.ts, b.is_navigation, NULL::text AS content_type,
+               NULL::text AS example_url, cyber_sentinel_sandbox.trusted_host(b.host) AS trusted
+        FROM b
+        WHERE b.host IS NOT NULL AND NOT cyber_sentinel_sandbox.private_ip_literal(b.host)
+        UNION ALL
+        SELECT 'ip', b.server_ip, b.ts, FALSE, NULL, b.url, cyber_sentinel_sandbox.trusted_host(b.host)
+        FROM b
+        WHERE b.event = 'http' AND b.server_ip IS NOT NULL
+        UNION ALL
+        -- Answered requests, plus top-level pages whose server failed
+        -- (event 'error': a dead phishing site is still a URL worth a
+        -- lookup; urlscan.io search may hold older scans of it).
+        SELECT 'url', b.url, b.ts, b.is_navigation, b.content_type, NULL, cyber_sentinel_sandbox.trusted_host(b.host)
+        FROM b
+        WHERE b.url ~* '^https?://' AND b.method IN ('GET', 'POST', 'HEAD')
+          AND ((b.event = 'http' AND (b.is_navigation OR NOT cyber_sentinel_sandbox.static_asset(b.content_type)))
+               OR (b.event = 'error' AND b.is_navigation))
+        UNION ALL
+        -- Hashes: payload types only, whatever the host (allow-listed hosts
+        -- serve malware too, e.g. file sharing).
+        SELECT 'sha256', b.sha256, b.ts, FALSE, b.content_type, b.url, FALSE
+        FROM b
+        WHERE b.sha256 IS NOT NULL AND b.status BETWEEN 200 AND 299
+          AND cyber_sentinel_sandbox.payload_type(b.content_type, b.url)
+    ), agg AS (
+        SELECT obs.kind, obs.value, min(obs.ts) AS first_seen, max(obs.ts) AS last_seen, count(*)::int AS n,
+               bool_or(obs.is_navigation) AS nav, max(obs.content_type) AS content_type,
+               max(obs.example_url) AS example_url, bool_and(obs.trusted) AS trusted
+        FROM obs
+        GROUP BY obs.kind, obs.value
+    )
+    INSERT INTO cyber_sentinel_sandbox.observables
+        (kind, value, first_seen, last_seen, seen_count, is_navigation, content_type, example_url, status)
+    SELECT agg.kind, agg.value, agg.first_seen, agg.last_seen, agg.n, agg.nav, agg.content_type,
+           LEFT(agg.example_url, 2000), CASE WHEN agg.trusted THEN 'skipped_trusted' ELSE 'active' END
+    FROM agg
+    ON CONFLICT (kind, value) DO UPDATE SET
+        last_seen     = GREATEST(cyber_sentinel_sandbox.observables.last_seen, EXCLUDED.last_seen),
+        seen_count    = cyber_sentinel_sandbox.observables.seen_count + EXCLUDED.seen_count,
+        is_navigation = cyber_sentinel_sandbox.observables.is_navigation OR EXCLUDED.is_navigation,
+        content_type  = COALESCE(cyber_sentinel_sandbox.observables.content_type, EXCLUDED.content_type),
+        example_url   = COALESCE(cyber_sentinel_sandbox.observables.example_url, EXCLUDED.example_url),
+        status        = EXCLUDED.status;   -- follows allow-list changes
+
+    IF p_inode IS NOT NULL THEN
+        INSERT INTO cyber_sentinel_sandbox.ingest_state (source, inode, file_offset, updated_at)
+        VALUES ('urls', p_inode, p_offset, now())
+        ON CONFLICT (source) DO UPDATE SET inode = EXCLUDED.inode, file_offset = EXCLUDED.file_offset,
+                                           updated_at = EXCLUDED.updated_at;
+    END IF;
+    RETURN v_count;
+END
+$$;
+REVOKE ALL ON FUNCTION cyber_sentinel_sandbox.ingest_events(JSONB, BIGINT, BIGINT) FROM PUBLIC;
+
+-- Stores a batch of sandbox Pi-hole rows: [{ts, query_type, record_type,
+-- domain, client, answer}, ...] and saves the read position.
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.ingest_dns(
+    p_rows JSONB, p_inode BIGINT, p_offset BIGINT)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    v_count INT;
+BEGIN
+    INSERT INTO cyber_sentinel_sandbox.dns_queries (ts, query_type, record_type, domain, client, answer)
+    SELECT COALESCE((r->>'ts')::timestamptz, now()),
+           LEFT(COALESCE(r->>'query_type', 'query'), 10),
+           LEFT(r->>'record_type', 10),
+           LEFT(lower(r->>'domain'), 255),
+           LEFT(r->>'client', 45),
+           LEFT(r->>'answer', 45)
+    FROM jsonb_array_elements(COALESCE(p_rows, '[]'::jsonb)) r
+    WHERE jsonb_typeof(r) = 'object' AND COALESCE(r->>'domain', '') <> '';
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+
+    IF p_inode IS NOT NULL THEN
+        INSERT INTO cyber_sentinel_sandbox.ingest_state (source, inode, file_offset, updated_at)
+        VALUES ('dns', p_inode, p_offset, now())
+        ON CONFLICT (source) DO UPDATE SET inode = EXCLUDED.inode, file_offset = EXCLUDED.file_offset,
+                                           updated_at = EXCLUDED.updated_at;
+    END IF;
+    RETURN v_count;
+END
+$$;
+REVOKE ALL ON FUNCTION cyber_sentinel_sandbox.ingest_dns(JSONB, BIGINT, BIGINT) FROM PUBLIC;
+
+-- Saves only the read position (a batch where every line was unusable).
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.ingest_skip(p_source TEXT, p_inode BIGINT, p_offset BIGINT)
+RETURNS VOID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+INSERT INTO cyber_sentinel_sandbox.ingest_state (source, inode, file_offset, updated_at)
+VALUES (p_source, p_inode, p_offset, now())
+ON CONFLICT (source) DO UPDATE SET inode = EXCLUDED.inode, file_offset = EXCLUDED.file_offset,
+                                   updated_at = EXCLUDED.updated_at;
+$$;
+REVOKE ALL ON FUNCTION cyber_sentinel_sandbox.ingest_skip(TEXT, BIGINT, BIGINT) FROM PUBLIC;
+
+-- Read position to resume from (no row = start of the current file).
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.ingest_position(p_source TEXT)
+RETURNS TABLE (inode BIGINT, file_offset BIGINT)
+LANGUAGE sql STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+SELECT s.inode, s.file_offset FROM cyber_sentinel_sandbox.ingest_state s WHERE s.source = p_source;
+$$;
+REVOKE ALL ON FUNCTION cyber_sentinel_sandbox.ingest_position(TEXT) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION cyber_sentinel_sandbox.ingest_events(JSONB, BIGINT, BIGINT) TO "{{ sandbox_db_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_sandbox.ingest_dns(JSONB, BIGINT, BIGINT)    TO "{{ sandbox_db_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_sandbox.ingest_skip(TEXT, BIGINT, BIGINT)    TO "{{ sandbox_db_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_sandbox.ingest_position(TEXT)                 TO "{{ sandbox_db_user }}";
+
+-- ============================================
+-- SECTION 5: CHECK QUEUE (n8n "Sandbox Scan")
+-- ============================================
+
+-- Due: never checked, or seen again after sandbox_recheck_days; or a
+-- private urlscan.io scan submitted at least a minute ago whose result is
+-- not fetched yet.
+CREATE OR REPLACE VIEW cyber_sentinel_sandbox.v_pending_checks AS
+WITH cfg AS (
+    SELECT make_interval(days => cyber_sentinel_ai.setting('sandbox_recheck_days')::int) AS recheck
+), q AS (
+    SELECT o.id, o.kind, o.value, o.is_navigation, o.content_type, o.example_url,
+           o.checked_at, o.urlscan_state, o.urlscan_uuid, o.urlscan_submitted_at,
+           (o.checked_at IS NULL OR (o.checked_at < now() - cfg.recheck AND o.last_seen > o.checked_at)) AS abuse_due,
+           COALESCE(o.urlscan_state = 'submitted' AND o.urlscan_submitted_at < now() - interval '1 minute', FALSE)
+               AS urlscan_result_due
+    FROM cyber_sentinel_sandbox.observables o, cfg
+    WHERE o.status = 'active'
+      AND (o.claimed_until IS NULL OR o.claimed_until < now())
+)
+SELECT * FROM q WHERE q.abuse_due OR q.urlscan_result_due;
+
+-- Private urlscan.io scans submitted today (UTC) and the daily cap.
+CREATE OR REPLACE VIEW cyber_sentinel_sandbox.v_urlscan_budget AS
+SELECT cyber_sentinel_ai.setting('sandbox_urlscan_daily_limit')::int AS daily_limit,
+       (SELECT count(*)::int FROM cyber_sentinel_sandbox.observables
+        WHERE urlscan_submitted_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS used_today;
+
+-- Hands out a batch for one run and marks it for 15 minutes, so two
+-- overlapping runs never take the same observable. Pending urlscan results
+-- and top-level pages first. Returns nothing when scanning is off.
+-- urlscan_scans_left: private scans this run may still submit.
+-- Dropped first: CREATE OR REPLACE cannot change a RETURNS TABLE.
+DROP FUNCTION IF EXISTS cyber_sentinel_sandbox.claim_checks();
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.claim_checks()
+RETURNS TABLE (id BIGINT, kind TEXT, value TEXT, is_navigation BOOLEAN, content_type TEXT,
+               example_url TEXT, abuse_due BOOLEAN, urlscan_result_due BOOLEAN,
+               urlscan_uuid UUID, urlscan_submitted_at TIMESTAMPTZ, urlscan_wanted BOOLEAN,
+               urlscan_scans_left INT)
+LANGUAGE plpgsql AS $$
+#variable_conflict use_column
+DECLARE
+    v_limit INT := cyber_sentinel_ai.setting('sandbox_scan_batch_size')::int;
+    v_scan  BOOLEAN := cyber_sentinel_ai.setting('sandbox_urlscan_enabled') = 1;
+    v_left  INT;
+BEGIN
+    IF cyber_sentinel_ai.setting('sandbox_scan_enabled') <> 1 THEN
+        RETURN;
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('cyber_sentinel_sandbox.claim_checks'));
+    SELECT GREATEST(b.daily_limit - b.used_today, 0) INTO v_left FROM cyber_sentinel_sandbox.v_urlscan_budget b;
+    IF NOT v_scan THEN
+        v_left := 0;
+    END IF;
+
+    RETURN QUERY
+    WITH picked AS (
+        SELECT p.id, p.kind, p.value, p.is_navigation, p.content_type, p.example_url, p.checked_at,
+               p.abuse_due, p.urlscan_result_due, p.urlscan_uuid, p.urlscan_submitted_at, p.urlscan_state
+        FROM cyber_sentinel_sandbox.v_pending_checks p
+        ORDER BY p.urlscan_result_due DESC, p.is_navigation DESC, p.checked_at NULLS FIRST, p.id
+        LIMIT v_limit
+    ), marked AS (
+        UPDATE cyber_sentinel_sandbox.observables o
+        SET claimed_until = now() + interval '15 minutes'
+        FROM picked
+        WHERE o.id = picked.id
+        RETURNING o.id
+    )
+    SELECT p.id, p.kind::text, p.value, p.is_navigation, p.content_type, p.example_url,
+           p.abuse_due, p.urlscan_result_due, p.urlscan_uuid, p.urlscan_submitted_at,
+           (p.kind = 'url' AND p.is_navigation AND p.urlscan_state IS NULL AND v_scan),
+           v_left
+    FROM picked p
+    JOIN marked m ON m.id = p.id
+    ORDER BY p.urlscan_result_due DESC, p.is_navigation DESC, p.id;
+END
+$$;
+
+-- Stores the results of one run. p_results = [{observable_id,
+--   checks: [{provider, outcome, http_status, summary, report_url, details}],
+--   abuse_checked: true|false,              -- abuse.ch lookups were made
+--   urlscan: {state, uuid} | null}]          -- new urlscan state
+-- Verdict: hit when any provider ever reported one, error when every
+-- abuse.ch lookup of this run failed, else clean. Returns the observables
+-- that are a hit and were not e-mailed yet; they are marked alerted only
+-- when sandbox_alert_enabled = 1 (otherwise nothing is returned).
+-- Dropped first: CREATE OR REPLACE cannot change a RETURNS TABLE.
+DROP FUNCTION IF EXISTS cyber_sentinel_sandbox.record_checks(JSONB);
+CREATE OR REPLACE FUNCTION cyber_sentinel_sandbox.record_checks(p_results JSONB)
+RETURNS TABLE (id BIGINT, kind TEXT, value TEXT, hit_providers TEXT[], summaries TEXT[],
+               report_urls TEXT[], first_seen TIMESTAMPTZ, example_url TEXT)
+LANGUAGE plpgsql AS $$
+#variable_conflict use_column
+DECLARE
+    r       JSONB;
+    v_id    BIGINT;
+    v_hits  TEXT[];
+    v_abuse BOOLEAN;
+    v_ok    INT;
+    v_err   INT;
+    v_alert BOOLEAN := cyber_sentinel_ai.setting('sandbox_alert_enabled') = 1;
+    v_ids   BIGINT[] := '{}';
+BEGIN
+    FOR r IN SELECT x FROM jsonb_array_elements(COALESCE(p_results, '[]'::jsonb)) x LOOP
+        v_id := (r->>'observable_id')::bigint;
+        CONTINUE WHEN v_id IS NULL;
+        v_ids := v_ids || v_id;
+        v_abuse := COALESCE((r->>'abuse_checked')::boolean, FALSE);
+
+        INSERT INTO cyber_sentinel_sandbox.observable_checks
+            (observable_id, provider, outcome, http_status, summary, report_url, details)
+        SELECT v_id, c->>'provider', c->>'outcome',
+               CASE WHEN c->>'http_status' ~ '^[0-9]{1,3}$' THEN (c->>'http_status')::int END,
+               LEFT(c->>'summary', 1000), LEFT(c->>'report_url', 500), c->'details'
+        FROM jsonb_array_elements(COALESCE(r->'checks', '[]'::jsonb)) c
+        WHERE c->>'provider' IN ('urlhaus', 'threatfox', 'malwarebazaar', 'urlscan')
+          AND c->>'outcome' IN ('hit', 'no_hit', 'pending', 'error');
+
+        SELECT count(*) FILTER (WHERE c->>'outcome' IN ('hit', 'no_hit')),
+               count(*) FILTER (WHERE c->>'outcome' = 'error')
+        INTO v_ok, v_err
+        FROM jsonb_array_elements(COALESCE(r->'checks', '[]'::jsonb)) c
+        WHERE c->>'provider' <> 'urlscan';
+
+        -- Every provider that ever reported a hit for this observable.
+        SELECT array_agg(DISTINCT ch.provider::text ORDER BY ch.provider::text) INTO v_hits
+        FROM cyber_sentinel_sandbox.observable_checks ch
+        WHERE ch.observable_id = v_id AND ch.outcome = 'hit';
+
+        UPDATE cyber_sentinel_sandbox.observables o SET
+            claimed_until        = NULL,
+            checked_at           = CASE WHEN v_abuse THEN now() ELSE o.checked_at END,
+            hit_providers        = v_hits,
+            verdict              = CASE WHEN v_hits IS NOT NULL THEN 'hit'
+                                        WHEN v_abuse AND v_ok = 0 AND v_err > 0 THEN 'error'
+                                        WHEN v_abuse THEN 'clean'
+                                        ELSE o.verdict END,
+            urlscan_state        = COALESCE(r->'urlscan'->>'state', o.urlscan_state),
+            urlscan_uuid         = COALESCE(CASE WHEN r->'urlscan'->>'uuid' ~* '^[0-9a-f-]{36}$'
+                                                 THEN (r->'urlscan'->>'uuid')::uuid END, o.urlscan_uuid),
+            urlscan_submitted_at = CASE WHEN r->'urlscan'->>'state' = 'submitted'
+                                         AND o.urlscan_state IS DISTINCT FROM 'submitted'
+                                        THEN now() ELSE o.urlscan_submitted_at END
+        WHERE o.id = v_id;
+    END LOOP;
+
+    IF NOT v_alert THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH marked AS (
+        UPDATE cyber_sentinel_sandbox.observables o SET alerted_at = now()
+        WHERE o.verdict = 'hit' AND o.alerted_at IS NULL AND o.id = ANY (v_ids)
+        RETURNING o.id
+    )
+    SELECT o.id, o.kind::text, o.value, o.hit_providers,
+           (SELECT array_agg(ch.provider || ': ' || COALESCE(ch.summary, '') ORDER BY ch.checked_at DESC)
+              FROM cyber_sentinel_sandbox.observable_checks ch WHERE ch.observable_id = o.id AND ch.outcome = 'hit'),
+           (SELECT array_agg(DISTINCT ch.report_url) FILTER (WHERE ch.report_url IS NOT NULL)
+              FROM cyber_sentinel_sandbox.observable_checks ch WHERE ch.observable_id = o.id AND ch.outcome = 'hit'),
+           o.first_seen, o.example_url
+    FROM cyber_sentinel_sandbox.observables o
+    JOIN marked m ON m.id = o.id;
+END
+$$;
+
+-- ============================================
+-- SECTION 6: VIEWS FOR THE AI CONFIG UI
+-- ============================================
+
+-- Browsing sessions: a pause longer than sandbox_session_gap_minutes
+-- starts a new one. session_start identifies the session.
+CREATE OR REPLACE VIEW cyber_sentinel_sandbox.v_event_sessions AS
+WITH g AS (
+    SELECT e.id, e.ts,
+           CASE WHEN lag(e.ts) OVER w IS NULL
+                  OR e.ts - lag(e.ts) OVER w
+                     > make_interval(mins => cyber_sentinel_ai.setting('sandbox_session_gap_minutes')::int)
+                THEN 1 ELSE 0 END AS is_start
+    FROM cyber_sentinel_sandbox.url_events e
+    WINDOW w AS (ORDER BY e.ts, e.id)
+), n AS (
+    SELECT g.id, g.ts, sum(g.is_start) OVER (ORDER BY g.ts, g.id) AS session_no FROM g
+)
+SELECT n.id, n.ts, n.session_no, min(n.ts) OVER (PARTITION BY n.session_no) AS session_start
+FROM n;
+
+CREATE OR REPLACE VIEW cyber_sentinel_sandbox.v_sessions AS
+WITH hits AS (
+    SELECT o.kind, o.value FROM cyber_sentinel_sandbox.observables o WHERE o.verdict = 'hit'
+)
+SELECT s.session_start,
+       max(e.ts)                                             AS session_end,
+       count(*)                                              AS events,
+       count(*) FILTER (WHERE e.is_navigation)               AS navigations,
+       count(*) FILTER (WHERE e.event = 'blocked')           AS blocked,
+       count(*) FILTER (WHERE e.event IN ('error', 'client_tls_failed')) AS errors,
+       count(DISTINCT e.host)                                AS hosts,
+       count(DISTINCT e.sha256)                              AS hashes,
+       (array_agg(e.url ORDER BY e.ts) FILTER (WHERE e.is_navigation))[1] AS first_page,
+       count(*) FILTER (WHERE EXISTS (
+           SELECT 1 FROM hits h
+           WHERE (h.kind = 'host' AND h.value = e.host) OR (h.kind = 'url' AND h.value = e.url)
+              OR (h.kind = 'sha256' AND h.value = e.sha256) OR (h.kind = 'ip' AND h.value = e.server_ip))) AS hit_events
+FROM cyber_sentinel_sandbox.v_event_sessions s
+JOIN cyber_sentinel_sandbox.url_events e ON e.id = s.id AND e.ts = s.ts
+GROUP BY s.session_start;
+
+-- Hosts confirmed malicious in the sandbox, for the own malicious
+-- blocklist: read by cyber_sentinel_ai.blocklist_sync_malicious()
+-- (db_blocklists.sql, Blocklist Publish, daily). A hit on a URL or a
+-- payload hash blocks the full host it came from (FQDN, not the registered
+-- domain). Never: allow-listed hosts (Tranco top N, manual), IP literals,
+-- or a shared platform itself (domain_allowlist_exclusions, e.g.
+-- storage.googleapis.com: URLhaus lists it for files in user buckets).
+-- A user's own name under such a platform (x.sites.google.com) is blocked.
+-- hit_at = latest provider hit; the list expiry runs from it.
+CREATE OR REPLACE VIEW cyber_sentinel_sandbox.v_blocklist_hits AS
+WITH h AS (
+    SELECT lower(rtrim(CASE o.kind
+               WHEN 'host' THEN o.value
+               ELSE substring(CASE o.kind WHEN 'url' THEN o.value ELSE o.example_url END
+                              FROM '^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^/?#@]*@)?([^/:?#]+)')
+           END, '.')) AS fqdn,
+           COALESCE((SELECT max(c.checked_at) FROM cyber_sentinel_sandbox.observable_checks c
+                     WHERE c.observable_id = o.id AND c.outcome = 'hit'), o.checked_at, o.last_seen) AS hit_at,
+           o.kind, o.hit_providers
+    FROM cyber_sentinel_sandbox.observables o
+    WHERE o.verdict = 'hit' AND o.kind IN ('host', 'url', 'sha256')
+)
+SELECT h.fqdn,
+       max(h.hit_at) AS hit_at,
+       LEFT('sandbox hit: ' || string_agg(DISTINCT h.kind || ' ' || COALESCE(array_to_string(h.hit_providers, '/'), '?'), ', '), 200) AS note
+FROM h
+WHERE h.fqdn IS NOT NULL AND h.fqdn <> ''
+  AND h.fqdn !~ '^[0-9.]+$' AND h.fqdn !~ ':'
+  AND NOT cyber_sentinel_sandbox.private_ip_literal(h.fqdn)
+  AND NOT cyber_sentinel_sandbox.trusted_host(h.fqdn)
+  AND NOT EXISTS (SELECT 1 FROM cyber_sentinel_ai.domain_allowlist_exclusions e WHERE e.domain = h.fqdn)
+GROUP BY h.fqdn;
+
+-- Latest result per provider and observable.
+CREATE OR REPLACE VIEW cyber_sentinel_sandbox.v_latest_checks AS
+SELECT DISTINCT ON (c.observable_id, c.provider)
+       c.observable_id, c.provider, c.checked_at, c.outcome, c.http_status, c.summary, c.report_url
+FROM cyber_sentinel_sandbox.observable_checks c
+ORDER BY c.observable_id, c.provider, c.checked_at DESC;
+
+-- ============================================
+-- SECTION 7: RETENTION, GRANTS
+-- ============================================
+-- url_events and dns_queries are in cyber_sentinel.partitioned_tables()
+-- (db_partitioning_retention.sql): sp_add_future_partitions() adds months,
+-- sp_drop_old_partitions() keeps 3 months. The AI config UI role gets
+-- read access in db_ai_config_editor.sql (playbook 04.5).
+
+GRANT SELECT ON ALL TABLES IN SCHEMA cyber_sentinel_sandbox TO "{{ postgres_user }}";
+GRANT UPDATE (claimed_until, checked_at, verdict, hit_providers, alerted_at,
+              urlscan_state, urlscan_uuid, urlscan_submitted_at)
+    ON cyber_sentinel_sandbox.observables TO "{{ postgres_user }}";
+GRANT INSERT ON cyber_sentinel_sandbox.observable_checks TO "{{ postgres_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_sandbox.claim_checks()       TO "{{ postgres_user }}";
+GRANT EXECUTE ON FUNCTION cyber_sentinel_sandbox.record_checks(JSONB) TO "{{ postgres_user }}";

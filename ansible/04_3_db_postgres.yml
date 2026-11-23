@@ -21,10 +21,15 @@
 #               4. db_blocklists.sql            — own blocklists for Pi-hole
 #                                                 (sentinel-blocklists): entries,
 #                                                 AI classifications, publish log
+#               5. db_sandbox.sql               — browser sandbox schema
+#                                                 `cyber_sentinel_sandbox`: events,
+#                                                 DNS, observables, CTI checks,
+#                                                 ingest role ({{ sandbox_db_user }})
 #
 # Depends on: - Playbook 04.2 (postgres_db container running, built from
 #               Dockerfile.postgres with pg_cron preloaded)
 #             - postgres_user / vault_postgres_password (group_vars)
+#             - sandbox_db_user (group_vars) / vault_sandbox_db_password
 #             - Source SQL under {{ main_repo_source_dir }}/config/postgres/
 #
 # Outputs:    - cyber_intelligence database fully provisioned
@@ -50,6 +55,7 @@
       - { name: "partitioning", src: "db_partitioning_retention.sql" }
       - { name: "ai_pipeline",  src: "db_ai_pipeline.sql" }
       - { name: "blocklists",   src: "db_blocklists.sql" }
+      - { name: "sandbox",      src: "db_sandbox.sql" }
 
   tasks:
     # ============================================================
@@ -120,6 +126,18 @@
               docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_blocklists_rendered.sql >> {{ postgres_init_log }} 2>&1
           register: pg_blocklists_result
           until: (pg_blocklists_result.rc | default(-1)) == 0
+          retries: 10
+          delay: 10
+
+        # Needs ai_settings / is_allowlisted() from db_ai_pipeline.sql;
+        # partitioned_tables() already lists the sandbox tables.
+        - name: "[04.3.1.7] Execute browser sandbox script (db_sandbox.sql)"
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- Sandbox Execution Date: $(date) ---" >> {{ postgres_init_log }}
+              docker exec -i postgres_db psql -U postgres -d cyber_intelligence -v ON_ERROR_STOP=1 < {{ remote_deploy_base }}/init_postgres_sandbox_rendered.sql >> {{ postgres_init_log }} 2>&1
+          register: pg_sandbox_result
+          until: (pg_sandbox_result.rc | default(-1)) == 0
           retries: 10
           delay: 10
 

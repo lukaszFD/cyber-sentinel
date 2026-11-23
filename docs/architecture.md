@@ -55,3 +55,4 @@ The UI connects with its own least-privilege role; every change is written to `c
 | Access | Nginx with TLS in front of every web UI, UFW, Fail2Ban |
 | Monitoring | Prometheus, Node Exporter — host metrics for the planned health agent |
 | Operations | Portainer; images pinned by digest in `group_vars/all/images.yml` |
+| Browser sandbox | Isolated ungoogled-chromium behind mitmproxy and its own Pi-hole without adlists; every URL and DNS query logged as CTI material, kept apart from `dns_queries` ([Browser Sandbox](sandbox/index.md)) |

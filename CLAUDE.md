@@ -13,7 +13,7 @@ There is no application build. The repo is infrastructure-as-code (Ansible + Doc
 - `ansible/` — numbered playbooks, run in order by `00_main.yml`; each one can be re-run on its own.
   - `hosts.ini` — inventory: `rpi5` (prod, `.prod`), `dev_vm` (Proxmox test VM, `.local`), `local_vm` (port 2222).
   - `group_vars/all/images.yml` — pinned container images (`cs_images.*`).
-  - `group_vars/all/vault.yml` — ansible-vault encrypted secrets (gitignored, never commit or print).
+  - `host_vars/<host>/vault.yml` — the host's only ansible-vault file (gitignored, never commit or print): all secrets plus that host's HashiCorp Vault root token, unseal keys and n8n token + accessor (dev and prod have separate Vaults). A new key goes into every host's file. Templates with every key: `host_vars/<host>/vault.yml.example` (Proxmox keys only for `dev_vm`).
   - `templates/` — Jinja2 templates (`env.j2`, Nginx config, Tranco allowlist sync).
 - `docker/docker-compose-cyber-sentinel.yml` — the whole stack; templated by Ansible (`{{ cs_images.* }}`), not run directly.
 - `config/` — per-service config copied to the host:
@@ -23,7 +23,7 @@ There is no application build. The repo is infrastructure-as-code (Ansible + Doc
   - `n8n/workflows/` — exported n8n workflows (JSON).
   - `postgres/` — schema SQL (`db_deployment.sql`, `db_ai_pipeline.sql`, partitioning/retention, AI config editor).
   - `pihole/`, `unbound/`, `prometheus/`, `grafana/provisioning/`.
-- `.db/` — helper scripts: SSH tunnel to Postgres (`pg_tunnel.sh dev|prod`) and ad-hoc SQL.
+- `.db/` — SSH tunnel to Postgres, split by OS: `.db/mac/` and `.db/linux/` (`pg_tunnel.sh dev|prod`, `db_dev.sh`, `db_prod.sh`; Mac also has `pgadmin-servers.json`), plus shared ad-hoc SQL. See `.db/README.md`.
 - `docs/` + `mkdocs.yml` — MkDocs Material site published to https://lukaszfd.github.io/cyber-sentinel/.
 - `.github/workflows/` — CodeQL, Trivy, OpenSSF Scorecard (`.trivyignore` holds accepted findings).
 
@@ -37,9 +37,9 @@ ansible-playbook -i hosts.ini 00_main.yml --limit vm-prox-dev
 
 - Always pass `--limit` (`vm-prox-dev`, `rpi5-prod`, `local-vm`) — every playbook targets `all_servers`, so a run without it hits prod too.
 - Claude may deploy to `vm-prox-dev` only. Never run playbooks against `rpi5-prod`; give the user the commands.
-- SSH (Ansible and `.db/pg_tunnel.sh`) uses the user's YubiKey; if a run needs a touch/PIN or fails on auth, hand the command to the user.
+- SSH (Ansible and `.db/*/pg_tunnel.sh`) uses the user's YubiKey; if a run needs a touch/PIN or fails on auth, hand the command to the user.
 - Database: full access on dev, read-only `SELECT` on prod.
-- Secrets flow: `vault.yml` (ansible-vault) → HashiCorp Vault (playbook `06_1`) → read by n8n at runtime.
+- Secrets flow: `host_vars/<host>/vault.yml` (ansible-vault) → HashiCorp Vault (playbook `06_1`) → read by n8n at runtime.
 
 ## Conventions
 

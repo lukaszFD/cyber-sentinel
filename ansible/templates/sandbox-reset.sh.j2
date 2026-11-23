@@ -1,0 +1,9 @@
+#!/bin/sh
+# Cyber Sentinel — wipe the browser sandbox (rendered by playbook 04.7).
+# Recreates sandbox-browser: the tmpfs profile, tabs, cookies and cache are
+# gone. mitmproxy, the sandbox Pi-hole and their logs are kept.
+# Run by hand after a session, and by cron every night at 04:00.
+set -eu
+cd {{ remote_deploy_base }}
+exec docker compose -f docker-compose-cyber-sentinel.yml -p cyber-sentinel \
+  up -d --force-recreate --no-deps sandbox-browser

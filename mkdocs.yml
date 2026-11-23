@@ -48,6 +48,10 @@ nav:
   - Architecture: architecture.md
   - Deployment: deployment.md
   - "Docker Compose": docker-compose.md
+  - "Browser Sandbox":
+      - Overview: sandbox/index.md
+      - "Using & Testing": sandbox/usage.md
+      - "Data & CTI": sandbox/data.md
   - "n8n Workflows": n8n.md
 #  - "Grafana Dashboards": grafana.md
   - Database: database.md

@@ -481,6 +481,61 @@ SETTING_HELP = {
         "raise": "More tolerance for short outages — but more failed runs before you hear about it.",
         "lower": "You hear about a problem sooner; a short outage may already stop the workflow.",
     },
+    "sandbox_scan_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 10,
+        "label": "Check what the sandbox saw",
+        "what": "1 = every 2 minutes the Sandbox Scan workflow looks up new hosts, IPs, URLs and downloaded files "
+                "of the browser sandbox at abuse.ch (and top-level pages at urlscan.io). 0 = nothing is looked up; "
+                "the traffic is still recorded.",
+        "raise": "1 — lookups on.",
+        "lower": "0 — lookups off, for example while testing many sites.",
+    },
+    "sandbox_scan_batch_size": {
+        "min": 1, "max": 200, "integer": True, "stage": 10,
+        "label": "Sandbox items checked per run",
+        "what": "How many hosts, URLs and files one run (every 2 minutes) checks. Each one is one or two abuse.ch "
+                "requests.",
+        "raise": "A busy browsing session is checked faster; more requests per run.",
+        "lower": "Gentler on abuse.ch; a long session takes longer to finish.",
+    },
+    "sandbox_recheck_days": {
+        "min": 1, "max": 365, "integer": True, "stage": 10,
+        "label": "Check a sandbox item again after (days)",
+        "what": "An item seen again in the sandbox is looked up again when its last check is older than this. "
+                "Items not seen again are never re-checked.",
+        "raise": "Fewer requests; a site that turned malicious later is noticed later.",
+        "lower": "Fresher results for sites you open often.",
+    },
+    "sandbox_session_gap_minutes": {
+        "min": 1, "max": 1440, "integer": True, "stage": 10,
+        "label": "New sandbox session after a pause of (minutes)",
+        "what": "The Sandbox page groups traffic into sessions: a pause longer than this starts a new one.",
+        "raise": "Fewer, longer sessions.",
+        "lower": "More, shorter sessions.",
+    },
+    "sandbox_urlscan_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 10,
+        "label": "Look up sandbox pages on urlscan.io",
+        "what": "1 = pages you opened in the sandbox (not the files they load) are searched on urlscan.io; without an "
+                "earlier scan a private scan is made. Private scans are visible only to your account.",
+        "raise": "1 — on.",
+        "lower": "0 — no urlscan.io requests from the sandbox.",
+    },
+    "sandbox_urlscan_daily_limit": {
+        "min": 0, "max": 50, "integer": True, "stage": 10,
+        "label": "Private urlscan.io scans per day (sandbox)",
+        "what": "At most this many private scans per UTC day. urlscan.io's free plan allows 50 private scans a day; "
+                "Deep Recon uses unlisted scans by default, so it is not affected.",
+        "raise": "More pages get a fresh scan.",
+        "lower": "0 — search only, never a new scan.",
+    },
+    "sandbox_alert_enabled": {
+        "min": 0, "max": 1, "integer": True, "stage": 10,
+        "label": "E-mail on a sandbox hit",
+        "what": "1 = one e-mail when abuse.ch or urlscan.io reports something the sandbox opened or downloaded.",
+        "raise": "1 — e-mail on.",
+        "lower": "0 — hits only on the Sandbox page.",
+    },
 }
 
 # The n8n AI workflow, in the order a domain goes through it.
@@ -502,6 +557,8 @@ PIPELINE_STEPS = {
     9: ("API usage and failures", "How many requests each outside service gets (VirusTotal, Gemini, urlscan.io, "
                                   "Shodan, abuse.ch), when you are warned, and when a failing workflow is "
                                   "switched off. Details on the API usage page."),
+    10: ("Browser sandbox", "What you open in the isolated sandbox browser is recorded and checked at abuse.ch and "
+                            "urlscan.io, apart from your network's traffic. Results on the Sandbox page."),
 }
 
 TF_UH_STATUSES = ["ok", "no_data", "not_checked", "error"]
@@ -1983,6 +2040,94 @@ def api_usage_page():
                            providers=providers, hour_rows=sorted(hour_rows.items()),
                            day_rows=sorted(day_rows.items(), reverse=True), day_providers=day_providers,
                            problems=problems, alerts=alerts, guard=guard)
+
+
+# ============================================================
+# Routes — browser sandbox (read-only, cyber_sentinel_sandbox)
+# ============================================================
+
+SANDBOX_REPORT_PREFIXES = ("https://urlscan.io/", "https://threatfox.abuse.ch/", "https://urlhaus.abuse.ch/",
+                           "https://bazaar.abuse.ch/")
+SANDBOX_VERDICTS = ["", "hit", "clean", "error", "pending", "trusted"]
+
+
+def _sandbox_report_link(url):
+    """Only ever link to the CTI providers (values come from their responses)."""
+    return url if isinstance(url, str) and url.startswith(SANDBOX_REPORT_PREFIXES) else None
+
+
+app.jinja_env.filters["sandbox_report_link"] = _sandbox_report_link
+
+
+@app.route("/sandbox")
+@login_required
+def sandbox_page():
+    """Sessions, events of one session, observables and their CTI checks."""
+    verdict = request.args.get("verdict", "")
+    if verdict not in SANDBOX_VERDICTS:
+        verdict = ""
+    session_arg = request.args.get("session", "")
+    with db(readonly=True) as conn:
+        if not conn.execute("SELECT to_regclass('cyber_sentinel_sandbox.v_sessions') IS NOT NULL "
+                            "AND has_table_privilege('cyber_sentinel_sandbox.v_sessions', 'SELECT') AS ok"
+                            ).fetchone()["ok"]:
+            flash("The sandbox schema arrives with db_sandbox.sql — run playbooks 04.3 and 04.5.", "error")
+            return render_template("sandbox.html", ready=False)
+        sessions = conn.execute(
+            "SELECT * FROM cyber_sentinel_sandbox.v_sessions ORDER BY session_start DESC LIMIT 30").fetchall()
+        counts = conn.execute(
+            "SELECT count(*) FILTER (WHERE status = 'active' AND verdict = 'hit') AS hit, "
+            "       count(*) FILTER (WHERE status = 'active' AND verdict = 'clean') AS clean, "
+            "       count(*) FILTER (WHERE status = 'active' AND verdict = 'error') AS error, "
+            "       count(*) FILTER (WHERE status = 'active' AND verdict IS NULL) AS pending, "
+            "       count(*) FILTER (WHERE status = 'skipped_trusted') AS trusted "
+            "FROM cyber_sentinel_sandbox.observables").fetchone()
+        queue = conn.execute("SELECT count(*) AS n FROM cyber_sentinel_sandbox.v_pending_checks").fetchone()["n"]
+        budget = conn.execute("SELECT * FROM cyber_sentinel_sandbox.v_urlscan_budget").fetchone()
+        ingest = conn.execute(
+            "SELECT source, updated_at AT TIME ZONE 'Europe/Warsaw' AS at FROM cyber_sentinel_sandbox.ingest_state "
+            "ORDER BY source").fetchall()
+        enabled = {r["key"]: r["value"] for r in conn.execute(
+            "SELECT key, value FROM ai_settings WHERE starts_with(key, 'sandbox_')").fetchall()}
+
+        selected, events, dns = None, [], []
+        if session_arg:
+            selected = next((s for s in sessions if s["session_start"].isoformat() == session_arg), None)
+            if selected:
+                events = conn.execute(
+                    "SELECT e.ts AT TIME ZONE 'Europe/Warsaw' AS at, e.event, e.method, e.url, e.host, e.server_ip, "
+                    "       e.status, e.content_type, e.size, e.sha256, e.is_navigation, e.error, "
+                    "       e.redirect_location, e.upstream_tls->>'verified' AS tls_verified, "
+                    "       e.upstream_tls->>'issuer' AS tls_issuer, "
+                    "       (SELECT array_agg(DISTINCT o.kind || ':' || array_to_string(o.hit_providers, ',')) "
+                    "          FROM cyber_sentinel_sandbox.observables o "
+                    "         WHERE o.verdict = 'hit' AND ((o.kind = 'host' AND o.value = e.host) "
+                    "            OR (o.kind = 'url' AND o.value = e.url) OR (o.kind = 'sha256' AND o.value = e.sha256) "
+                    "            OR (o.kind = 'ip' AND o.value = e.server_ip))) AS hits "
+                    "FROM cyber_sentinel_sandbox.v_event_sessions s "
+                    "JOIN cyber_sentinel_sandbox.url_events e ON e.id = s.id AND e.ts = s.ts "
+                    "WHERE s.session_start = %s ORDER BY e.ts, e.id LIMIT 1000",
+                    (selected["session_start"],)).fetchall()
+                dns = conn.execute(
+                    "SELECT domain, count(*) FILTER (WHERE query_type = 'query') AS queries, "
+                    "       string_agg(DISTINCT answer, ', ') FILTER (WHERE query_type IN ('reply', 'cached')) AS answers "
+                    "FROM cyber_sentinel_sandbox.dns_queries WHERE ts BETWEEN %s AND %s "
+                    "GROUP BY domain ORDER BY queries DESC, domain LIMIT 200",
+                    (selected["session_start"], selected["session_end"])).fetchall()
+
+        observables = conn.execute(
+            "SELECT o.*, o.last_seen AT TIME ZONE 'Europe/Warsaw' AS last_local, "
+            "       (SELECT json_agg(json_build_object('provider', c.provider, 'outcome', c.outcome, "
+            "                'summary', c.summary, 'report_url', c.report_url, 'at', c.checked_at) ORDER BY c.provider) "
+            "          FROM cyber_sentinel_sandbox.v_latest_checks c WHERE c.observable_id = o.id) AS checks "
+            "FROM cyber_sentinel_sandbox.observables o "
+            "WHERE (%s = '' OR (%s = 'trusted' AND o.status = 'skipped_trusted') "
+            "       OR (o.status = 'active' AND ((%s = 'pending' AND o.verdict IS NULL) OR o.verdict = %s))) "
+            "ORDER BY (o.verdict = 'hit') DESC NULLS LAST, o.last_seen DESC LIMIT 200",
+            (verdict, verdict, verdict, verdict)).fetchall()
+    return render_template("sandbox.html", ready=True, sessions=sessions, counts=counts, queue=queue,
+                           budget=budget, ingest=ingest, settings=enabled, selected=selected, events=events,
+                           dns=dns, observables=observables, verdict=verdict, verdicts=SANDBOX_VERDICTS)
 
 
 @app.route("/audit")
