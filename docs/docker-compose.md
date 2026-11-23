@@ -10,6 +10,7 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 |---|---|---|---|
 | `.2` | `unbound` | registry | Recursive resolver — the end of the DNS chain |
 | `.4` | `pihole` | registry | DNS for the LAN, ad-block, denylist written by n8n; query log `pihole.log` |
+| `.5` | `sandbox_log_processor` | built (Python) | Sandbox `urls.jsonl` + sandbox Pi-hole log (read-only) → `cyber_sentinel_sandbox`; own DB role, only its own `SANDBOX_DB_*` vars |
 | `.6` | `dns_log_processor` | built (Python) | `pihole.log` (read-only mount) → `dns_queries` |
 | `.7` | `n8n` | registry | AI decision workflow |
 | `.8` | `ai-config-ui` | built (Flask) | AI pipeline configuration |
@@ -22,11 +23,11 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 | `.16` | `sandbox-pihole` | registry | DNS of the browser sandbox (also in `sandbox_network`), to reach Unbound |
 | `.100` | `nginx-proxy` | registry | TLS reverse proxy — started by playbook 05, not by compose |
 
-DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log); `.5` is free (it was `firefox`, replaced by the browser sandbox).
+DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log); `.5` (formerly `firefox`) is now `sandbox_log_processor`.
 
 ### Browser sandbox networks
 
-See [Browser Sandbox](sandbox.md).
+See [Browser Sandbox](sandbox/index.md).
 
 | Network | Subnet | Members |
 |---|---|---|

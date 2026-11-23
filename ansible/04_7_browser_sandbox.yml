@@ -15,7 +15,8 @@
 # Depends on: - 04.1 (sandbox dirs + addon staged)
 #             - 04.2 (sandbox containers running; mitmproxy creates its
 #               CA in config/sandbox/mitmproxy on first start)
-#             - vault_pihole_admin_password (same password as main Pi-hole)
+#             - vault_sandbox_pihole_admin_password (falls back to
+#               vault_pihole_admin_password while it is not set)
 #
 # Outputs:    - config/sandbox/browser/policies/cyber_sentinel.json
 #             - empty adlist table in config/sandbox/pihole/etc/gravity.db
@@ -126,7 +127,9 @@
     - name: "[04.7.2.5] Set sandbox Pi-hole admin password"
       community.docker.docker_container_exec:
         container: sandbox-pihole
-        argv: [pihole, setpassword, "{{ vault_pihole_admin_password }}"]
+        # Own password (the sandbox browser can reach this UI, see docs);
+        # falls back to the main Pi-hole's until it is set in vault.yml.
+        argv: [pihole, setpassword, "{{ vault_sandbox_pihole_admin_password | default(vault_pihole_admin_password, true) }}"]
       register: sandbox_pihole_pass
       changed_when: "'New password set' in (sandbox_pihole_pass.stdout | default(''))"
       no_log: true

@@ -56,10 +56,11 @@
     #   - server_name <hostname|name>.<domain_suffix>
     # The internal_host is the Docker DNS name Nginx uses to reach
     # the upstream container; port is the container-internal port.
-    # Optional `cert` reuses another service's vault_<cert>_cert/key
-    # (the files on disk are still named after `name`). The sandbox
-    # entries reuse the certs of the retired firefox and of pihole, so
-    # browsers warn about the name until dedicated certs are added.
+    # Certificates come from vault_<name>_cert/key. Optional
+    # `cert_fallback` names another service's pair, used while the own
+    # pair is empty or missing (the files on disk are still named after
+    # `name`): the sandbox entries fall back to the retired firefox pair
+    # and to pihole until vault_sandbox_* / vault_sandbox_dns_* are set.
     # Present on every host in the inventory.
     services:
       - { name: "pihole",          port: 80,   internal_host: "pihole" }
@@ -68,8 +69,8 @@
       - { name: "grafana",         port: 3000, internal_host: "grafana" }
       - { name: "hashicorp_vault", port: 8200, internal_host: "hashicorp_vault" }
       - { name: "ai_config",       port: 8000, internal_host: "ai-config-ui", hostname: "ai-config" }
-      - { name: "sandbox",         port: 3000, internal_host: "sandbox-browser", cert: "firefox" }
-      - { name: "sandbox_dns",     port: 80,   internal_host: "sandbox-pihole", hostname: "sandbox-dns", cert: "pihole" }
+      - { name: "sandbox",         port: 3000, internal_host: "sandbox-browser", cert_fallback: "firefox" }
+      - { name: "sandbox_dns",     port: 80,   internal_host: "sandbox-pihole", hostname: "sandbox-dns", cert_fallback: "pihole" }
 
   tasks:
     # ============================================================
@@ -102,7 +103,7 @@
 
     - name: "[05.2.1] Save TLS certificates (.crt) for each service"
       ansible.builtin.copy:
-        content: "{{ lookup('vars', 'vault_' + (item.cert | default(item.name)) + '_cert') }}"
+        content: "{{ lookup('vars', 'vault_' + item.name + '_cert', default='') or lookup('vars', 'vault_' + (item.cert_fallback | default(item.name)) + '_cert') }}"
         dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.crt"
         owner: "{{ deployment_user }}"
         mode: '0600'
@@ -111,7 +112,7 @@
 
     - name: "[05.2.2] Save TLS private keys (.key) for each service"
       ansible.builtin.copy:
-        content: "{{ lookup('vars', 'vault_' + (item.cert | default(item.name)) + '_key') }}"
+        content: "{{ lookup('vars', 'vault_' + item.name + '_key', default='') or lookup('vars', 'vault_' + (item.cert_fallback | default(item.name)) + '_key') }}"
         dest: "{{ remote_deploy_base }}/config/nginx/certs/{{ item.name }}.key"
         owner: "{{ deployment_user }}"
         mode: '0600'

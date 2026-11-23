@@ -6,7 +6,7 @@
       "Host": "localhost",
       "Port": 5432,
       "MaintenanceDB": "cyber_intelligence",
-      "Username": "postgres",
+      "Username": "hunter",
       "SSLMode": "prefer",
       "Comment": "Start the tunnel first: .db/mac/db_dev.sh"
     },
@@ -16,7 +16,7 @@
       "Host": "localhost",
       "Port": 5433,
       "MaintenanceDB": "cyber_intelligence",
-      "Username": "postgres",
+      "Username": "hunter",
       "SSLMode": "prefer",
       "BGColor": "#B71C1C",
       "FGColor": "#FFFFFF",

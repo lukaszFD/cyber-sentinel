@@ -48,6 +48,21 @@
         - passive_dns
         - firefox
 
+    # Registry images first, retried: a fresh host pulls ~10 images at
+    # once (the sandbox browser alone is ~5 GB), and a slow registry
+    # (lscr.io) can time out the TLS handshake. A failed pull here is
+    # retried; layers already downloaded are kept. Locally built images
+    # are skipped (--ignore-buildable) and built by `up --build` below.
+    - name: "[04.2.1.0a] Pull registry images (retried on timeouts)"
+      ansible.builtin.shell:
+        cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} pull --ignore-buildable"
+        chdir: "{{ remote_deploy_base }}"
+      register: pull_output
+      until: pull_output.rc == 0
+      retries: 5
+      delay: 30
+      changed_when: "' Pulled' in pull_output.stderr"
+
     - name: "[04.2.1.1] Pull, build and start Sentinel stack (detached)"
       ansible.builtin.shell:
         cmd: "docker compose -f {{ docker_compose_file_name }} -p {{ project_name }} up --build -d"

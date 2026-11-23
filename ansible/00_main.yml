@@ -5,8 +5,8 @@
 # Purpose:    Top-level entry point that imports all sub-playbooks in
 #             dependency order. Run this to deploy the entire stack.
 #
-# Depends on: hosts.ini inventory file, group_vars/all/vault.yml decrypted
-#             via .vault_pass file (or --ask-vault-pass flag).
+# Depends on: hosts.ini inventory file, host_vars/<host>/vault.yml (one
+#             complete ansible-vault file per host) decrypted via .vault_pass file (or --ask-vault-pass flag).
 #
 # Outputs:    Fully provisioned stack: secrets, firewall, system packages,
 #             Docker containers, Postgres (schema, partitioning, AI

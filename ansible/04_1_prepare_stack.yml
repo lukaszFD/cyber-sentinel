@@ -79,6 +79,7 @@
         - "config/sandbox/logs"                        # Browser sandbox: urls.jsonl (mitmproxy)
         - "config/sandbox/mitmproxy"                   # Browser sandbox: mitmproxy CA (per host)
         - "config/sandbox/browser/policies"            # Browser sandbox: Chromium policy (04.7)
+        - "sandbox_log_processor"                      # Browser sandbox: ingest build context
 
     # ============================================================
     # SECTION 2 — Stack manifests (docker-compose + build inputs)
@@ -135,6 +136,21 @@
         dest: "{{ remote_deploy_base }}/log_processor.py"
         owner: "{{ deployment_user }}"
         mode: '0644'
+
+    # Build context of sandbox_log_processor: its script, its Dockerfile and
+    # the Pi-hole line parser it shares with dns_log_processor.
+    - name: "[04.1.2.8] Copy browser sandbox log processor build context"
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ remote_deploy_base }}/sandbox_log_processor/{{ item.dest }}"
+        owner: "{{ deployment_user }}"
+        mode: '0644'
+      loop:
+        - { src: "{{ main_repo_source_dir }}/config/sandbox/processor/Dockerfile",                 dest: "Dockerfile" }
+        - { src: "{{ main_repo_source_dir }}/config/sandbox/processor/sandbox_log_processor.py",  dest: "sandbox_log_processor.py" }
+        - { src: "{{ main_repo_source_dir }}/config/dns/log_processor.py",                        dest: "log_processor.py" }
+      loop_control:
+        label: "{{ item.dest }}"
 
     # vault_unsealer is disabled in docker-compose-cyber-sentinel.yml
     # (commented out, [SVC.SECRETS.UNSEALER]); these two files are staged

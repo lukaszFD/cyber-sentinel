@@ -1,8 +1,6 @@
 -- ============================================
 -- Cyber Sentinel — AI config editor (web UI) — POSTGRES
--- Version: 1.3 (API usage: read-only call log, usage views and provider
---               counters; simulator VirusTotal calls through api_claim();
---               Failure Guard alerts read-only)
+-- Version: 1.4 (Sandbox page: read-only access to cyber_sentinel_sandbox)
 -- ============================================
 -- Runs AFTER db_ai_pipeline.sql, as the `postgres` superuser, connected to
 -- `cyber_intelligence`. Rendered by Ansible (template module, playbook
@@ -56,6 +54,11 @@
 --                                              [[THREAT_SCALE]] in the prompt,
 --                                              the flag drives Grafana
 --   cyber_sentinel.v_threat_scale_for_agent    SELECT (prompt preview)
+--   cyber_sentinel_sandbox.url_events / dns_queries / observables /
+--   observable_checks / v_sessions / v_event_sessions / v_latest_checks /
+--   v_pending_checks / v_urlscan_budget / ingest_state  SELECT (Sandbox page;
+--                                              written by sandbox_log_processor
+--                                              and n8n)
 --
 --   ai_settings has no INSERT/DELETE on purpose: every key is read by
 --   cyber_sentinel_ai.setting(), which RAISES on a missing key — deleting
@@ -564,6 +567,15 @@ GRANT EXECUTE ON FUNCTION cyber_sentinel_ai.blocklist_render() TO "{{ ai_config_
 GRANT SELECT                                   ON cyber_sentinel.dic_threat_levels        TO "{{ ai_config_db_user }}";
 GRANT UPDATE (description, action_recommended, is_malicious_flag) ON cyber_sentinel.dic_threat_levels TO "{{ ai_config_db_user }}";
 GRANT SELECT                                   ON cyber_sentinel.v_threat_scale_for_agent TO "{{ ai_config_db_user }}";
+
+-- Browser sandbox (db_sandbox.sql, playbook 04.3): read-only Sandbox page.
+GRANT USAGE ON SCHEMA cyber_sentinel_sandbox TO "{{ ai_config_db_user }}";
+GRANT SELECT ON cyber_sentinel_sandbox.url_events, cyber_sentinel_sandbox.dns_queries,
+                cyber_sentinel_sandbox.observables, cyber_sentinel_sandbox.observable_checks,
+                cyber_sentinel_sandbox.ingest_state, cyber_sentinel_sandbox.v_sessions,
+                cyber_sentinel_sandbox.v_event_sessions, cyber_sentinel_sandbox.v_latest_checks,
+                cyber_sentinel_sandbox.v_pending_checks, cyber_sentinel_sandbox.v_urlscan_budget
+    TO "{{ ai_config_db_user }}";
 
 -- The n8n app role keeps full access to the AI schema (default privileges
 -- in db_ai_pipeline.sql); grant it the new objects explicitly as well, in

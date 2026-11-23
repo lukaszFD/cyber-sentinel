@@ -4,6 +4,7 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
+| [v2.5.0](#v250) | Stable | 20 November 2026 | Browser sandbox: isolated ungoogled-chromium behind mitmproxy and its own Pi-hole, data in `cyber_sentinel_sandbox`, abuse.ch / urlscan.io checks, Sandbox page; Firefox removed |
 | [v2.4.0](#v240) | Stable | 18 November 2026 | Pi-hole query log as the DNS source: real client IPs, cached and blocked answers, `passive_dns` removed, 3-month retention |
 | [v2.3.0](#v230) | Stable | 16 November 2026 | API call log and usage page, VirusTotal budget from the provider's counter, Failure Guard |
 | [v2.2.0](#v220) | Stable | 16 November 2026 | Own Pi-hole blocklists: AI classification, review, daily pull request to sentinel-blocklists |
@@ -13,6 +14,133 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 | [v1.0.2-rc1](#v102-rc1) | Release candidate | 5 May 2026 | 1–5 threat scale, partitioning, unified Vault playbook |
 | [v1.0.1](#v101) | Release | — | Ansible deployment |
 | [v1.0.0](#v100) | Release | — | First version |
+
+---
+
+## v2.5.0
+
+Adds a browser sandbox for opening suspicious links: an isolated ungoogled-chromium whose whole traffic goes through mitmproxy and its own Pi-hole. Every request and DNS query lands in a separate schema, `cyber_sentinel_sandbox`, and is checked against abuse.ch and urlscan.io; hits are e-mailed and shown on a new Sandbox page. Upgrades v2.4.0 in place; no data is lost. **The `firefox` container is removed** — the sandbox replaces it.
+
+### Highlights
+
+- **Browser sandbox** at `https://sandbox.<suffix>` — ungoogled-chromium in the Selkies web viewer, profile on tmpfs, wiped by `sudo sandbox-reset` and every night at 04:00.
+- **Every request recorded** — mitmproxy is the only way out; one record per request, error or blocked attempt (headers, redirects, server IP, body SHA-256, upstream certificate).
+- **Own Pi-hole without adlists** at `https://sandbox-dns.<suffix>/admin`, with its own password.
+- **Sandbox data in Postgres** — new schema `cyber_sentinel_sandbox`, filled by the new container `sandbox_log_processor`.
+- **CTI checks** — new n8n workflow **Sandbox Scan**: abuse.ch (URLhaus, ThreatFox, MalwareBazaar) for hosts, IPs, URLs and payload hashes; urlscan.io search and private scans for top-level pages; e-mail on hits.
+- **Sandbox page** in the AI Config UI: sessions, requests, DNS, observables and their checks.
+- **Sandbox hits blocked for the LAN** — the full host of every hit goes to the own malicious blocklist and into the daily pull request in sentinel-blocklists.
+- **Isolated** — the sandbox never reaches the LAN, the stack or the main Pi-hole; none of its traffic lands in `cyber_sentinel.dns_queries` or the main queue.
+- **Firefox removed** — container, Nginx entry and certificate files.
+
+### Browser Sandbox
+
+- Containers: `sandbox-browser` (`linuxserver/ungoogled-chromium`), `sandbox-mitmproxy` (`mitmproxy/mitmproxy` 12.3.1), `sandbox-pihole` (same pin as the main Pi-hole), `sandbox_log_processor` (built, `python:3.12-slim`). Images pinned by digest in `images.yml`, all multi-arch.
+- Networks: `sandbox_network` `10.10.20.0/24` is `internal: true` (no route out; Nginx joins it only to serve the viewer); `sandbox_egress` `10.10.21.0/24` holds only mitmproxy. `sandbox_log_processor` sits on `internal_network` (`.5`, formerly firefox) and is not reachable from the sandbox.
+- Chromium is forced through the proxy by a managed policy (`ProxySettings`, no bypass; WebRTC only through the proxy).
+- The mitmproxy addon `config/sandbox/sandbox_logger.py` refuses any destination that resolves to a non-public address and pins the checked IP, so DNS rebinding cannot reach the LAN. Refused attempts are logged as `blocked`.
+- TLS is intercepted with mitmproxy's own CA (created on the host, private key 0600); 04.7 puts the public certificate into the Chromium policy. Upstream certificates are not enforced, but each chain is verified and the result stored.
+- Memory limits: browser 1.5 GB (+512 MB shared memory), mitmproxy 384 MB, Pi-hole 256 MB, log processor 128 MB.
+
+### Sandbox Data and CTI
+
+- `db_sandbox.sql` (new, playbook 04.3): `url_events` and `dns_queries` (monthly partitions, 3 months, added to `partitioned_tables()`), `observables`, `observable_checks`, `ingest_state`, queue and session views, settings `sandbox_*` in `ai_settings`.
+- `sandbox_log_processor`: exactly-once ingest (batch and file position in one transaction, resumes across rotation), role `sandbox_ingest` with EXECUTE on four ingest functions only, non-root, read-only file system, no capabilities, only its own `SANDBOX_DB_*` variables.
+- Noise filter: allow-listed hosts (Tranco top N, manual) and their URLs are never looked up; static assets are not stored as URL observables; hashes only for payload types, whatever the host.
+- Top-level pages whose server failed (`error`, e.g. a dead phishing site) are still URL observables, so urlscan.io search can show older scans.
+- **Blocklist:** view `v_blocklist_hits`; `blocklist_sync_malicious()` (Blocklist Publish) adds those hosts to `blocklist_entries` as `malicious`, `approved`, new source `sandbox` (check constraint widened in `db_blocklists.sql`).
+- **Sandbox Scan** (every 2 minutes): `claim_checks()` → one HTTP node for all lookups → `record_checks()`; private urlscan.io scans capped by `sandbox_urlscan_daily_limit` (20) and fetched by a later run; every request in `api_call_log` (caller `sandbox`); Failure Guard as Error Workflow.
+
+### AI Config UI
+
+- New **Sandbox** page (read-only): counters, urlscan budget, ingest heartbeat, sessions, the requests and DNS of a session with hits marked, observables with their latest checks. Only urlscan.io and abuse.ch report links are rendered; URLs from browsed sites are shown as text.
+- Settings step 10 *Browser sandbox*.
+
+### Ansible
+
+- New playbook **04.7** (`04_7_browser_sandbox.yml`, in `00_main.yml` as `[00.2.7]`): CA policy for Chromium, sandbox Pi-hole without adlists and its password, `/usr/local/bin/sandbox-reset` and its 04:00 cron.
+- 04.1 stages `config/sandbox/*` and the processor's build context; 04.2 removes the retired `firefox` container (with `passive_dns`); 04.3 runs `db_sandbox.sql`; 04.5 grants the UI read access; 04.6 imports *Sandbox Scan*.
+- 05: new entries `sandbox` and `sandbox_dns` with their own certificates (`vault_sandbox_*`, `vault_sandbox_dns_*`); while those are empty the old firefox pair and pihole's are used. The old `firefox.conf` and its cert files are deleted.
+- 01: `.env` gets `SANDBOX_DB_USER` / `SANDBOX_DB_PASSWORD`.
+
+### Per-host Vault Files
+
+- Dev and prod run separate HashiCorp Vaults, so each host now has **one complete** ansible-vault file, `ansible/host_vars/<host>/vault.yml` (`rpi5`, `dev_vm`): all shared keys (API keys, Gmail, passwords, certificates) plus that host's `vault_root_token`, `vault_unseal_keys`, `vault_n8n_vault_token` and `vault_n8n_token_accessor`. `group_vars/all/vault.yml` is gone. Templates with every key: `host_vars/<host>/vault.yml.example` (the Proxmox keys of playbook 00.1 only for `dev_vm`; 00.1 reads them from the dev host); `group_vars/all/vault.yml.example` is removed. All `vault.yml` files are git-ignored.
+- `ansible/tools/vault_add_password.sh` generates passwords (letters and digits) and adds them to every host's file without printing them, a separate value per host.
+- 06.1 checks the root token against the host's Vault (`[06.1.2.4]`) and stops with a clear message instead of a hidden 403.
+- 04.2 pulls registry images in a separate, retried step (`[04.2.1.0a]`): the sandbox browser image is about 5 GB and a slow registry could time out the whole `up`.
+
+### Database Helpers
+
+- `.db/` split by OS: `.db/mac/` (Homebrew YubiKey module, uses ssh-agent after `yk`, prod on local port 5433, `pgadmin-servers.json` for pgAdmin) and `.db/linux/` (previous scripts). See `.db/README.md`.
+
+### Upgrading from v2.4.0
+
+New keys in `ansible/host_vars/rpi5/vault.yml` (letters and digits only — they end up in SQL and `.env`):
+
+| Key | Required | Value |
+|---|---|---|
+| `vault_sandbox_db_password` | yes | 32 random characters (`openssl rand -hex 16`) |
+| `vault_sandbox_pihole_admin_password` | no | 24+ characters; the main Pi-hole's password is used while empty |
+| `vault_sandbox_cert` / `vault_sandbox_key` | no | certificate for `sandbox.<suffix>`; the firefox pair is used while empty |
+| `vault_sandbox_dns_cert` / `vault_sandbox_dns_key` | no | certificate for `sandbox-dns.<suffix>`; pihole's pair is used while empty |
+
+1. **Vault file.** Move the prod secrets into one file: copy the old `group_vars/all/vault.yml` to `ansible/host_vars/rpi5/vault.yml` (still encrypted, same `.vault_pass`), make sure it holds prod's `vault_root_token`, `vault_unseal_keys`, `vault_n8n_vault_token` and `vault_n8n_token_accessor` (with the accessor set, 06.1 renews the n8n token instead of minting a new one on every run), then remove `group_vars/all/vault.yml`. Add the keys above (`VAULT_HOSTS=rpi5 ansible/tools/vault_add_password.sh` generates the two passwords). Check that Ansible sees it:
+
+    ```bash
+    cd ansible && ansible-inventory -i hosts.ini --host rpi5 | grep -c '"vault_'
+    ```
+
+2. **RPi memory limits.** Docker ignores the sandbox memory limits (browser 1.5 GB) unless the memory cgroup is on. Append `cgroup_enable=memory cgroup_memory=1` to the single line in `/boot/firmware/cmdline.txt`, reboot, then check:
+
+    ```bash
+    ssh <user>@<host> 'docker info 2>/dev/null | grep -i "no memory limit" || echo "memory limits OK"'
+    ```
+
+3. **Disk space.** The sandbox browser image is about 5 GB; keep at least 8 GB free on `/` before 04.2 (`ssh <user>@<host> 'df -h /'`; `docker image prune` frees old layers).
+4. Add two Local DNS records in the main Pi-hole pointing at the host: `sandbox.<suffix>` and `sandbox-dns.<suffix>`. The `firefox.<suffix>` record can go. On a Mac, names ending in `.local` are resolved by mDNS and never reach Pi-hole: put them in `/etc/hosts` instead (not needed for `.prod`).
+5. Render `.env`, stage the files, create the schema, start the containers (this also removes `firefox`), grant the UI, import the workflow, configure the sandbox and update Nginx:
+
+```bash
+cd ansible
+ansible-playbook -i hosts.ini 01_setup_secrets.yml       --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_1_prepare_stack.yml     --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_3_db_postgres.yml       --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_2_deploy_containers.yml --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_5_ai_config_editor.yml  --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_6_post_config.yml       --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_7_browser_sandbox.yml   --limit rpi5-prod
+ansible-playbook -i hosts.ini 05_deploy_proxy.yml        --limit rpi5-prod
+ansible-playbook -i hosts.ini 06_3_n8n_api_key.yml       --limit rpi5-prod
+```
+
+04.3 runs before 04.2 so the processor finds its role and functions when it starts (it waits and retries otherwise).
+
+6. 04.6 re-imports all workflows and leaves them **inactive**: publish the main workflow, Deep Recon, Blocklist Candidates, Blocklist Publish, API Usage Monitor and the new **Sandbox Scan** in n8n. 06.3 re-activates Failure Guard.
+7. Check:
+
+```bash
+ssh <user>@<host> 'docker ps --filter name=sandbox --format "{{.Names}} {{.Status}}"'   # four containers, Up
+ssh <user>@<host> 'docker logs --tail 5 sandbox_log_processor'                         # Connected to Postgres, following both logs
+```
+
+Open `https://sandbox.<suffix>`, load any HTTPS site, then:
+
+```sql
+SELECT event, count(*) FROM cyber_sentinel_sandbox.url_events WHERE ts > now() - interval '15 minutes' GROUP BY 1;
+SELECT kind, status, verdict, count(*) FROM cyber_sentinel_sandbox.observables GROUP BY 1, 2, 3;
+```
+
+Within a few minutes the observables get a verdict, and the AI Config UI → Sandbox shows the session.
+
+### Fresh Installs
+
+Create `ansible/host_vars/<host>/vault.yml` with every key (templates above) and, on a Raspberry Pi, turn on the memory cgroup (step 2). `00_main.yml` runs every playbook above; afterwards copy the Vault credentials 06.1 prints into the host's file. The `firefox` removal in 04.2 and 05 does nothing on a new host.
+
+### Tested
+
+- Dev: _to be filled in after the dev deployment._
+- Prod (RPi 5): _to be filled in after the upgrade._
 
 ---
 

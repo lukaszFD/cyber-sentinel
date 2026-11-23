@@ -1,0 +1,81 @@
+# ============================================================
+# Cyber Sentinel — vault file of dev_vm (dev, Proxmox VM)
+# ============================================================
+# The host's ONLY secrets file (there is no group_vars/all/vault.yml).
+# Copy to vault.yml in this folder, fill in, and encrypt it:
+#   ansible-vault create ansible/host_vars/dev_vm/vault.yml
+# (vault.yml is git-ignored; this .example is not — never put values here.)
+# Every key below must exist in every host's file; values may differ per
+# host. A generated password goes into all of them with
+# ansible/tools/vault_add_password.sh.
+# ============================================================
+
+# ------------------------------------------------------------
+# This host's HashiCorp Vault — dev and prod run separate Vaults
+# ------------------------------------------------------------
+# Shown once by 06.1 on this host's first Vault init ([06.1.8.1]).
+# 06.1 checks the root token against this host's Vault ([06.1.2.4]).
+vault_root_token: ''
+vault_unseal_keys: []          # the 5 base64 keys (3 needed to unseal)
+# n8n read-only Vault token, shown once by 06.1 when it is minted ([06.1.7.7]).
+# With the accessor set, later 06.1 runs renew it instead of minting a new one.
+vault_n8n_vault_token: ''
+vault_n8n_token_accessor: ''
+
+# ------------------------------------------------------------
+# Proxmox API — playbook 00.1 restores this VM from backup (dev only)
+# ------------------------------------------------------------
+proxmox_host: ''
+proxmox_user_token: ''         # user@realm!token-id
+proxmox_api_secret: ''
+
+# ------------------------------------------------------------
+# Secrets shared by every host (same keys; TLS certificates for *.local)
+# ------------------------------------------------------------
+vault_github_blocklists_token: ''
+vault_proton_lukasz: ''
+vault_proton_hng: ''
+ansible_become_password: ''
+vault_postgres_password: ''
+vault_postgres_root_password: ''
+vault_pihole_admin_password: ''
+vault_grafana_password: ''
+vault_portainer_password: ''
+vault_n8n_password: ''
+vault_urlscanio_api_key: ''
+vault_grafana_api_key: ''
+vault_abuse_api_key: ''
+vault_n8n_gmail: ''
+vault_n8n_user: ''
+vault_n8n_alert_to: ''
+vault_virus_total_token: ''
+vault_gemini_api_key: ''
+vault_ai_config_db_password: ''
+# Browser sandbox: login of sandbox_log_processor (32 letters/digits) and
+# the sandbox Pi-hole UI (24 letters/digits; falls back to the main one).
+vault_sandbox_db_password: ''
+vault_sandbox_pihole_admin_password: ''
+vault_ai_ui_secret_key: ''
+vault_ai_ui_users:
+  lukasz: ''
+vault_ai_config_cert: ''
+vault_ai_config_key: ''
+vault_n8n_cert: ''
+vault_n8n_key: ''
+vault_pihole_cert: ''
+vault_pihole_key: ''
+vault_hashicorp_vault_cert: ''
+vault_hashicorp_vault_key: ''
+vault_grafana_cert: ''
+vault_grafana_key: ''
+vault_portainer_cert: ''
+vault_portainer_key: ''
+# Browser sandbox: sandbox.<suffix> (viewer) and sandbox-dns.<suffix> (its
+# Pi-hole). While empty, playbook 05 falls back to the firefox / pihole pairs.
+vault_sandbox_cert: ''
+vault_sandbox_key: ''
+vault_sandbox_dns_cert: ''
+vault_sandbox_dns_key: ''
+# Retired firefox pair: only the fallback for vault_sandbox_cert/key.
+vault_firefox_cert: ''
+vault_firefox_key: ''

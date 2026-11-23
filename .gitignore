@@ -5,7 +5,10 @@
 .run/
 
 /ansible/.vault_pass
-/ansible/group_vars/all/vault.yml
+/.tmp/vault/vault.yml
+/.tmp/vault/vault.yml.bak
+/ansible/host_vars/*/vault.yml
+/ansible/host_vars/*/vault.yml.bak
 .tmp
 ai/.
 

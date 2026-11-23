@@ -20,8 +20,8 @@
 #   ./pg_tunnel.sh dev 6432       # custom local port
 #
 # pgAdmin: Tools -> Import/Export Servers -> Import -> pgadmin-servers.json
-# (this folder). Database cyber_intelligence, user postgres, password =
-# vault_postgres_password from ansible/group_vars/all/vault.yml.
+# (this folder). Database cyber_intelligence, user hunter (app role, postgres_user), password =
+# vault_postgres_password from ansible/host_vars/<dev_vm|rpi5>/vault.yml.
 #
 # Stop the tunnel with Ctrl+C.
 # ============================================================
@@ -79,7 +79,7 @@ fi
 
 echo
 echo "Tunneling localhost:${LOCAL_PORT} -> ${REMOTE_HOST} -> ${POSTGRES_CONTAINER_IP}:${POSTGRES_PORT} (${ENV_NAME})"
-echo "pgAdmin / psql: host localhost, port ${LOCAL_PORT}, db cyber_intelligence, user postgres"
+echo "pgAdmin / psql: host localhost, port ${LOCAL_PORT}, db cyber_intelligence, user hunter (app role)"
 [[ "${ENV_NAME}" == "prod" ]] && echo "PROD: read-only — SELECT queries only."
 echo "Leave this running. Ctrl+C to stop."
 echo

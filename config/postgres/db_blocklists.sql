@@ -1,6 +1,6 @@
 -- ============================================
 -- Cyber Sentinel — Own blocklists (sentinel-blocklists) — POSTGRES
--- Version: 1.0
+-- Version: 1.1 (source 'sandbox': browser sandbox hits on the malicious list)
 -- ============================================
 -- Runs AFTER db_ai_pipeline.sql, as the `postgres` superuser, connected to
 -- `cyber_intelligence`. Rendered by Ansible (playbook 04_3_db_postgres.yml).
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.blocklist_entries (
     list_name   VARCHAR(20) NOT NULL CHECK (list_name IN ('malicious', 'tracking', 'telemetry')),
     status      VARCHAR(20) NOT NULL DEFAULT 'candidate'
                 CHECK (status IN ('candidate', 'approved', 'rejected')),
-    source      VARCHAR(20) NOT NULL CHECK (source IN ('pipeline', 'ai', 'manual')),
+    source      VARCHAR(20) NOT NULL CHECK (source IN ('pipeline', 'ai', 'manual', 'sandbox')),
     note        TEXT,
     expires_at  TIMESTAMP,
     reviewed_by TEXT,
@@ -134,6 +134,10 @@ CREATE TABLE IF NOT EXISTS cyber_sentinel_ai.blocklist_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_blocklist_entries_status
     ON cyber_sentinel_ai.blocklist_entries (list_name, status);
+-- Upgrade: 'sandbox' (browser sandbox hits, v2.5.0) added to the sources.
+ALTER TABLE cyber_sentinel_ai.blocklist_entries DROP CONSTRAINT IF EXISTS blocklist_entries_source_check;
+ALTER TABLE cyber_sentinel_ai.blocklist_entries ADD CONSTRAINT blocklist_entries_source_check
+    CHECK (source IN ('pipeline', 'ai', 'manual', 'sandbox'));
 
 CREATE OR REPLACE FUNCTION cyber_sentinel_ai.trg_blocklist_entries_touch()
 RETURNS trigger
@@ -344,15 +348,17 @@ BEGIN
 END
 $$;
 
--- Copies Pi-hole auto-blocks into the malicious list (approved). The
--- expiry runs from the latest block; a new block extends it. Rows the
--- operator rejected stay rejected; manual rows keep their own expiry.
+-- Copies Pi-hole auto-blocks and browser sandbox hits into the malicious
+-- list (approved). The expiry runs from the latest block / hit; a new one
+-- extends it. Rows the operator rejected stay rejected; manual rows keep
+-- their own expiry; a host already listed by another source is left as is.
 CREATE OR REPLACE FUNCTION cyber_sentinel_ai.blocklist_sync_malicious()
 RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
     v_ttl     INT := cyber_sentinel_ai.setting('blocklist_malicious_ttl_days')::int;
     v_changed INT;
+    v_sandbox INT := 0;
 BEGIN
     WITH last_block AS (
         SELECT lower(rtrim(fqdn, '.')) AS fqdn, max(created_at) AS blocked_at
@@ -375,7 +381,29 @@ BEGIN
         RETURNING 1
     )
     SELECT count(*) INTO v_changed FROM up;
-    RETURN jsonb_build_object('malicious_changed', v_changed);
+
+    -- Browser sandbox (db_sandbox.sql, deployed after this file): full
+    -- hosts with a CTI hit. Skipped while the schema does not exist.
+    IF to_regclass('cyber_sentinel_sandbox.v_blocklist_hits') IS NOT NULL THEN
+        WITH up AS (
+            INSERT INTO cyber_sentinel_ai.blocklist_entries
+                (fqdn, list_name, status, source, note, expires_at, reviewed_by, reviewed_at)
+            SELECT h.fqdn, 'malicious', 'approved', 'sandbox', h.note,
+                   h.hit_at::timestamp + make_interval(days => v_ttl), 'sandbox', LOCALTIMESTAMP
+            FROM cyber_sentinel_sandbox.v_blocklist_hits h
+            WHERE h.fqdn ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+              AND NOT cyber_sentinel_ai.blocklist_is_protected(h.fqdn)
+            ON CONFLICT (fqdn, list_name) DO UPDATE
+                SET expires_at = EXCLUDED.expires_at, note = EXCLUDED.note
+                WHERE blocklist_entries.source = 'sandbox'
+                  AND blocklist_entries.status = 'approved'
+                  AND EXCLUDED.expires_at > COALESCE(blocklist_entries.expires_at, '-infinity')
+            RETURNING 1
+        )
+        SELECT count(*) INTO v_sandbox FROM up;
+    END IF;
+
+    RETURN jsonb_build_object('malicious_changed', v_changed + v_sandbox, 'sandbox_changed', v_sandbox);
 END
 $$;
 

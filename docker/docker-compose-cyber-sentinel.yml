@@ -4,7 +4,7 @@
 # their base image in the Dockerfile.
 # Network 10.10.10.0/24, static IPs; .100 is nginx-proxy (playbook 05).
 # Browser sandbox: sandbox_network 10.10.20.0/24 (internal, no route out)
-# + sandbox_egress 10.10.21.0/24 (mitmproxy only). See docs/sandbox.md.
+# + sandbox_egress 10.10.21.0/24 (mitmproxy only). See docs/sandbox/.
 
 services:
 
@@ -346,6 +346,41 @@ services:
     restart: unless-stopped
     depends_on:
       - unbound
+
+  # [SVC.SANDBOX.INGEST] sandbox_log_processor — urls.jsonl + sandbox Pi-hole
+  # log → cyber_sentinel_sandbox. Reads both logs read-only; its DB role may
+  # only call the ingest functions (db_sandbox.sql). Gets only its own
+  # SANDBOX_DB_* vars from .env (no env_file: the stack's other secrets stay out).
+  sandbox_log_processor:
+    build:
+      context: ./sandbox_log_processor
+    container_name: sandbox_log_processor
+    depends_on:
+      - postgres_db
+      - sandbox-mitmproxy
+      - sandbox-pihole
+    networks:
+      internal_network:
+        ipv4_address: 10.10.10.5
+    dns: 10.10.10.4
+    # uid/gid 1000 = the pihole user inside sandbox-pihole, owner of its
+    # log files (mode 0640); urls.jsonl is world-readable.
+    user: "1000:1000"
+    environment:
+      POSTGRES_HOST: postgres_db
+      POSTGRES_DATABASE: "{{ postgres_database }}"
+      POSTGRES_USER: ${SANDBOX_DB_USER}
+      POSTGRES_PASSWORD: ${SANDBOX_DB_PASSWORD}
+    volumes:
+      - './config/sandbox/logs:/logs:ro'
+      - './config/sandbox/pihole/log:/var/log/sandbox-pihole:ro'
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    restart: unless-stopped
 
   # [SVC.SECRETS.UNSEALER] vault_unsealer — DISABLED; unsealing is done by 06.1
   #  vault_unsealer:

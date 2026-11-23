@@ -1,0 +1,647 @@
+{
+  "name": "Sandbox Scan",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Cyber Sentinel — Sandbox Scan\n\nEvery 2 minutes: CTI checks of what the **browser sandbox** saw (`cyber_sentinel_sandbox`, filled by `sandbox_log_processor`).\n\n1. `claim_checks()` hands out up to `sandbox_scan_batch_size` observables (hosts, IPs, URLs, payload hashes) that were never checked or are due again; allow-listed hosts never get here.\n2. **abuse.ch** — ThreatFox + URLhaus for hosts / IPs, URLhaus for URLs, MalwareBazaar + ThreatFox for hashes.\n3. **urlscan.io** — only top-level pages: search first; without a result a **private** scan (`sandbox_urlscan_daily_limit`), fetched by a later run.\n4. `record_checks()` stores every result and the verdict; new hits are e-mailed (`sandbox_alert_enabled`).\n\nSettings: AI Config UI → Settings (`sandbox_*`). Results: AI Config UI → Sandbox. Every request is logged in `api_call_log` (caller `sandbox`).",
+        "height": 420,
+        "width": 620,
+        "color": 5
+      },
+      "id": "58f0639c-0e27-59d0-ada4-66c8991938b1",
+      "name": "Note - overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -520
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "adb0bd84-d840-53f3-86c9-4952f8515d25",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "fda0c476-35e0-5d89-a3bf-6b340aeb3a30",
+      "name": "Run now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Batch of due observables, marked for 15 minutes so overlapping runs\n-- never take the same one. No row (nothing due, or sandbox_scan_enabled = 0)\n-- = the run ends here.\nSELECT * FROM cyber_sentinel_sandbox.claim_checks();",
+        "options": {}
+      },
+      "id": "917bb13d-f33f-5441-ae2c-a4c25c48fa75",
+      "name": "Claim checks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/abuse/api-key",
+        "additionalFields": {}
+      },
+      "id": "45291b87-49a0-5453-bd4b-a8175ed905c8",
+      "name": "Abuse API TOKEN",
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        480,
+        100
+      ],
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/api-keys/urlscanio/api-key",
+        "additionalFields": {}
+      },
+      "id": "a919bbdb-ad76-5106-a698-12a08ecb4b1a",
+      "name": "urlscan.io API TOKEN",
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        720,
+        100
+      ],
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Plan requests\n// One item per HTTP request of this run. Bodies are built here, so a single\n// HTTP node sends all of them (form bodies for URLhaus / MalwareBazaar, JSON\n// for ThreatFox, GET for urlscan.io). Values come from sandbox traffic\n// (attacker controlled): they are only ever sent as encoded parameters.\n// Mode: Run Once for All Items.\n\nconst rows = $('Claim checks').all().map((i) => i.json).filter((r) => r.id);\nconst form = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');\n// No URL class in the Code node sandbox: take the host with a pattern.\nconst hostOf = (u) => { const m = /^https?:\\/\\/(?:[^@\\/?#]*@)?([^:\\/?#]+)/i.exec(String(u || '')); return m ? m[1].toLowerCase() : null; };\nconst reqs = [];\nconst add = (r, provider, endpoint, method, url, body, contentType, auth) =>\n  reqs.push({ observable_id: r.id, kind: r.kind, value: r.value, provider, endpoint, method, url,\n              body: body ?? '', content_type: method === 'GET' ? 'text/plain' : (contentType ?? 'application/json'), auth });\n\nconst TF = 'https://threatfox-api.abuse.ch/api/v1/';\nconst UH = 'https://urlhaus-api.abuse.ch/v1/';\nconst MB = 'https://mb-api.abuse.ch/api/v1/';\nconst FORM = 'application/x-www-form-urlencoded';\n\nfor (const r of rows) {\n  if (r.abuse_due) {\n    if (r.kind === 'host' || r.kind === 'ip') {\n      add(r, 'threatfox', 'search_ioc', 'POST', TF, JSON.stringify({ query: 'search_ioc', search_term: r.value, exact_match: true }), null, 'abuse');\n      add(r, 'urlhaus', 'host', 'POST', `${UH}host/`, form({ host: r.value }), FORM, 'abuse');\n    } else if (r.kind === 'url') {\n      add(r, 'urlhaus', 'url', 'POST', `${UH}url/`, form({ url: r.value }), FORM, 'abuse');\n    } else if (r.kind === 'sha256') {\n      add(r, 'malwarebazaar', 'get_info', 'POST', MB, form({ query: 'get_info', hash: r.value }), FORM, 'abuse');\n      add(r, 'threatfox', 'search_hash', 'POST', TF, JSON.stringify({ query: 'search_hash', hash: r.value }), null, 'abuse');\n    }\n  }\n  if (r.urlscan_result_due && r.urlscan_uuid) {\n    add(r, 'urlscan', 'result', 'GET', `https://urlscan.io/api/v1/result/${encodeURIComponent(r.urlscan_uuid)}/`, '', null, 'urlscan');\n  } else if (r.urlscan_wanted) {\n    const host = hostOf(r.value);\n    if (host) {\n      const q = `page.domain:\"${host.replace(/[^a-z0-9._-]/g, '')}\" AND date:>now-7d`;\n      add(r, 'urlscan', 'search', 'GET', `https://urlscan.io/api/v1/search/?size=5&q=${encodeURIComponent(q)}`, '', null, 'urlscan');\n    }\n  }\n}\nreturn reqs.map((json) => ({ json }));\n"
+      },
+      "id": "97249ae8-094e-58f1-93f7-7585d966b15b",
+      "name": "Plan requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Auth-Key",
+              "value": "={{ $json.auth === 'abuse' ? $('Abuse API TOKEN').first().json.data.token : '' }}"
+            },
+            {
+              "name": "API-Key",
+              "value": "={{ $json.auth === 'urlscan' ? $('urlscan.io API TOKEN').first().json.data.token : '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ $json.content_type }}",
+        "body": "={{ $json.body }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "id": "e9f6f10c-a1e2-560b-bd23-825b94d6d634",
+      "name": "CTI request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate results\n// Turns every response into a check row for record_checks() and decides\n// which top-level pages get a private urlscan.io scan (search found\n// nothing, daily cap not reached). Response text is attacker-influenced:\n// only short, length-capped fields are kept.\n// Mode: Run Once for All Items.\n\nconst plan = $('Plan requests').all().map((i) => i.json);\nconst resp = $input.all().map((i) => i.json);\nconst rows = $('Claim checks').all().map((i) => i.json).filter((r) => r.id);\nlet scansLeft = rows.length ? Number(rows[0].urlscan_scans_left) || 0 : 0;\n\nconst cut = (s, n = 200) => (s == null ? null : String(s).replace(/\\s+/g, ' ').trim().slice(0, n));\nconst parse = (b) => { if (typeof b !== 'string') return b || {}; try { return JSON.parse(b); } catch (e) { return { _text: b.slice(0, 200) }; } };\nconst results = new Map(rows.map((r) => [r.id, { observable_id: r.id, checks: [], abuse_checked: Boolean(r.abuse_due), urlscan: null }]));\nconst calls = [];\nconst submits = [];\n\nfunction interpret(p, status, body) {\n  const base = { provider: p.provider, http_status: status };\n  if (status === null) return { ...base, outcome: 'error', summary: 'no response' };\n  if (p.provider === 'urlscan') {\n    if (p.endpoint === 'search') {\n      if (status !== 200) return { ...base, outcome: 'error', summary: cut(body.message || body.description || `HTTP ${status}`) };\n      const hits = Array.isArray(body.results) ? body.results : [];\n      if (!hits.length) return { ...base, outcome: 'no_hit', summary: 'no earlier scan', _empty: true };\n      const r = hits[0];\n      const mal = r.verdicts?.overall?.malicious === true || r.verdicts?.malicious === true;\n      return { ...base, outcome: mal ? 'hit' : 'no_hit', report_url: r.task?.uuid ? `https://urlscan.io/result/${r.task.uuid}/` : null,\n               summary: cut(`earlier scan ${r.task?.time || ''}: ${r.page?.title || r.page?.url || ''}${mal ? ' — malicious' : ''}`),\n               details: { uuid: r.task?.uuid || null, time: r.task?.time || null, page_url: cut(r.page?.url, 300), malicious: mal },\n               _state: 'found' };\n    }\n    // result of our private scan\n    if (status === 404) return { _pending: true };\n    if (status !== 200) return { ...base, outcome: 'error', summary: cut(body.message || `HTTP ${status}`), _state: 'failed' };\n    const v = body.verdicts?.overall || {};\n    const mal = v.malicious === true;\n    return { ...base, outcome: mal ? 'hit' : 'no_hit', report_url: `https://urlscan.io/result/${body.task?.uuid || ''}/`,\n             summary: cut(`private scan: ${body.page?.title || body.page?.url || ''} — score ${v.score ?? 'n/a'}${mal ? ', malicious' : ''}`),\n             details: { score: v.score ?? null, malicious: mal, categories: (v.categories || []).slice(0, 10), brands: (v.brands || []).slice(0, 10).map((b) => cut(b?.name || b, 60)),\n                        final_url: cut(body.page?.url, 300), ip: body.page?.ip || null, country: body.page?.country || null },\n             _state: 'done' };\n  }\n  if (status !== 200) return { ...base, outcome: 'error', summary: cut(body.message || body.query_status || `HTTP ${status}`) };\n  const qs = body.query_status;\n  if (p.provider === 'threatfox') {\n    if (qs === 'no_result' || qs === 'no_results') return { ...base, outcome: 'no_hit' };\n    if (qs !== 'ok' || !Array.isArray(body.data)) return { ...base, outcome: 'error', summary: cut(qs || body._text) };\n    const d = body.data[0] || {};\n    return { ...base, outcome: 'hit', report_url: d.id ? `https://threatfox.abuse.ch/ioc/${d.id}/` : null,\n             summary: cut(`${d.malware_printable || d.malware || 'IOC'} (${d.threat_type || 'n/a'}, confidence ${d.confidence_level ?? 'n/a'}), ${body.data.length} IOC(s)`),\n             details: { iocs: body.data.slice(0, 5).map((x) => ({ id: x.id, ioc: cut(x.ioc, 200), threat_type: x.threat_type, malware: cut(x.malware_printable, 80),\n                                                                 confidence: x.confidence_level, first_seen: x.first_seen, last_seen: x.last_seen, tags: (x.tags || []).slice(0, 10) })) } };\n  }\n  if (p.provider === 'urlhaus') {\n    if (qs === 'no_results' || qs === 'invalid_url' || qs === 'invalid_host') return { ...base, outcome: 'no_hit', summary: qs === 'no_results' ? null : qs };\n    if (qs !== 'ok') return { ...base, outcome: 'error', summary: cut(qs || body._text) };\n    if (p.endpoint === 'host') {\n      const n = Number(body.url_count) || (Array.isArray(body.urls) ? body.urls.length : 0);\n      return { ...base, outcome: n > 0 ? 'hit' : 'no_hit', report_url: body.urlhaus_reference || null,\n               summary: cut(`${n} malware URL(s) on URLhaus${body.blacklists ? `, blacklists: ${Object.entries(body.blacklists).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''}`),\n               details: { url_count: n, urls: (body.urls || []).slice(0, 5).map((u) => ({ url: cut(u.url, 300), status: u.url_status, threat: u.threat, date_added: u.date_added, tags: (u.tags || []).slice(0, 10) })) } };\n    }\n    return { ...base, outcome: 'hit', report_url: body.urlhaus_reference || null,\n             summary: cut(`URLhaus: ${body.threat || 'malware'} (${body.url_status || 'n/a'})${(body.tags || []).length ? `, tags ${body.tags.slice(0, 5).join(' ')}` : ''}`),\n             details: { threat: body.threat, url_status: body.url_status, date_added: body.date_added, tags: (body.tags || []).slice(0, 10),\n                        payloads: (body.payloads || []).slice(0, 5).map((x) => ({ sha256: x.response_sha256, file_type: x.file_type, signature: x.signature })) } };\n  }\n  if (p.provider === 'malwarebazaar') {\n    if (qs === 'hash_not_found' || qs === 'no_results') return { ...base, outcome: 'no_hit' };\n    if (qs !== 'ok' || !Array.isArray(body.data)) return { ...base, outcome: 'error', summary: cut(qs || body._text) };\n    const d = body.data[0] || {};\n    return { ...base, outcome: 'hit', report_url: `https://bazaar.abuse.ch/sample/${p.value}/`,\n             summary: cut(`MalwareBazaar: ${d.signature || 'sample'} (${d.file_type || 'n/a'}), first seen ${d.first_seen || 'n/a'}`),\n             details: { signature: d.signature, file_type: d.file_type, file_name: cut(d.file_name, 200), first_seen: d.first_seen, tags: (d.tags || []).slice(0, 10) } };\n  }\n  return { ...base, outcome: 'error', summary: 'unknown provider' };\n}\n\nplan.forEach((p, i) => {\n  const res = resp[i] || {};\n  const status = Number.isInteger(Number(res.statusCode)) && res.statusCode !== undefined ? Number(res.statusCode) : null;\n  const body = parse(res.body);\n  calls.push({ provider: p.provider === 'urlscan' ? 'urlscan' : 'abusech', caller: 'sandbox',\n               endpoint: `${p.provider === 'urlscan' ? '' : `${p.provider}_`}${p.endpoint}`.slice(0, 40), http_status: status,\n               message: res.error ? cut(res.error.message || res.error, 300) : null,\n               fqdn: p.kind === 'host' ? p.value : null, observable_ip: p.kind === 'ip' ? p.value : null });\n  const out = results.get(p.observable_id);\n  if (!out) return;\n  const c = interpret(p, status, body);\n  if (c._pending) {\n    // Scan not finished yet: try again next run; give up after 15 minutes.\n    const row = rows.find((r) => r.id === p.observable_id);\n    const age = row?.urlscan_submitted_at ? (Date.now() - Date.parse(row.urlscan_submitted_at)) / 60000 : 0;\n    if (age > 15) {\n      out.checks.push({ provider: 'urlscan', outcome: 'error', http_status: status, summary: 'private scan result not available after 15 minutes' });\n      out.urlscan = { state: 'failed' };\n    }\n    return;\n  }\n  if (c._empty) {\n    const row = rows.find((r) => r.id === p.observable_id);\n    if (scansLeft > 0) {\n      scansLeft -= 1;\n      submits.push({ observable_id: p.observable_id, url: row.value });\n      return;      // the submission's own result row is written by \"Evaluate submits\"\n    }\n    c.outcome = 'error';\n    c.summary = 'no earlier scan; daily private scan limit reached';\n  }\n  if (c._state) out.urlscan = { state: c._state, uuid: c.details?.uuid || null };\n  delete c._state; delete c._empty;\n  out.checks.push(c);\n});\n\nreturn [{ json: { results: [...results.values()], calls, submits } }];\n"
+      },
+      "id": "0541b187-7ac7-5b45-8431-2a2980cf1523",
+      "name": "Evaluate results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Every request of this run (abuse.ch, urlscan.io) for the API usage page.\nSELECT cyber_sentinel_ai.api_calls_record($1::jsonb) AS logged;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.calls) ] }}"
+        }
+      },
+      "id": "b49b2805-c7c0-5107-8cab-4ab533878e99",
+      "name": "Log API calls",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1680,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Check rows + verdicts; returns the observables that became a hit and\n-- were not e-mailed yet (only when sandbox_alert_enabled = 1).\nSELECT * FROM cyber_sentinel_sandbox.record_checks($1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($('Evaluate results').first().json.results) ] }}"
+        }
+      },
+      "id": "ea4eb62f-f9fc-56b2-b2e4-810df4ea3a8c",
+      "name": "Store results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Plan submits\n// Top-level pages without an earlier urlscan.io scan: one item per private\n// scan. No item = nothing to submit, this branch ends here.\n// Mode: Run Once for All Items.\n\nreturn $('Evaluate results').first().json.submits.map((json) => ({ json }));\n"
+      },
+      "id": "3df8b980-0387-5a26-9488-12e58c4502af",
+      "name": "Plan submits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://urlscan.io/api/v1/scan/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "={{ $('urlscan.io API TOKEN').first().json.data.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ url: $json.url, visibility: 'private', tags: ['cyber-sentinel', 'sandbox'] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          }
+        }
+      },
+      "id": "1c17aeef-2302-5d53-b5c7-b559a9b7295e",
+      "name": "Submit private scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate submits\n// Accepted scan -> urlscan_state 'submitted' + uuid; a later run fetches the\n// result (claim_checks() returns it after a minute). Refused -> 'failed'.\n// Mode: Run Once for All Items.\n\nconst plan = $('Plan submits').all().map((i) => i.json);\nconst resp = $input.all().map((i) => i.json);\nconst cut = (s, n = 200) => (s == null ? null : String(s).replace(/\\s+/g, ' ').trim().slice(0, n));\nconst results = [];\nconst calls = [];\nplan.forEach((p, i) => {\n  const res = resp[i] || {};\n  const status = Number.isInteger(Number(res.statusCode)) && res.statusCode !== undefined ? Number(res.statusCode) : null;\n  let body = res.body;\n  if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = { message: body.slice(0, 200) }; } }\n  body = body || {};\n  calls.push({ provider: 'urlscan', caller: 'sandbox', endpoint: 'scan', http_status: status,\n               message: res.error ? cut(res.error.message || res.error, 300) : null });\n  if (status === 200 && body.uuid) {\n    results.push({ observable_id: p.observable_id, abuse_checked: false, urlscan: { state: 'submitted', uuid: body.uuid },\n                   checks: [{ provider: 'urlscan', outcome: 'pending', http_status: status, summary: 'private scan submitted',\n                              report_url: `https://urlscan.io/result/${body.uuid}/` }] });\n  } else {\n    results.push({ observable_id: p.observable_id, abuse_checked: false, urlscan: { state: 'failed' },\n                   checks: [{ provider: 'urlscan', outcome: 'error', http_status: status,\n                              summary: cut(`private scan refused: ${[body.message, body.description].filter(Boolean).join(' - ') || `HTTP ${status}`}`) }] });\n  }\n});\nreturn [{ json: { results, calls } }];\n"
+      },
+      "id": "3a6ffa91-1b93-55e9-ae73-db06bc15df6e",
+      "name": "Evaluate submits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT cyber_sentinel_ai.api_calls_record($1::jsonb) AS logged;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.calls) ] }}"
+        }
+      },
+      "id": "b4fddd61-5c2a-55f4-b3c6-7070616819c7",
+      "name": "Log submit calls",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2880,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) AS stored FROM cyber_sentinel_sandbox.record_checks($1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($('Evaluate submits').first().json.results) ] }}"
+        }
+      },
+      "id": "780569b8-8274-5956-b3ce-d8438f1833ac",
+      "name": "Store submits",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3120,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "kin1B7xj2oBNB0Mj",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5251e65c-9292-51b3-ab95-65a5403f82ad",
+              "leftValue": "={{ $('Store results').all().some((i) => !!i.json.id) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cd88dde3-be14-5bb5-b764-ebbdae8331d6",
+      "name": "Any hits?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2160,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "secretPath": "cyber-sentinel/credentials/gmail",
+        "additionalFields": {}
+      },
+      "id": "96a9f3cf-0912-5c69-b4da-84f9010cb41d",
+      "name": "Get Email Pass",
+      "type": "n8n-nodes-hashi-vault.hashiCorpVault",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        -100
+      ],
+      "credentials": {
+        "hashiCorpVaultApi": {
+          "id": "1QU8HZJWvrIPg75B",
+          "name": "HashiCorp Vault account"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build e-mail\n// One e-mail for every sandbox observable that became a hit in this run.\n// Everything is untrusted (it comes from the browsed site and from CTI\n// feeds): HTML-escaped, URLs defanged.\n// Mode: Run Once for All Items.\n\nconst hits = $('Store results').all().map((i) => i.json).filter((h) => h.id);\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst defang = (s) => String(s ?? '').replace(/^http/i, 'hxxp').replace(/\\./g, '[.]');\nconst rows = hits.map((h) => `<tr>\n  <td style=\"padding:6px;border-bottom:1px solid #444\">${esc(h.kind)}</td>\n  <td style=\"padding:6px;border-bottom:1px solid #444;word-break:break-all\"><code>${esc(defang(h.value).slice(0, 300))}</code>\n    ${h.example_url ? `<br><small>from ${esc(defang(h.example_url).slice(0, 200))}</small>` : ''}</td>\n  <td style=\"padding:6px;border-bottom:1px solid #444\">${esc((h.hit_providers || []).join(', '))}</td>\n  <td style=\"padding:6px;border-bottom:1px solid #444\">${(h.summaries || []).slice(0, 3).map(esc).join('<br>')}\n    ${(h.report_urls || []).slice(0, 3).map((u) => `<br><small>${esc(defang(u))}</small>`).join('')}</td>\n</tr>`).join('');\nconst html = `<div style=\"font-family:sans-serif;background:#1e1e1e;color:#eee;padding:16px\">\n<h2 style=\"color:#ff5252;margin-top:0\">🧪 Browser sandbox — CTI hit${hits.length > 1 ? 's' : ''}</h2>\n<p>Something opened in the sandbox matches a threat-intelligence source. Details: AI Config UI → Sandbox.</p>\n<table style=\"border-collapse:collapse;width:100%;font-size:13px\">\n<tr><th align=\"left\">Type</th><th align=\"left\">Observable</th><th align=\"left\">Providers</th><th align=\"left\">Findings</th></tr>\n${rows}</table>\n<p style=\"color:#999;font-size:12px\">URLs are defanged (hxxp, [.]). Do not open them outside the sandbox.</p></div>`;\nreturn [{ json: { subject: `🧪 Sandbox: ${hits.length} CTI hit${hits.length > 1 ? 's' : ''} — ${hits[0].value.slice(0, 60).replace(/\\./g, '[.]')}`, html } }];\n"
+      },
+      "id": "7761cd44-db6e-5bb0-b4b0-4a77f627e1e7",
+      "name": "Build e-mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Get Email Pass').first().json.data.user }}",
+        "toEmail": "={{ $('Get Email Pass').first().json.data.to }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "24641f0c-2fd0-5d02-af30-a7a0ecc43721",
+      "name": "Send an Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2880,
+        -100
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "adTLsyZpBC1gVJK2",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Claim checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "Claim checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim checks": {
+      "main": [
+        [
+          {
+            "node": "Abuse API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abuse API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "urlscan.io API TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan.io API TOKEN": {
+      "main": [
+        [
+          {
+            "node": "Plan requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan requests": {
+      "main": [
+        [
+          {
+            "node": "CTI request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CTI request": {
+      "main": [
+        [
+          {
+            "node": "Evaluate results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate results": {
+      "main": [
+        [
+          {
+            "node": "Log API calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log API calls": {
+      "main": [
+        [
+          {
+            "node": "Store results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store results": {
+      "main": [
+        [
+          {
+            "node": "Any hits?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Plan submits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any hits?": {
+      "main": [
+        [
+          {
+            "node": "Get Email Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Pass": {
+      "main": [
+        [
+          {
+            "node": "Build e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan submits": {
+      "main": [
+        [
+          {
+            "node": "Submit private scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit private scan": {
+      "main": [
+        [
+          {
+            "node": "Evaluate submits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate submits": {
+      "main": [
+        [
+          {
+            "node": "Log submit calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log submit calls": {
+      "main": [
+        [
+          {
+            "node": "Store submits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "errorWorkflow": "FailureGuard0001"
+  },
+  "versionId": "53b89c78-a8cb-5636-8ad9-a5b40254e8f9",
+  "meta": {
+    "instanceId": "4efa9d51e8a3979b61633a85e297802c7247ebfbaaec1d5e3e34069621598208"
+  },
+  "id": "SandboxScan0001X",
+  "tags": []
+}

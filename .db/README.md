@@ -12,7 +12,7 @@ Postgres (`postgres_db`, `10.10.10.9:5432`) has no published port. These scripts
 .db/mac/db_prod.sh      # prod -> localhost:5433 on Mac (5432 on Linux), SELECT only
 ```
 
-Connection: database `cyber_intelligence`, user `postgres`, password `vault_postgres_password` from `ansible/group_vars/all/vault.yml`.
+Connection: database `cyber_intelligence`, user `hunter` (`postgres_user`, the app role n8n uses), password `vault_postgres_password` from `ansible/host_vars/<dev_vm|rpi5>/vault.yml`. The superuser is `postgres` with `vault_postgres_root_password` — use it only on dev, when the app role is not enough.
 
 **pgAdmin (Mac):** Tools → Import/Export Servers → Import → `.db/mac/pgadmin-servers.json`. This adds DEV (5432) and PROD (5433, red, read-only) under the *Cyber Sentinel* group. Start the matching tunnel before connecting.
 
