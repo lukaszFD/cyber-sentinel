@@ -4,7 +4,7 @@ Guidance for Claude (Claude Code and the Claude.ai "Cyber Sentinel" project) whe
 
 ## What this is
 
-Cyber Sentinel is a self-hosted, AI-driven network security stack: DNS filtering and logging (Pi-hole + recursive Unbound; Pi-hole's query log feeds `dns_queries`), threat-intel enrichment and AI verdicts in n8n (Gemini, VirusTotal, abuse.ch ThreatFox/URLhaus, urlscan.io, Shodan), PostgreSQL 16 + pgvector, HashiCorp Vault for secrets, Nginx TLS proxy, Prometheus/Grafana monitoring. Production runs on a Raspberry Pi 5.
+Cyber Sentinel is a self-hosted, AI-driven network security stack: DNS filtering and logging (Pi-hole + recursive Unbound; Pi-hole's query log feeds `dns_queries`), threat-intel enrichment and AI verdicts in n8n (Gemini, VirusTotal, abuse.ch ThreatFox/URLhaus, urlscan.io, Shodan), PostgreSQL 16 + pgvector, HashiCorp Vault for secrets, Nginx TLS proxy, Prometheus host metrics. Production runs on a Raspberry Pi 5.
 
 There is no application build. The repo is infrastructure-as-code (Ansible + Docker Compose), plus a few Python services and SQL.
 
@@ -23,7 +23,7 @@ There is no application build. The repo is infrastructure-as-code (Ansible + Doc
   - `hcv/` — Vault auto-unsealer.
   - `n8n/workflows/` — exported n8n workflows (JSON).
   - `postgres/` — schema SQL (`db_deployment.sql`, partitioning/retention, `db_ai_pipeline.sql`, `db_blocklists.sql`, `db_sandbox.sql`, AI config editor).
-  - `pihole/`, `unbound/`, `prometheus/`, `grafana/provisioning/`.
+  - `pihole/`, `unbound/`, `prometheus/`.
 - `.db/` — SSH tunnel to Postgres, split by OS: `.db/mac/` and `.db/linux/` (`pg_tunnel.sh dev|prod`, `db_dev.sh`, `db_prod.sh`; Mac also has `pgadmin-servers.json`), plus shared ad-hoc SQL. See `.db/README.md`.
 - `docs/` + `mkdocs.yml` — MkDocs Material site published to https://lukaszfd.github.io/cyber-sentinel/.
 - `.github/workflows/` — CodeQL, Trivy, OpenSSF Scorecard (`.trivyignore` holds accepted findings).
@@ -64,6 +64,11 @@ ansible-playbook -i hosts.ini 00_main.yml --limit vm-prox-dev
   - **Only when the user allows it, each time:** `git commit`, `git push`, a tag, a GitHub Release.
   - **Never:** merge or approve a PR (the user accepts every PR), push to `main`, change repo settings or rulesets.
 - Claude works on the branch the user points to (or creates `YYYYMMDD_<english_name>` when asked), never on `main`. `.claude/settings.json` enforces the commit/push/tag prompts and blocks `gh pr merge`.
+
+### Where Claude works
+
+- Claude works in the main checkout on the user's branch, never in `.claude/worktrees/*` — the user follows every changed file in the IDE. A session started with a worktree says so at once and asks the user to start a new session in the main folder with the worktree option off.
+- Deploys and tests run in a visible terminal tab (not filtered in the background), so the user can follow them live.
 
 ## Skills (`.claude/skills/`)
 

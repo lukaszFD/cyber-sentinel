@@ -169,7 +169,7 @@
     <div class="score s{{ result.score.rule_score }}">{{ result.score.rule_score }}</div>
     <div>
       <div class="stat-sm">{{ result.level.description if result.level else '' }}</div>
-      <div class="muted">Recommended action: {{ result.level.action_recommended if result.level else '—' }}{% if result.level and result.level.is_malicious_flag %} · counted as malicious in Grafana{% endif %}</div>
+      <div class="muted">Recommended action: {{ result.level.action_recommended if result.level else '—' }}{% if result.level and result.level.is_malicious_flag %} · counted as malicious{% endif %}</div>
     </div>
   </div>
   <h2>Rule trace</h2>

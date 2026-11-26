@@ -16,14 +16,13 @@ All containers share one bridge network, `internal_network` (`10.10.10.0/24`), w
 | `.8` | `ai-config-ui` | built (Flask) | AI pipeline configuration |
 | `.9` | `postgres_db` | built (pgvector + pg_cron) | The only database |
 | `.10` | `portainer` | registry | Docker management |
-| `.11` | `grafana` | registry | Dashboards |
 | `.12` | `vault` | registry | Secrets for n8n |
 | `.13` | `prometheus` | registry | Metrics |
 | `.14` | `node_exporter` | registry | Host metrics |
 | `.16` | `sandbox-pihole` | registry | DNS of the browser sandbox (also in `sandbox_network`), to reach Unbound |
 | `.100` | `nginx-proxy` | registry | TLS reverse proxy — started by playbook 05, not by compose |
 
-DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log); `.5` (formerly `firefox`) is now `sandbox_log_processor`.
+DNS path: `client → pihole → unbound → internet`. `.3` is free (it was `passive_dns`, removed in favour of Pi-hole's own log); `.5` (formerly `firefox`) is now `sandbox_log_processor`; `.11` is free (it was `grafana`, removed in v2.5.1).
 
 ### Browser sandbox networks
 
@@ -52,6 +51,7 @@ All other services have no published ports.
 - `vault` — `IPC_LOCK` so secrets are not swapped to disk; TLS terminated by Nginx.
 - `sandbox-browser` — stateless (profile in tmpfs), only on the internal sandbox network, forced through mitmproxy; recreated nightly by `sandbox-reset`.
 - `sandbox-mitmproxy` — refuses private/loopback/link-local destinations, so the sandbox cannot reach the LAN or the stack.
+- `sandbox_log_processor` — read-only filesystem, all capabilities dropped, `no-new-privileges`, 128 MB limit, only its own `SANDBOX_DB_*` variables. Docker `HEALTHCHECK`: healthy while the main loop runs and Postgres answers (heartbeat file on a small tmpfs, touched every 15 s; unhealthy after 60 s without one).
 - `node_exporter` — host `/proc`, `/sys` and `/` mounted read-only.
 - `portainer` — has the Docker socket, i.e. full control of the host's Docker. Keep it behind Nginx.
 
@@ -61,7 +61,6 @@ All other services have no published ports.
 |---|---|
 | `postgres_data` | the `cyber_intelligence` database |
 | `n8n_data` | workflows, credentials, execution history |
-| `grafana_data` | users and non-provisioned dashboards |
 | `prometheus_data` | metrics history |
 | `./config/vault/data` | Vault storage (bind mount) |
 | `./portainer_data` | Portainer settings (bind mount) |

@@ -1,6 +1,6 @@
 -- ============================================
 -- Cyber Intelligence Database Deployment — POSTGRES
--- Version: 1.1
+-- Version: 1.2 (Grafana views v_grafana_* dropped; Grafana removed in v2.5.1)
 -- ============================================
 -- Runs against: postgres_db (pgvector/pgvector:pg16 + pg_cron, see
 -- Dockerfile.postgres). Executed by playbook 04_3_db_postgres.yml as the
@@ -311,92 +311,14 @@ FROM cyber_sentinel.threat_indicators ti
 ) latest ON ti.dns_query_id = latest.dns_query_id AND ti.last_scan = latest.max_scan;
 
 -- ============================================
--- SECTION 6: GRAFANA VIEWS
+-- SECTION 6: VIEWS
 -- ============================================
-
-CREATE OR REPLACE VIEW cyber_sentinel.v_grafana_malicious_stats AS
-SELECT
-    COUNT(vlt.id) AS total_scans,
-    SUM(CASE WHEN tl.is_malicious_flag THEN 1 ELSE 0 END) AS total_malicious_scans,
-    ROUND((SUM(CASE WHEN tl.is_malicious_flag THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(vlt.id), 0)) * 100, 2) AS malicious_percentage,
-    MAX(vlt.last_scan) AS last_scan,
-    MIN(vlt.last_scan) AS first_scan
-FROM cyber_sentinel.v_latest_threat_reports vlt
-         JOIN cyber_sentinel.dic_threat_levels tl ON vlt.threat_score = tl.score;
-
-CREATE OR REPLACE VIEW cyber_sentinel.v_grafana_daily_trends AS
-SELECT
-    vlt.last_scan::date AS scan_date,
-    EXTRACT(EPOCH FROM date_trunc('day', MAX(vlt.last_scan)))::bigint AS time_sec,
-    COUNT(vlt.id) AS total_scans_per_day,
-    SUM(CASE WHEN tl.is_malicious_flag THEN 1 ELSE 0 END) AS total_positives_per_day,
-    SUM(CASE WHEN NOT tl.is_malicious_flag THEN 1 ELSE 0 END) AS total_clean_per_day,
-    MAX(vlt.threat_score) AS max_threat_score_that_day,
-    AVG(vlt.threat_score) AS avg_threat_score
-FROM cyber_sentinel.v_latest_threat_reports vlt
-         JOIN cyber_sentinel.dic_threat_levels tl ON vlt.threat_score = tl.score
-GROUP BY scan_date
-ORDER BY scan_date DESC;
-
-CREATE OR REPLACE VIEW cyber_sentinel.v_grafana_dns_hourly_traffic AS
-SELECT
-    date_trunc('hour', timestamp) AS hour_group,
-    EXTRACT(EPOCH FROM date_trunc('hour', timestamp))::bigint AS time_sec,
-    COUNT(id) AS total_queries,
-    COUNT(DISTINCT domain) AS unique_domains,
-    COUNT(DISTINCT source_ip) AS unique_sources,
-    MAX(timestamp) AS latest_query
-FROM cyber_sentinel.dns_queries
-GROUP BY hour_group
-ORDER BY hour_group DESC;
-
-CREATE OR REPLACE VIEW cyber_sentinel.v_grafana_threat_explorer AS
-SELECT
-    ne.timestamp,
-    dq.domain AS fqdn,
-    ne.source_ip,
-    ne.dest_ip,
-    ne.request_url,
-    ne.event_type,
-    (SELECT STRING_AGG(sp.name, ', ')
-     FROM cyber_sentinel.threat_indicator_details tid
-              JOIN cyber_sentinel.dic_source_providers sp ON tid.source_id = sp.id
-     WHERE tid.indicator_id = ti.id) AS providers,
-    tl.description AS threat_label,
-    tl.action_recommended,
-    ar.threat_score,
-    ne.action_taken
-FROM cyber_sentinel.network_events ne
-         JOIN cyber_sentinel.dns_queries dq ON ne.dns_query_id = dq.id
-         JOIN cyber_sentinel.threat_indicators ti ON ne.threat_indicator_id = ti.id
-         JOIN cyber_sentinel.ai_analysis_results ar ON ti.analysis_result_id = ar.id
-         JOIN cyber_sentinel.dic_threat_levels tl ON ar.threat_score = tl.score
-WHERE tl.is_malicious_flag = TRUE
-ORDER BY ne.timestamp DESC;
-
-CREATE OR REPLACE VIEW cyber_sentinel.v_grafana_threat_alerts AS
-SELECT
-    ti.id AS indicator_id,
-    dq.timestamp AS detection_time,
-    dq.domain AS fqdn,
-    dq.record_type,
-    dq.source_ip,
-    dq.response_ip AS observable_ip,
-    ar.threat_score,
-    tl.description AS threat_label,
-    tl.is_malicious_flag,
-    tl.action_recommended,
-    ar.verdict_summary_en AS verdict_en,
-    ar.analysis_pl,
-    ar.confidence_score,
-    ti.scan_count,
-    ti.last_scan
-FROM cyber_sentinel.threat_indicators ti
-         JOIN cyber_sentinel.dns_queries dq ON ti.dns_query_id = dq.id
-         JOIN cyber_sentinel.ai_analysis_results ar ON ti.analysis_result_id = ar.id
-         JOIN cyber_sentinel.dic_threat_levels tl ON ar.threat_score = tl.score
-WHERE tl.is_malicious_flag = TRUE
-ORDER BY dq.timestamp DESC, ar.threat_score DESC;
+-- Grafana was removed in v2.5.1; its views go with it (idempotent).
+DROP VIEW IF EXISTS cyber_sentinel.v_grafana_malicious_stats;
+DROP VIEW IF EXISTS cyber_sentinel.v_grafana_daily_trends;
+DROP VIEW IF EXISTS cyber_sentinel.v_grafana_dns_hourly_traffic;
+DROP VIEW IF EXISTS cyber_sentinel.v_grafana_threat_explorer;
+DROP VIEW IF EXISTS cyber_sentinel.v_grafana_threat_alerts;
 
 CREATE OR REPLACE VIEW cyber_sentinel.v_threat_scale_for_agent AS
 SELECT

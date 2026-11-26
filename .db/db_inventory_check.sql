@@ -108,13 +108,8 @@ SELECT * FROM cyber_sentinel.threat_data_raw LIMIT 100;
 SELECT * FROM cyber_sentinel.partition_maintenance_log ORDER BY executed_at DESC LIMIT 50;
 
 -- ------------------------------------------------------------
--- 10. Grafana views — confirm they return data once dns_queries has rows
+-- 10. Views — confirm they return data once dns_queries has rows
 -- ------------------------------------------------------------
 SELECT * FROM cyber_sentinel.v_pending_analysis LIMIT 50;
 SELECT * FROM cyber_sentinel.v_latest_threat_reports LIMIT 50;
-SELECT * FROM cyber_sentinel.v_grafana_malicious_stats;
-SELECT * FROM cyber_sentinel.v_grafana_daily_trends LIMIT 50;
-SELECT * FROM cyber_sentinel.v_grafana_dns_hourly_traffic LIMIT 50;
-SELECT * FROM cyber_sentinel.v_grafana_threat_explorer LIMIT 50;
-SELECT * FROM cyber_sentinel.v_grafana_threat_alerts LIMIT 50;
 SELECT * FROM cyber_sentinel.v_threat_scale_for_agent;

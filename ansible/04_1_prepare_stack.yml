@@ -18,7 +18,7 @@
 #               - Dockerfiles for custom images (postgres,
 #                 log_processor, vault unsealer)
 #               - ai_config_ui/ build context (AI config editor)
-#               - Service configs (unbound, prometheus, grafana)
+#               - Service configs (unbound, prometheus)
 #               - Pi-hole log directory (read by dns_log_processor)
 #               - Browser sandbox dirs + mitmproxy addon (config/sandbox)
 #               - Vault data directory with correct UID:GID
@@ -71,9 +71,6 @@
         - "n8n_data"                                   # n8n workflows + credentials volume
         - "config/vault/data"                          # Vault file-backend storage (UID 100)
         - "config/vault/config"                        # Vault HCL config files
-        - "config/grafana/provisioning/datasources"    # Auto-provisioned datasources
-        - "config/grafana/provisioning/dashboards"     # Dashboard provisioning manifest
-        - "config/grafana/dashboards"                  # Actual dashboard JSON files
         - "ai_config_ui"                               # AI config editor build context
         - "config/sandbox/addons"                      # Browser sandbox: mitmproxy addon
         - "config/sandbox/logs"                        # Browser sandbox: urls.jsonl (mitmproxy)
@@ -185,9 +182,8 @@
     # ============================================================
     # SECTION 3 — Service configuration files
     # ------------------------------------------------------------
-    # Copies static config for Unbound (recursive DNS), Prometheus
-    # scrape targets, and Grafana provisioning. Grafana dashboards
-    # land in two places intentionally — see [04.1.3.4].
+    # Copies static config for Unbound (recursive DNS), the sandbox
+    # mitmproxy addon and Prometheus scrape targets.
     # ============================================================
 
     - name: "[04.1.3.1] Copy Unbound DNS resolver configuration"
@@ -210,23 +206,6 @@
       ansible.builtin.copy:
         src: "{{ main_repo_source_dir }}/config/prometheus/prometheus.yml"
         dest: "{{ remote_deploy_base }}/config/prometheus/prometheus.yml"
-        owner: "{{ deployment_user }}"
-        group: "{{ deployment_user }}"
-        mode: '0644'
-
-    - name: "[04.1.3.3] Copy Grafana provisioning tree (datasources + manifests)"
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/grafana/provisioning/"
-        dest: "{{ remote_deploy_base }}/config/grafana/provisioning/"
-        owner: "{{ deployment_user }}"
-        group: "{{ deployment_user }}"
-        mode: '0644'
-        directory_mode: '0755'
-
-    - name: "[04.1.3.4] Copy dashboard JSONs to Grafana's runtime path"
-      ansible.builtin.copy:
-        src: "{{ main_repo_source_dir }}/config/grafana/provisioning/dashboards/"
-        dest: "{{ remote_deploy_base }}/config/grafana/dashboards/"
         owner: "{{ deployment_user }}"
         group: "{{ deployment_user }}"
         mode: '0644'

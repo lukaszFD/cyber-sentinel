@@ -234,9 +234,8 @@ SETTING_HELP = {
     "vt_medium_max": {
         "min": 0, "max": 100, "integer": True, "stage": 3,
         "label": "Malicious from (antivirus detections, above this number)",
-        "what": "Above this many antivirus detections a domain is considered malicious (score 4, Block) and is "
-                "counted as a threat in the Grafana dashboards. Between the low-risk ceiling and this number "
-                "it needs manual review (score 3).",
+        "what": "Above this many antivirus detections a domain is considered malicious (score 4, Block). "
+                "Between the low-risk ceiling and this number it needs manual review (score 3).",
         "raise": "More engines must agree before a domain is called malicious — fewer false alarms, later reaction.",
         "lower": "A domain is called malicious with fewer engines agreeing — faster reaction, more false alarms.",
     },
@@ -291,7 +290,7 @@ SETTING_HELP = {
                 "the check, so no device in the network can reach them any more. Domains of trusted "
                 "providers are never blocked. Every block is listed at the bottom of this section.",
         "raise": "On — the network is protected within minutes of the first visit, without waiting for you.",
-        "lower": "Off — nothing is blocked automatically; you decide based on the e-mails and Grafana.",
+        "lower": "Off — nothing is blocked automatically; you decide based on the e-mails.",
     },
     "pihole_block_min_vt_malicious": {
         "min": 1, "max": 100, "integer": True, "stage": 6,
@@ -546,7 +545,7 @@ PIPELINE_STEPS = {
                            "Clearly suspicious domains go on to deep analysis."),
     3: ("Scoring rules", "Fixed rules turn the evidence into a score from 1 (clean) to 5 (critical)."),
     4: ("AI analyst", "An AI analyst explains the score in English and Polish and may correct it slightly."),
-    5: ("Alerts", "Every verdict is stored for the Grafana dashboards; serious ones are e-mailed."),
+    5: ("Alerts", "Every verdict is stored in the database; serious ones are e-mailed."),
     6: ("Automatic blocking", "Domains that are clearly malicious are blocked in Pi-hole for the whole network."),
     7: ("Deep recon", "A separate hourly workflow takes a second look at high-scored domains: domain age, "
                       "certificate history and the web page. An AI analyst may propose a different score; "

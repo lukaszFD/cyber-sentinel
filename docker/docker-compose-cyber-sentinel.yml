@@ -168,23 +168,6 @@ services:
       - ./portainer_data:/data
     restart: unless-stopped
 
-  # [SVC.OBSERVE.GRAFANA] Grafana — dashboards, provisioned by 04.1
-  grafana:
-    image: "{{ cs_images.grafana }}"
-    container_name: grafana
-    networks:
-      internal_network:
-        ipv4_address: 10.10.10.11
-    dns: 10.10.10.4
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    volumes:
-      - './config/grafana/provisioning:/etc/grafana/provisioning'
-      - './config/grafana/dashboards:/etc/grafana/dashboards'
-      - 'grafana_data:/var/lib/grafana'
-    restart: unless-stopped
-
   # [SVC.SECRETS] HashiCorp Vault — secrets for n8n; init/unseal by 06.1
   vault:
     image: "{{ cs_images.vault }}"
@@ -375,6 +358,9 @@ services:
       - './config/sandbox/logs:/logs:ro'
       - './config/sandbox/pihole/log:/var/log/sandbox-pihole:ro'
     read_only: true
+    # Heartbeat file for the image's HEALTHCHECK (writable, owned by user 1000).
+    tmpfs:
+      - /run/heartbeat:uid=1000,gid=1000,mode=0700,size=64k
     cap_drop:
       - ALL
     security_opt:
@@ -421,6 +407,5 @@ networks:
 
 volumes:
   n8n_data:
-  grafana_data:
   prometheus_data:
   postgres_data:

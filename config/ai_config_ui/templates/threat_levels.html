@@ -5,14 +5,14 @@
 <p class="muted">Table <code>cyber_sentinel.dic_threat_levels</code>.</p>
 <div class="help-box">
   <ul>
-    <li><strong>Description</strong> and <strong>Recommended action</strong> are inserted into the AI prompt as <code>[[THREAT_SCALE]]</code>. The AI uses them to word its verdict and the recommended action in <code>analysis_pl</code>, so keep them short and unambiguous. The description is also the <code>threat_label</code> shown in the Grafana threat explorer and alert views.</li>
-    <li><strong>Malicious</strong> decides which scores every Grafana view counts as malicious (malicious statistics, daily trends, threat explorer, threat alerts). The views read this table at query time, so a change is <strong>retroactive</strong> — historical verdicts are re-counted immediately. Malicious levels must be a contiguous top range (e.g. 4–5 or 3–5).</li>
+    <li><strong>Description</strong> and <strong>Recommended action</strong> are inserted into the AI prompt as <code>[[THREAT_SCALE]]</code>. The AI uses them to word its verdict and the recommended action in <code>analysis_pl</code>, so keep them short and unambiguous.</li>
+    <li><strong>Malicious</strong> decides which scores count as malicious — the AI agent's threat scale and the main workflow read it. It is read at query time, so a change is <strong>retroactive</strong>. Malicious levels must be a contiguous top range (e.g. 4–5 or 3–5).</li>
     <li>The scores themselves are produced by the rule engine (see <a href="{{ url_for('simulator_page') }}">Simulator</a>); editing this page never changes a score.</li>
     <li>The number of levels is fixed at five: the rule engine, the prompt (<code>proposed_score: integer 1-5</code>) and the foreign key on stored verdicts all assume 1–5. Adding or removing a level is a code change, not something this page can do safely.</li>
   </ul>
 </div>
 
-<form method="post" class="card" id="levels-form" data-confirm-malicious="Changing which levels are malicious re-counts every historical verdict in Grafana. Continue?">
+<form method="post" class="card" id="levels-form" data-confirm-malicious="Changing which levels are malicious also changes how historical verdicts are counted. Continue?">
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
   <table class="list">
     <thead><tr><th>Score</th><th>Description</th><th>Recommended action</th><th>Malicious</th></tr></thead>

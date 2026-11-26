@@ -3,7 +3,7 @@
 # Cyber Sentinel — Playbook 05 — Nginx Reverse Proxy with SSL
 # ============================================================
 # Purpose:    Deploys an Nginx reverse proxy in front of all web-facing
-#             services (Pi-hole, n8n, Portainer, Grafana, HashiCorp
+#             services (Pi-hole, n8n, Portainer, HashiCorp
 #             Vault, AI config editor, browser sandbox + its Pi-hole). Provisions per-service
 #             TLS certs from Ansible Vault and renders Nginx server
 #             blocks from a Jinja2 template.
@@ -66,7 +66,6 @@
       - { name: "pihole",          port: 80,   internal_host: "pihole" }
       - { name: "n8n",             port: 5678, internal_host: "n8n-server" }
       - { name: "portainer",       port: 9000, internal_host: "portainer" }
-      - { name: "grafana",         port: 3000, internal_host: "grafana" }
       - { name: "hashicorp_vault", port: 8200, internal_host: "hashicorp_vault" }
       - { name: "ai_config",       port: 8000, internal_host: "ai-config-ui", hostname: "ai-config" }
       - { name: "sandbox",         port: 3000, internal_host: "sandbox-browser", cert_fallback: "firefox" }
@@ -128,8 +127,9 @@
     # assemble server_name.
     # ============================================================
 
-    # firefox was replaced by the browser sandbox (sandbox.<suffix>).
-    - name: "[05.3.0] Remove the retired firefox server block and cert"
+    # firefox was replaced by the browser sandbox (sandbox.<suffix>);
+    # grafana was removed in v2.5.1.
+    - name: "[05.3.0] Remove retired server blocks and certs (firefox, grafana)"
       ansible.builtin.file:
         path: "{{ remote_deploy_base }}/config/nginx/{{ item }}"
         state: absent
@@ -137,6 +137,9 @@
         - conf.d/firefox.conf
         - certs/firefox.crt
         - certs/firefox.key
+        - conf.d/grafana.conf
+        - certs/grafana.crt
+        - certs/grafana.key
 
     - name: "[05.3.1] Render Nginx server block for each service"
       ansible.builtin.template:
