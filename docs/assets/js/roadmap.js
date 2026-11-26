@@ -19,6 +19,11 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
+  function sanitizeRepo(repo) {
+    var s = String(repo == null ? "" : repo).trim();
+    return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s) ? s : "";
+  }
+
   // Minimal, safe inline markdown: escape first, then add a few tags back.
   function inline(text, repo) {
     var codes = [];
@@ -260,7 +265,7 @@
       if (root.getAttribute("data-ready")) return;
       root.setAttribute("data-ready", "1");
       var ctx = {
-        repo: root.getAttribute("data-repo"),
+        repo: sanitizeRepo(root.getAttribute("data-repo")),
         epicLabel: root.getAttribute("data-epic-label") || "type:epic",
         fixLabels: (root.getAttribute("data-fix-labels") || "type:bug,type:security").split(",").map(function (s) { return s.trim(); }),
         filterPrefix: root.getAttribute("data-filter-prefix") || "area:"
