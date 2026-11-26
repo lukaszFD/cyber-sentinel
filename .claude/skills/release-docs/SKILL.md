@@ -40,9 +40,9 @@ Update the pages for what changed: `docs/n8n.md`, `docs/database.md`, `docs/arch
 
 ## 5. Pull request
 
-- Branch `<issue-nr>-<short-slug>`; PR title `<type>(<area>): <summary>` (it becomes the squash commit on `main`); body with `Closes #N` and the PR template checklist.
+- Branch `YYYYMMDD_<english_name>` (e.g. `20261126_release_v2_6_0`); PR title `<type>(<area>): <summary>` (it becomes the squash commit on `main`); body with `Closes #N` and the PR template checklist.
 - Rules on `main`: **linear history** — merge with *Squash* or *Rebase* only (`gh pr merge N --squash`), a merge commit is refused; **all review threads resolved**, including code scanning comments from `github-advanced-security[bot]` (Trivy, CodeQL). Fix the finding or resolve the thread with a reason; accepted findings go into `.trivyignore` with a written justification.
-- Claude prepares files and commands; the user commits, pushes and merges unless they explicitly ask Claude to.
+- Claude commits and pushes only when the user allows that step; it may open the PR (`gh pr create --head <branch>`). The user reviews and merges — Claude never runs `gh pr merge`.
 
 ## 6. After merge — tag and GitHub Release
 

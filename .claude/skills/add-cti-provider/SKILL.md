@@ -13,7 +13,7 @@ git show 306c111 --stat
 
 ## 0. Decide first (grill if unclear)
 
-Start from the GitHub issue (or create it: `type:feature`, `area:n8n`, milestone, parent epic) and work on a branch `<issue-nr>-<slug>`.
+Start from the GitHub issue (or create it: `type:feature`, `area:n8n`, milestone, parent epic) and work on a branch `YYYYMMDD_<english_name>` (e.g. `20261126_shodan_host`).
 
 
 Run `grill-me` style questions for anything not stated:

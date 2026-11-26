@@ -55,11 +55,15 @@ ansible-playbook -i hosts.ini 00_main.yml --limit vm-prox-dev
 
 ## Issues and pull requests
 
-- Work is tracked in GitHub Issues: an **epic** (`type:epic`) per roadmap section, **tasks** as its sub-issues, each closed by one PR. Labels `type:*`, `area:*`, `prio:*`. Milestones are versions (`v2.6.0`); the backlog has none. `docs/future-roadmap.md` keeps the direction and links to the epics.
-- New work starts from an issue (create one if missing, with labels, milestone and parent epic). Branch `<issue-nr>-<short-slug>`; PR title `<type>(<area>): <summary>` (it becomes the commit on `main`); PR body `Closes #N` and the template checklist.
+- Work is tracked in GitHub Issues: an **epic** (`type:epic`) per roadmap section, **tasks** as its sub-issues, each closed by one PR. Labels `type:*`, `area:*`, `prio:*`. Milestones are versions (`v2.6.0`); the backlog has none. `docs/future-roadmap.md` is rendered live in the browser from issues (`docs/assets/js/roadmap.js`, public GitHub API): never write plans into it by hand. An epic's first paragraph is its summary on the page; its `- [ ]` lines are ideas with no issue yet (remove the line once the issue exists as a sub-issue); long designs go after the checklist or in `<details>`.
+- New work starts from an issue (create one if missing, with labels, milestone and parent epic). Branch `YYYYMMDD_<english_name>` (e.g. `20261126_roadmap_issue_links`, date of the day it starts); PR title `<type>(<area>): <summary>` (it becomes the commit on `main`); PR body `Closes #N` and the template checklist.
 - `main` requires a PR, **linear history** (squash or rebase merge; merge commits are refused) and **all review threads resolved** — code scanning comments from Trivy/CodeQL count too.
 - A release tag goes on the **merge commit after the PR is merged** — never before (see `release-docs`).
-- Claude does not commit, push, merge or tag unless the user asks for that step explicitly.
+- What Claude does on GitHub (`gh`):
+  - **Freely:** read and edit issues (labels, milestones, sub-issues, comments), the Project board, CI runs and security alerts; open pull requests from the user's branches.
+  - **Only when the user allows it, each time:** `git commit`, `git push`, a tag, a GitHub Release.
+  - **Never:** merge or approve a PR (the user accepts every PR), push to `main`, change repo settings or rulesets.
+- Claude works on the branch the user points to (or creates `YYYYMMDD_<english_name>` when asked), never on `main`. `.claude/settings.json` enforces the commit/push/tag prompts and blocks `gh pr merge`.
 
 ## Skills (`.claude/skills/`)
 
