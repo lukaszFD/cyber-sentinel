@@ -7,7 +7,7 @@ description: Add a new container/service to the Cyber Sentinel Docker stack (pin
 
 ## 0. Decide first
 
-Start from the GitHub issue (`type:feature`, area, milestone, parent epic); branch `<issue-nr>-<slug>`. Ask (grill) for anything unknown: does it have a web UI, which port, which internal network/IP, persistent volumes, does it need Postgres or Vault, upstream image or our own build (`config/<svc>/Dockerfile`, like `ai_config_ui`).
+Start from the GitHub issue (`type:feature`, area, milestone, parent epic); branch `YYYYMMDD_<english_name>`. Ask (grill) for anything unknown: does it have a web UI, which port, which internal network/IP, persistent volumes, does it need Postgres or Vault, upstream image or our own build (`config/<svc>/Dockerfile`, like `ai_config_ui`).
 
 ## 1. Image — pinned, multi-arch (mandatory)
 

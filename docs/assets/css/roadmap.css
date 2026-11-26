@@ -1,0 +1,48 @@
+/* Live roadmap (docs/future-roadmap.md, assets/js/roadmap.js). Uses Material's theme variables. */
+
+.cs-roadmap { margin: 1rem 0 2rem; }
+.cs-rm-status { color: var(--md-default-fg-color--light); font-size: .7rem; }
+
+.cs-filter { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: 1rem; }
+.cs-filter-btn {
+  border: 1px solid var(--md-default-fg-color--lightest); border-radius: 1rem;
+  padding: .1rem .6rem; font-size: .7rem; cursor: pointer;
+  color: var(--md-default-fg-color); background: transparent;
+}
+.cs-filter-btn small { color: var(--md-default-fg-color--light); }
+.cs-filter-btn.cs-active { background: var(--md-accent-fg-color); border-color: var(--md-accent-fg-color); color: var(--md-accent-bg-color); }
+.cs-filter-btn.cs-active small { color: inherit; }
+
+.cs-section h2 { margin-top: 1.6rem; }
+.cs-card {
+  border: 1px solid var(--md-default-fg-color--lightest); border-radius: .3rem;
+  padding: .6rem .9rem; margin: .7rem 0;
+}
+.cs-card h3 { margin: 0 0 .3rem; font-size: .9rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; }
+.cs-num { color: var(--md-default-fg-color--light); font-weight: normal; font-size: .75rem; }
+.cs-summary { margin: .2rem 0 .5rem; font-size: .75rem; }
+.cs-empty { color: var(--md-default-fg-color--light); font-style: italic; }
+
+.cs-progress { display: flex; align-items: center; gap: .5rem; margin: .3rem 0; font-size: .65rem; }
+.cs-bar { flex: 1; max-width: 16rem; height: .35rem; border-radius: .2rem; background: var(--md-default-fg-color--lightest); overflow: hidden; }
+.cs-bar span { display: block; height: 100%; background: var(--md-primary-fg-color); }
+.cs-count { color: var(--md-default-fg-color--light); }
+
+.md-typeset ul.cs-list { list-style: none; margin: .3rem 0; padding: 0; }
+.md-typeset ul.cs-list li.cs-item { margin: 0; padding: .2rem 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; font-size: .75rem; border-top: 1px solid var(--md-default-fg-color--lightest); }
+.md-typeset ul.cs-list li.cs-item:first-child { border-top: 0; }
+.cs-state { width: 1rem; text-align: center; color: var(--md-default-fg-color--light); }
+.cs-done .cs-title { text-decoration: line-through; color: var(--md-default-fg-color--light); }
+.cs-done .cs-state { color: var(--md-primary-fg-color); }
+.cs-chips { display: inline-flex; flex-wrap: wrap; gap: .2rem; margin-left: auto; }
+
+.cs-chip { font-size: .6rem; padding: 0 .4rem; border-radius: .6rem; border: 1px solid var(--md-default-fg-color--lightest); color: var(--md-default-fg-color--light); white-space: nowrap; }
+.cs-chip-ms { border-color: var(--md-primary-fg-color); color: var(--md-primary-fg-color); }
+.cs-prio-high { border-color: #d73a4a; color: #d73a4a; }
+.cs-prio-med { border-color: #c69026; color: #c69026; }
+.cs-type-security, .cs-type-bug { border-color: #d73a4a; color: #d73a4a; }
+
+.cs-planned { margin-top: .4rem; font-size: .72rem; }
+.cs-planned summary { cursor: pointer; color: var(--md-default-fg-color--light); }
+.md-typeset .cs-planned ul { margin: .3rem 0 .2rem 1rem; }
+.md-typeset .cs-planned li { margin: .1rem 0; }

@@ -57,7 +57,7 @@ nav:
   - Database: database.md
   - Project Releases: releases.md
   - Future Roadmap: future-roadmap.md
-  - License & Security :
+  - "License & Security":
       - Open Source Policy: license.md
       - Security Policy: security.md
 
@@ -73,6 +73,12 @@ extra:
       link: https://github.com/lukaszFD
       name: My GitHub Projects
 
+extra_css:
+  - assets/css/roadmap.css
+
+extra_javascript:
+  - assets/js/roadmap.js
+
 markdown_extensions:
   - attr_list
   - pymdownx.emoji:
@@ -83,7 +89,6 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
