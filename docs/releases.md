@@ -4,7 +4,7 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
-| [v2.5.1](#v251) | Patch | — | Healthcheck for `sandbox_log_processor`, malicious list header names the sandbox, Grafana removed, prod housekeeping after v2.5.0 |
+| [v2.5.1](#v251) | Stable | 26 November 2026 | Healthcheck for `sandbox_log_processor`, malicious list header names the sandbox, Grafana removed, prod housekeeping after v2.5.0 |
 | [v2.5.0](#v250) | Stable | 20 November 2026 | Browser sandbox: isolated ungoogled-chromium behind mitmproxy and its own Pi-hole, data in `cyber_sentinel_sandbox`, abuse.ch / urlscan.io checks, Sandbox page; Firefox removed |
 | [v2.4.0](#v240) | Stable | 18 November 2026 | Pi-hole query log as the DNS source: real client IPs, cached and blocked answers, `passive_dns` removed, 3-month retention |
 | [v2.3.0](#v230) | Stable | 16 November 2026 | API call log and usage page, VirusTotal budget from the provider's counter, Failure Guard |
@@ -33,6 +33,10 @@ Follow-ups of v2.5.0: Docker now knows whether `sandbox_log_processor` works, th
 - Local DNS records `sandbox.prod` and `sandbox-dns.prod` in the main Pi-hole ([#52](https://github.com/lukaszFD/cyber-sentinel/issues/52)).
 - `host_vars/rpi5/vault.yml` matches `vault.yml.example`; spare n8n Vault tokens revoked ([#53](https://github.com/lukaszFD/cyber-sentinel/issues/53)).
 - Remaining v2.5.0 sandbox scenarios on prod ([#54](https://github.com/lukaszFD/cyber-sentinel/issues/54)).
+
+### Security
+
+Open code scanning alerts at release time: 31, all from OpenSSF Scorecard and Trivy config checks — none in the stack's own code. The four `high` ones are Scorecard posture checks (token permissions in `trivy.yml` and `codeql.yml`, branch protection, code review); they are deferred to v2.6.0 ([#61](https://github.com/lukaszFD/cyber-sentinel/issues/61)). No Dependabot or secret scanning alerts.
 
 ### Upgrading from v2.5.0
 
