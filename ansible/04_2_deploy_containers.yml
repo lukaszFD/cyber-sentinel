@@ -40,13 +40,26 @@
     # removed from the compose file; `up` would leave the old containers
     # running as orphans. Removed by name, not with --remove-orphans, so
     # nothing else in the project is touched.
-    - name: "[04.2.1.0] Remove retired containers (passive_dns, firefox)"
+    - name: "[04.2.1.0] Remove retired containers (passive_dns, firefox, grafana)"
       community.docker.docker_container:
         name: "{{ item }}"
         state: absent
       loop:
         - passive_dns
         - firefox
+        - grafana
+
+    # Grafana was removed in v2.5.1: drop its data volume and the copied
+    # provisioning files left on hosts deployed before that.
+    - name: "[04.2.1.0b] Remove retired Grafana volume"
+      community.docker.docker_volume:
+        name: "{{ project_name }}_grafana_data"
+        state: absent
+
+    - name: "[04.2.1.0c] Remove retired Grafana config directory"
+      ansible.builtin.file:
+        path: "{{ remote_deploy_base }}/config/grafana"
+        state: absent
 
     # Registry images first, retried: a fresh host pulls ~10 images at
     # once (the sandbox browser alone is ~5 GB), and a slow registry

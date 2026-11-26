@@ -61,8 +61,7 @@ Links to and from `dns_queries`, `threat_indicators` and `network_events` are ke
 | Object | Used by |
 |---|---|
 | `v_threat_scale_for_agent` | The threat scale as text, injected into the AI agent prompt. |
-| `v_latest_threat_reports` | Latest verdict per DNS query; base for the Grafana views. |
-| `v_grafana_*` | Dashboards: malicious stats, daily trends, hourly DNS traffic, threat alerts, threat explorer. |
+| `v_latest_threat_reports` | Latest verdict per DNS query. |
 | `v_pending_analysis` | Previous work queue, still read by the DNS Traffic dashboard. |
 | `v_partition_info` | Rows and size per partition. |
 

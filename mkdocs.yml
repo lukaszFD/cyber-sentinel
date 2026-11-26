@@ -53,7 +53,6 @@ nav:
       - "Using & Testing": sandbox/usage.md
       - "Data & CTI": sandbox/data.md
   - "n8n Workflows": n8n.md
-#  - "Grafana Dashboards": grafana.md
   - Database: database.md
   - Project Releases: releases.md
   - Future Roadmap: future-roadmap.md

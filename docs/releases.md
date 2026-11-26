@@ -4,6 +4,7 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 
 | Version | Type | Date | Focus |
 |---|---|---|---|
+| [v2.5.1](#v251) | Patch | — | Healthcheck for `sandbox_log_processor`, malicious list header names the sandbox, Grafana removed, prod housekeeping after v2.5.0 |
 | [v2.5.0](#v250) | Stable | 20 November 2026 | Browser sandbox: isolated ungoogled-chromium behind mitmproxy and its own Pi-hole, data in `cyber_sentinel_sandbox`, abuse.ch / urlscan.io checks, Sandbox page; Firefox removed |
 | [v2.4.0](#v240) | Stable | 18 November 2026 | Pi-hole query log as the DNS source: real client IPs, cached and blocked answers, `passive_dns` removed, 3-month retention |
 | [v2.3.0](#v230) | Stable | 16 November 2026 | API call log and usage page, VirusTotal budget from the provider's counter, Failure Guard |
@@ -14,6 +15,44 @@ All versions are on [GitHub Releases](https://github.com/lukaszFD/cyber-sentinel
 | [v1.0.2-rc1](#v102-rc1) | Release candidate | 5 May 2026 | 1–5 threat scale, partitioning, unified Vault playbook |
 | [v1.0.1](#v101) | Release | — | Ansible deployment |
 | [v1.0.0](#v100) | Release | — | First version |
+
+---
+
+## v2.5.1
+
+Follow-ups of v2.5.0: Docker now knows whether `sandbox_log_processor` works, the malicious list says where its entries come from, Grafana is gone, and the prod install is tidied up. Upgrades v2.5.0 in place. **The `grafana` container, its data volume and its dashboards are removed.**
+
+### Changes
+
+- **Healthcheck for `sandbox_log_processor`** ([#50](https://github.com/lukaszFD/cyber-sentinel/issues/50)) — the processor touches a heartbeat file every 15 s while its main loop runs and Postgres answers (`SELECT 1`, so a dead server is noticed even when no logs come in). The image's `HEALTHCHECK` marks the container `unhealthy` after 60 s without one. The file lives on a small tmpfs (`/run/heartbeat`), the root filesystem stays read-only. Closes Trivy DS-0026.
+- **Malicious list header** ([#51](https://github.com/lukaszFD/cyber-sentinel/issues/51)) — the description in `lists/malicious.txt` names both sources: pipeline (VirusTotal detections) and browser sandbox hits. The next Blocklist Publish pull request changes only that line.
+- **Grafana removed** ([#55](https://github.com/lukaszFD/cyber-sentinel/issues/55)) — container, `grafana_data` volume, dashboards (`config/grafana/`), Nginx entry and certificate, vault keys `vault_grafana_*`, and the `v_grafana_*` views (dropped by `db_deployment.sql`; nothing else used them). Prometheus and node_exporter stay: they are the data source for the planned health agent ([#46](https://github.com/lukaszFD/cyber-sentinel/issues/46)). Playbooks 04.2 and 05 remove the container, volume, config directory, server block and certificate on existing hosts.
+
+### Prod housekeeping
+
+- Local DNS records `sandbox.prod` and `sandbox-dns.prod` in the main Pi-hole ([#52](https://github.com/lukaszFD/cyber-sentinel/issues/52)).
+- `host_vars/rpi5/vault.yml` matches `vault.yml.example`; spare n8n Vault tokens revoked ([#53](https://github.com/lukaszFD/cyber-sentinel/issues/53)).
+- Remaining v2.5.0 sandbox scenarios on prod ([#54](https://github.com/lukaszFD/cyber-sentinel/issues/54)).
+
+### Upgrading from v2.5.0
+
+No new vault keys. The `vault_grafana_password`, `vault_grafana_api_key`, `vault_grafana_cert` and `vault_grafana_key` keys are no longer read: delete them from `host_vars/rpi5/vault.yml` (and `dev_vm`). The Pi-hole Local DNS record `grafana.<suffix>` can go too. Rebuild the processor, remove Grafana, update the database and Nginx:
+
+```bash
+cd ansible
+ansible-playbook -i hosts.ini 04_1_prepare_stack.yml --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_2_deploy_containers.yml --limit rpi5-prod
+ansible-playbook -i hosts.ini 04_3_db_postgres.yml --limit rpi5-prod
+ansible-playbook -i hosts.ini 05_deploy_proxy.yml --limit rpi5-prod
+```
+
+Check: `docker ps --filter name=sandbox_log_processor` shows `(healthy)` about a minute after the start; `docker ps -a --filter name=grafana` and `docker volume ls | grep grafana` show nothing.
+
+### Tested
+
+- Dev (2026-11-26): 04.1 → 04.2 → 04.3, all `failed=0`. `sandbox_log_processor` `healthy` right after the start. Postgres stopped at 13:12:38 → processor `unhealthy` at 13:14:28 (log: `Postgres unavailable`, backoff up to 60 s); Postgres started at 13:14:29 → `Connected to Postgres`, `healthy` again at 13:15:24. `blocklist_render()` returns the new malicious header.
+- Dev (2026-11-26), Grafana removal: 04.1 → 04.2 → 04.3 → 05, all `failed=0`. Container `grafana`, volume `cyber-sentinel_grafana_data`, `config/grafana` on the host, the five `v_grafana_*` views and Nginx `grafana.conf` / certificate gone; `nginx -t` OK; ai-config, n8n, Pi-hole and the sandbox answer through Nginx; all other containers up (`healthy` where defined).
+- Prod (RPi 5, 2026-11-26), upgrade from v2.5.0 with 04.1 → 04.2 → 04.3 → 05, all `failed=0`: `sandbox_log_processor` `healthy`; container `grafana`, its volume, `config/grafana` and the Nginx `grafana.conf` / certificate removed; `nginx -t` OK; no `v_grafana_*` view left; `blocklist_render()` returns the new malicious header. Still to do: TODO #52 (Local DNS records), #53 (vault file, spare n8n tokens), #54 (scenarios 7, 11, 12).
 
 ---
 

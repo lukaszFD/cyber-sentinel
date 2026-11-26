@@ -177,7 +177,7 @@ flowchart TD
     PR --> MG[manual merge] --> PH[Pi-hole gravity update]
 ```
 
-- **Lists** — `lists/malicious.txt`, `lists/tracking.txt`, `lists/telemetry.txt`: one domain per line, exact match, no IPs.
+- **Lists** — `lists/malicious.txt`, `lists/tracking.txt`, `lists/telemetry.txt`: one domain per line, exact match, no IPs. Each file starts with a header (title, description, entry count) rendered by `blocklist_render()`; the malicious list's description names both sources, pipeline and browser sandbox.
 - **Candidates** — domains with a public IPv4 answer in the last `blocklist_lookback_days`, queried at least `blocklist_min_queries` times, whose name contains an active pattern (`blocklist_name_patterns`), not classified yet and not on any list. At most `blocklist_ai_daily_limit` per day, `blocklist_ai_batch_size` per request. No VirusTotal calls. Answers about domains that were not in the batch are dropped.
 - **Review** — telemetry and tracking at or above `blocklist_ai_min_confidence` wait for approval on the Blocklists page; an e-mail announces them. Rejected domains are kept and never proposed again.
 - **Malicious** — every Pi-hole auto-block is copied as approved; a new block extends the expiry. A rejected malicious domain stays rejected.

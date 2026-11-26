@@ -47,11 +47,9 @@
       - vault_virus_total_token
       - vault_gemini_api_key
       - vault_abuse_api_key
-      - vault_grafana_api_key
       - vault_urlscanio_api_key
       - vault_github_blocklists_token
       - vault_pihole_admin_password
-      - vault_grafana_password
       - vault_portainer_password
       - vault_n8n_password
       - vault_postgres_password
@@ -67,7 +65,6 @@
     required_cert_services:
       - pihole
       - n8n
-      - grafana
 
   tasks:
 
@@ -235,7 +232,6 @@
         - { path: "virustotal",                     value: "{{ vault_virus_total_token }}" }
         - { path: "gemini/home-network-guardian",   value: "{{ vault_gemini_api_key }}" }
         - { path: "abuse/api-key",                  value: "{{ vault_abuse_api_key }}" }
-        - { path: "grafana/api-key",                value: "{{ vault_grafana_api_key }}" }
         - { path: "urlscanio/api-key",              value: "{{ vault_urlscanio_api_key }}" }
         # Fine-grained PAT, lukaszFD/sentinel-blocklists only: Contents and
         # Pull requests read/write. Read by the "Blocklist Publish" workflow.
@@ -277,7 +273,6 @@
       loop:
         # App passwords
         - { path: "pihole",            value: "{{ vault_pihole_admin_password }}" }
-        - { path: "grafana",           value: "{{ vault_grafana_password }}" }
         - { path: "portainer",         value: "{{ vault_portainer_password }}", user: "{{ portainer_admin_user }}" }
         - { path: "n8n",               value: "{{ vault_n8n_password }}",       user: "{{ n8n_admin_user }}" }
         # Database roots
@@ -305,12 +300,10 @@
     #   - certs/*                      (Nginx-only, staged by playbook 05)
     #   - credentials/postgres/root    (Ansible-only, playbook 04.3)
     #   - credentials/postgres/ai_config_editor (AI config editor only)
-    #   - credentials/pihole|grafana|portainer|n8n
+    #   - credentials/pihole|portainer|n8n
     #     (admin UI passwords, consumed by Ansible in 04.6, not n8n).
     #     n8n reads credentials/pihole-api instead — a separate Pi-hole
     #     application password (Section 7b), revocable on its own.
-    #   - api-keys/grafana/*
-    #     (consumed by Grafana provisioning, not n8n)
     #
     # api-keys/* is granted as a whole subtree rather than one leaf
     # path per provider — CTI API keys are exactly the class of

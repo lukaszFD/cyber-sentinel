@@ -4,7 +4,7 @@
 # ============================================================
 # Purpose:    Collects hardware health signals that node_exporter's
 #             default collectors do not cover, and exposes them to
-#             the existing Prometheus/Grafana stack via node_exporter's
+#             the existing Prometheus stack via node_exporter's
 #             textfile collector:
 #               - NVMe SMART health for the external SSD (Samsung 980
 #                 500GB behind a JMicron USB-NVMe bridge, /dev/sda,
@@ -41,7 +41,7 @@
 #
 # Note:       This script surfaces raw values only. No thresholds or
 #             alert logic are embedded here — that belongs in
-#             Prometheus alerting rules / Grafana, not a shell script,
+#             Prometheus alerting rules, not a shell script,
 #             so alert conditions stay in one place and are editable
 #             without redeploying this playbook.
 # ============================================================

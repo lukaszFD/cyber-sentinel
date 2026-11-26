@@ -34,6 +34,8 @@ Configuration (environment):
     BATCH_SIZE         default 200 records
     FLUSH_INTERVAL     default 2 (seconds)
     LOG_LEVEL          default INFO
+    HEARTBEAT_FILE     default /run/heartbeat/alive (tmpfs; touched every 15 s
+                       while Postgres answers, checked by the Docker HEALTHCHECK)
 """
 
 import json
@@ -56,8 +58,24 @@ FLUSH_INTERVAL = float(os.getenv("FLUSH_INTERVAL", "2"))
 POLL_INTERVAL = 0.5
 STATS_INTERVAL = 300
 MAX_LINE = 1_000_000          # bytes; longer lines are skipped (never produced by the addon)
+HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "/run/heartbeat/alive")
+HEARTBEAT_INTERVAL = 15       # seconds; the Docker HEALTHCHECK allows 60
 
 log = logging.getLogger("sandbox_log_processor")
+_heartbeat_failed = False
+
+
+def heartbeat():
+    """Touch HEARTBEAT_FILE: the main loop runs and Postgres answers (read by HEALTHCHECK)."""
+    global _heartbeat_failed
+    try:
+        with open(HEARTBEAT_FILE, "w") as f:
+            f.write(datetime.now(timezone.utc).isoformat())
+        _heartbeat_failed = False
+    except OSError as e:
+        if not _heartbeat_failed:
+            log.warning("Cannot write heartbeat %s (%s)", HEARTBEAT_FILE, e)
+            _heartbeat_failed = True
 
 
 # ------------------------------------------------------------
@@ -255,6 +273,18 @@ class Db:
             self.backoff = min(self.backoff * 2, 60)
             return False
 
+    def ping(self):
+        """Cheap round trip; an idle connection does not notice a dead server otherwise."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            self.conn.commit()
+            return True
+        except psycopg2.Error as e:
+            log.warning("Postgres ping failed (%s)", str(e).strip())
+            self.drop()
+            return False
+
     def drop(self):
         if self.conn:
             try:
@@ -354,6 +384,7 @@ def main():
     db = Db()
     sources = [Source("urls", URLS_LOG, url_record), Source("dns", DNS_LOG, DnsShaper())]
     last_stats = time.monotonic()
+    last_beat = 0.0
 
     while not stopping["flag"]:
         busy = False
@@ -388,6 +419,10 @@ def main():
             if src.dirty and (len(src.rows) >= BATCH_SIZE or switched
                               or time.monotonic() - src.last_flush >= FLUSH_INTERVAL):
                 flush(db, src)
+        if time.monotonic() - last_beat >= HEARTBEAT_INTERVAL:
+            if db.connected() and db.ping():
+                heartbeat()
+            last_beat = time.monotonic()
         if time.monotonic() - last_stats >= STATS_INTERVAL:
             for src in sources:
                 log.info("[%s] stored %d, buffered %d, skipped %d", src.name, src.stored, len(src.rows), src.skipped)

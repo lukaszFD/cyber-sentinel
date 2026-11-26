@@ -11,7 +11,7 @@ Rendered by Ansible (Jinja2: `{{ postgres_user }}`, `{{ ai_config_db_user }}`, `
 
 Playbook `04_3_db_postgres.yml`, in this order:
 
-1. `db_deployment.sql` — schema `cyber_sentinel` (CTI tables, dictionaries, Grafana views).
+1. `db_deployment.sql` — schema `cyber_sentinel` (CTI tables, dictionaries, views).
 2. `db_partitioning_retention.sql` — partitions + pg_cron retention; every partitioned table is listed in `partitioned_tables()`.
 3. `db_ai_pipeline.sql` — schema `cyber_sentinel_ai` (settings, prompts, queue, budget, Deep Recon).
 4. `db_blocklists.sql` — own blocklists (entries, AI queue, render, publish log).
@@ -28,7 +28,7 @@ Put the change in the file that owns the object. In `db_ai_pipeline.sql` add a n
 - Partitioned tables: the partition key must be in the PK at `CREATE TABLE` time — see the comment in `db_deployment.sql`.
 - Settings are data: new switch/limit = `ai_settings` row with a description, plus the matching entry in `config/ai_config_ui/app.py`.
 - Prompts: new version = new row with `is_active = FALSE`; never edit or deactivate the active one in SQL (unique index allows one active).
-- Do not break Grafana views (`v_grafana_*`) or the n8n queries; grep `config/n8n/workflows/` and `config/grafana/` for any column you rename.
+- Do not break the views or the n8n queries; grep `config/n8n/workflows/` and `config/ai_config_ui/` for any column you rename.
 - Grants: n8n role and `ai_config_db_user` need explicit grants on new objects.
 - Bump `Version:` in the file header and describe the new section there.
 - **Performance at prod volume.** `dns_queries` holds ~750k rows a week on prod, dev only a few thousand — a view that is instant on dev can take a minute on prod. When a view groups raw rows and then filters with a function (`is_allowlisted()`, `blocklist_is_protected()`, `NOT EXISTS`), write the grouping CTE `AS MATERIALIZED`: otherwise the planner pushes the filter below `GROUP BY` and runs it per raw row (v2.5.0: 51 s → 4 s). The UI role has `statement_timeout = 15s`; the n8n queue runs every minute.
@@ -49,4 +49,4 @@ Checks:
 
 ## Done when
 
-SQL is idempotent (proved by two runs), header version bumped, UI/n8n/Grafana consumers updated, `docs/database.md` updated, and the upgrade commands for prod are ready for `release-docs`.
+SQL is idempotent (proved by two runs), header version bumped, UI/n8n consumers updated, `docs/database.md` updated, and the upgrade commands for prod are ready for `release-docs`.

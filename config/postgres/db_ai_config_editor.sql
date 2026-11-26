@@ -52,7 +52,7 @@
 --                                              action_recommended,
 --                                              is_malicious_flag) — wording feeds
 --                                              [[THREAT_SCALE]] in the prompt,
---                                              the flag drives Grafana
+--                                              the flag marks malicious levels
 --   cyber_sentinel.v_threat_scale_for_agent    SELECT (prompt preview)
 --   cyber_sentinel_sandbox.url_events / dns_queries / observables /
 --   observable_checks / v_sessions / v_event_sessions / v_latest_checks /
@@ -333,13 +333,12 @@ CREATE CONSTRAINT TRIGGER trg_prompt_one_active
 -- ============================================
 -- SECTION 4b: dic_threat_levels — malicious flag guard
 -- ============================================
--- is_malicious_flag decides what every Grafana view counts as malicious
--- (v_grafana_malicious_stats, _daily_trends, _threat_explorer,
--- _threat_alerts). The views join the dictionary at query time, so a
+-- is_malicious_flag decides which threat levels count as malicious (the
+-- agent's threat scale, the main workflow). Read at query time, so a
 -- change is retroactive for all historical verdicts.
 -- Guard: the flags must form one contiguous top range (score >= N), and
 -- the highest score must be malicious. "3 malicious but 4 not" would
--- make Grafana count a weaker verdict as worse than a stronger one.
+-- count a weaker verdict as worse than a stronger one.
 -- Deferred, so one transaction can flip several rows.
 
 CREATE OR REPLACE FUNCTION cyber_sentinel_ai.trg_threat_levels_malicious()

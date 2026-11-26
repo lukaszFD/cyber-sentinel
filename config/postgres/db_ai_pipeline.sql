@@ -16,7 +16,7 @@
 --   `cyber_sentinel_ai`. The CTI schema `cyber_sentinel` is NOT modified:
 --   verdicts are still written to its existing tables
 --   (threat_data_raw, ai_analysis_results, threat_indicators,
---   threat_indicator_details), so every Grafana view keeps working.
+--   threat_indicator_details), so existing views keep working.
 --
 -- OBJECTS (everything a change usually touches is DATA, not code):
 --   ai_settings             thresholds and pipeline switches   -> UPDATE

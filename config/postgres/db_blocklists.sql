@@ -1,5 +1,6 @@
 -- ============================================
 -- Cyber Sentinel — Own blocklists (sentinel-blocklists) — POSTGRES
+-- Version: 1.2 (malicious list header mentions browser sandbox hits, v2.5.1)
 -- Version: 1.1 (source 'sandbox': browser sandbox hits on the malicious list;
 --               v_blocklist_ai_queue: MATERIALIZED, checks once per domain)
 -- ============================================
@@ -428,7 +429,7 @@ RETURNS JSONB
 LANGUAGE sql STABLE AS $$
 WITH meta(list_name, title, description) AS (
     VALUES
-        ('malicious', 'Malicious', 'Domains confirmed malicious by the Cyber Sentinel pipeline (VirusTotal detections). Entries expire unless the domain is detected again.'),
+        ('malicious', 'Malicious', 'Domains confirmed malicious by the Cyber Sentinel pipeline (VirusTotal detections) and hosts with a threat-intelligence hit in the browser sandbox. Entries expire unless they are detected again.'),
         ('tracking',  'Tracking',  'Tracking domains classified by AI and approved by a human.'),
         ('telemetry', 'Telemetry', 'Telemetry domains classified by AI and approved by a human. May break vendor features (updates, sync).')
 ), files AS (

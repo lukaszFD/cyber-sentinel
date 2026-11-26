@@ -53,7 +53,6 @@ ansible_become_password: ""        # omit if the user has passwordless sudo
 # Service logins
 vault_pihole_admin_password: ""
 vault_sandbox_pihole_admin_password: ""  # sandbox Pi-hole UI; falls back to the main one when empty
-vault_grafana_password: ""
 vault_portainer_password: ""
 vault_n8n_password: ""
 
@@ -74,7 +73,6 @@ vault_abuse_api_key: ""            # abuse.ch: ThreatFox + URLhaus
 vault_gemini_api_key: ""
 vault_urlscanio_api_key: ""        # urlscan.io: search (main workflow) + page scans (Deep Recon)
 vault_github_blocklists_token: ""  # fine-grained PAT, sentinel-blocklists only: Contents + Pull requests read/write
-vault_grafana_api_key: ""
 
 # Email alerts (Gmail)
 vault_n8n_user: ""                 # sender address
@@ -82,7 +80,7 @@ vault_n8n_gmail: ""                # Gmail app password
 vault_n8n_alert_to: ""             # alert recipient (defaults to the sender)
 
 # TLS: one cert/key pair per service behind Nginx
-# pihole, n8n, grafana, portainer, hashicorp_vault, ai_config,
+# pihole, n8n, portainer, hashicorp_vault, ai_config,
 # sandbox (sandbox.<suffix>), sandbox_dns (sandbox-dns.<suffix>)
 # While vault_sandbox_* / vault_sandbox_dns_* are empty, playbook 05 falls
 # back to the old firefox pair and to pihole's.
@@ -188,7 +186,6 @@ Web UIs (`<suffix>` is `prod` or `local`):
 | AI Config UI | `https://ai-config.<suffix>` |
 | n8n | `https://n8n.<suffix>` |
 | Pi-hole | `https://pihole.<suffix>` |
-| Grafana | `https://grafana.<suffix>` |
 | Portainer | `https://portainer.<suffix>` |
 | Vault | `https://hashicorp_vault.<suffix>` |
 | Browser sandbox | `https://sandbox.<suffix>` |

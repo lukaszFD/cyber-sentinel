@@ -24,4 +24,9 @@ COPY log_processor.py sandbox_log_processor.py ./
 # sandbox Pi-hole's log (owned by the pihole user, mode 0640).
 USER 10001
 
+# Healthy while the main loop runs and Postgres answers: the processor touches
+# the heartbeat file every 15 s (a tmpfs in compose; the root fs is read-only).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=2 \
+  CMD ["python", "-c", "import os,sys,time; p=os.getenv('HEARTBEAT_FILE','/run/heartbeat/alive'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 60 else 1)"]
+
 CMD ["python", "sandbox_log_processor.py"]

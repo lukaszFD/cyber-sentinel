@@ -1,6 +1,6 @@
 ---
 name: add-stack-service
-description: Add a new container/service to the Cyber Sentinel Docker stack (pinned multi-arch image, compose, Nginx TLS proxy, Vault secrets, Ansible wiring, docs). Use when the user wants to deploy a new tool or self-built service alongside Pi-hole, n8n, Grafana, Vault, AI Config UI, etc.
+description: Add a new container/service to the Cyber Sentinel Docker stack (pinned multi-arch image, compose, Nginx TLS proxy, Vault secrets, Ansible wiring, docs). Use when the user wants to deploy a new tool or self-built service alongside Pi-hole, n8n, Vault, AI Config UI, etc.
 ---
 
 # Add a service to the stack
